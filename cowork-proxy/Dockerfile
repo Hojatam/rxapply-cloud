@@ -54,6 +54,7 @@ COPY --from=builder /opt/venv /opt/venv
 COPY cowork-proxy/     ./cowork-proxy/
 COPY agents/           ./agents/
 COPY supabase/         ./supabase/
+COPY compose-recipes/  ./compose-recipes/
 COPY dashboard.html ./
 # architecture.html removed in M14 — moved to founder's local OPS/.
 
