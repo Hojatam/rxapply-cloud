@@ -19,12 +19,12 @@
 
 const fs = require('fs');
 const path = require('path');
-const { spawnSync } = require('child_process');
 const agentModels = require('./agent-models');
 const agentMemory = require('./agent-memory');
 const brandProfile = require('./brand-profile');
 const KB = require('./knowledge-base');
 const handoffs = require('./agent-handoffs');
+const { query, queryValue, queryReturning, q: _q, qJson: _qjson } = require('./db');
 
 // Read at call time so a later .env change picks up after a proxy restart
 // without leaving stale captured values around. Consistent with afshin-router.js.
@@ -32,26 +32,9 @@ const ANTHROPIC_KEY    = () => process.env.ANTHROPIC_API_KEY || '';
 const ANTHROPIC_URL    = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_MAX_TOKENS = parseInt(process.env.ANTHROPIC_MAX_TOKENS, 10) || 4096;
 
-const PG_CONTAINER = process.env.SUPABASE_DB_CONTAINER || 'supabase_db_rxapply-test';
 const AGENTS_DIR   = path.resolve(__dirname, '..', 'agents');
 
 function isConfigured() { return !!ANTHROPIC_KEY(); }
-
-// ── psql helpers ─────────────────────────────────────────────────────
-function _psql(script) {
-  const r = spawnSync('docker',
-    ['exec', '-i', PG_CONTAINER, 'psql', '-U', 'postgres', '-d', 'postgres', '-tA', '-v', 'ON_ERROR_STOP=1'],
-    { input: script, encoding: 'utf-8' });
-  if (r.status !== 0) throw new Error(`psql (${r.status}): ${(r.stderr || '').slice(0, 500)}`);
-  return (r.stdout || '').trim();
-}
-function _q(v) {
-  if (v == null) return 'NULL';
-  if (typeof v === 'number') return String(v);
-  if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';
-  return `'${String(v).replace(/'/g, "''")}'`;
-}
-function _qjson(v) { return v == null ? 'NULL' : `${_q(JSON.stringify(v))}::jsonb`; }
 
 // ── Context assembly ─────────────────────────────────────────────────
 function readSkill(agent) {
@@ -60,16 +43,16 @@ function readSkill(agent) {
   try { return fs.readFileSync(p, 'utf-8'); } catch (_) { return null; }
 }
 
-function recentRuns(agent, limit = 10) {
+async function recentRuns(agent, limit = 10) {
   const sql = `
     SELECT COALESCE(json_agg(row_to_json(s) ORDER BY started_at DESC), '[]'::json)
     FROM (SELECT id::text AS id, started_at::text, status, duration_ms, output_payload
           FROM agent_runs WHERE agent = ${_q(agent)} ORDER BY started_at DESC LIMIT ${limit|0}) s;`;
-  try { return JSON.parse(_psql(sql)); } catch (_) { return []; }
+  try { return JSON.parse(await queryValue(sql)); } catch (_) { return []; }
 }
 
 // ── Chat persistence ─────────────────────────────────────────────────
-function getChat(chatId) {
+async function getChat(chatId) {
   if (!chatId) return null;
   const sql = `
     SELECT row_to_json(c) FROM (
@@ -78,30 +61,30 @@ function getChat(chatId) {
       FROM agent_chats WHERE id = ${_q(chatId)}
     ) c;`;
   try {
-    const out = _psql(sql);
+    const out = await queryValue(sql);
     return out ? JSON.parse(out) : null;
   } catch (_) { return null; }
 }
 
-function listChats(agent, limit = 20) {
+async function listChats(agent, limit = 20) {
   const sql = `
     SELECT COALESCE(json_agg(row_to_json(s) ORDER BY last_msg_at DESC), '[]'::json)
     FROM (SELECT id::text, title, started_at::text, last_msg_at::text,
                  jsonb_array_length(messages) AS msg_count, total_tokens, total_cost
           FROM agent_chats WHERE agent = ${_q(agent)} AND archived = false
           ORDER BY last_msg_at DESC LIMIT ${limit|0}) s;`;
-  try { return JSON.parse(_psql(sql)); } catch (_) { return []; }
+  try { return JSON.parse(await queryValue(sql)); } catch (_) { return []; }
 }
 
-function createChat(agent, title) {
+async function createChat(agent, title) {
   const sql = `
     INSERT INTO agent_chats (agent, title, messages, total_tokens, total_cost)
     VALUES (${_q(agent)}, ${_q(title)}, '[]'::jsonb, 0, 0)
     RETURNING id::text;`;
-  try { return _psql(sql); } catch (e) { throw new Error('createChat failed: ' + e.message); }
+  try { return await queryReturning(sql); } catch (e) { throw new Error('createChat failed: ' + e.message); }
 }
 
-function appendMessages(chatId, agent, newMessages, addedTokens, addedCostUsd) {
+async function appendMessages(chatId, agent, newMessages, addedTokens, addedCostUsd) {
   const sql = `
     UPDATE agent_chats SET
       messages = messages || ${_qjson(newMessages)},
@@ -109,7 +92,7 @@ function appendMessages(chatId, agent, newMessages, addedTokens, addedCostUsd) {
       total_tokens = total_tokens + ${addedTokens|0},
       total_cost   = total_cost   + ${Number.isFinite(addedCostUsd) ? addedCostUsd : 0}
     WHERE id = ${_q(chatId)};`;
-  try { _psql(sql); } catch (e) { /* best effort */ console.warn('[anthropic-chat] appendMessages failed:', e.message); }
+  try { await query(sql); } catch (e) { /* best effort */ console.warn('[anthropic-chat] appendMessages failed:', e.message); }
 }
 
 // ── Streaming the call ───────────────────────────────────────────────
@@ -128,25 +111,24 @@ async function streamChat({ agent, userMessage, chatId = null, onText, onUsage, 
   if (!isConfigured()) { onError(new Error('ANTHROPIC_API_KEY not set in .env')); return; }
   if (!agent || !userMessage) { onError(new Error('agent + message required')); return; }
 
-  // Build context.
+  // Build context. Run the four async pulls concurrently — they don't
+  // depend on each other.
   const skill = readSkill(agent) || `(no SKILL.md found for ${agent})`;
-  const runs  = recentRuns(agent, 10);
+  const queryKeywords = String(userMessage || '').split(/\s+/)
+    .filter(w => w.length >= 4).slice(0, 8);
+  const detectedCountry = KB.detectCountry(userMessage);
+  const [runs, memoryBlock, kbBlock] = await Promise.all([
+    recentRuns(agent, 10),
+    agentMemory.renderAsBlock(agent, { limit: 8, queryKeywords }),
+    KB.renderAsBlock({ country: detectedCountry, query: userMessage, limit: 6 }),
+  ]);
   const runsCompact = runs.slice(0, 10).map(r => ({
     id: r.id, started_at: r.started_at, status: r.status, duration_ms: r.duration_ms,
     output: r.output_payload && (typeof r.output_payload === 'object'
       ? JSON.stringify(r.output_payload).slice(0, 300) : String(r.output_payload).slice(0, 300)),
   }));
-
-  // K2 · Memory injection. Pull keywords from the user's message so that
-  // tag/keyword matching surfaces relevant past interactions.
-  const queryKeywords = String(userMessage || '').split(/\s+/)
-    .filter(w => w.length >= 4).slice(0, 8);
-  const memoryBlock = agentMemory.renderAsBlock(agent, { limit: 8, queryKeywords });
-  // Brand profile — same single source of truth that compose-ig & afshin use.
+  // brand-profile.renderAsPromptBlock stays sync (cache-backed).
   const brandBlock = brandProfile.renderAsPromptBlock();
-  // K6 · Knowledge base — country-aware grounding.
-  const detectedCountry = KB.detectCountry(userMessage);
-  const kbBlock = KB.renderAsBlock({ country: detectedCountry, query: userMessage, limit: 6 });
 
   const systemPrompt = [
     `You are ${agent}, an agent in the RxApply local test stack.`,
@@ -167,7 +149,7 @@ async function streamChat({ agent, userMessage, chatId = null, onText, onUsage, 
   ].filter(Boolean).join('\n\n');
 
   // Prior messages (if continuing a chat).
-  let chat = chatId ? getChat(chatId) : null;
+  let chat = chatId ? await getChat(chatId) : null;
   if (chatId && !chat) { onError(new Error('chat_id not found')); return; }
 
   const priorMsgs = chat ? (Array.isArray(chat.messages) ? chat.messages : []) : [];
@@ -254,9 +236,9 @@ async function streamChat({ agent, userMessage, chatId = null, onText, onUsage, 
   try {
     if (!resolvedChatId) {
       const title = userMessage.slice(0, 80);
-      resolvedChatId = createChat(agent, title);
+      resolvedChatId = await createChat(agent, title);
     }
-    appendMessages(resolvedChatId, agent,
+    await appendMessages(resolvedChatId, agent,
       [
         { role: 'user',      content: userMessage,   ts: new Date().toISOString() },
         { role: 'assistant', content: fullText,      ts: new Date().toISOString(), tokens: outputTokens },
@@ -279,7 +261,7 @@ async function streamChat({ agent, userMessage, chatId = null, onText, onUsage, 
       try { ho = JSON.parse(fenceMatch[1]); } catch (_) {}
       const parsed = ho && handoffs.parseFromOutput({ handoff_intent: ho }, agent);
       if (parsed) {
-        handoffs.record({
+        await handoffs.record({
           fromAgent: agent, toAgent: parsed.to_agent,
           reason: parsed.reason, suggestedAction: parsed.suggested_action,
           payload: parsed.payload, sourceChatId: resolvedChatId,
@@ -297,7 +279,7 @@ async function streamChat({ agent, userMessage, chatId = null, onText, onUsage, 
       durationMs: null, costUsd,
       topic: userMessage.slice(0, 80),
     });
-    agentMemory.write({
+    await agentMemory.write({
       agent, type: 'episodic', content: episodic,
       tags: ['chat'], importance: 2, source: 'auto',
     });

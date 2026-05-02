@@ -22,6 +22,8 @@ cowork-proxy/public/team/team-original.jpg
 
 # Per-run logs (rotated to disk, large; not in git)
 cowork-proxy/runs/
+cowork-proxy/startup.out
+cowork-proxy/startup.err
 
 # Docker volumes / data
 supabase/.branches/

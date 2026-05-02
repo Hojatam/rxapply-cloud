@@ -23,10 +23,11 @@ require('dotenv').config({
 });
 
 const express = require('express');
-const { spawn, spawnSync } = require('child_process');
+const { spawn } = require('child_process');     // spawnSync gone in cloud build (no docker-shell-outs)
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const db = require('./db');                          // T0 · pg client (cloud build)
 const logWriter = require('./log-writer');           // F2 · L2 logs
 const auth = require('./auth');                       // F7 · session auth
 const promptVersions = require('./prompt-versions');  // F7 · SKILL.md history
@@ -271,7 +272,7 @@ app.post('/run-helper', async (req, res) => {
   let runState = null;
   const inputPayload = { command, args, started_at: new Date().toISOString() };
   try {
-    runState = logWriter.recordRunStart({ agent, command, args, stdin });
+    runState = await logWriter.recordRunStart({ agent, command, args, stdin });
   } catch (e) {
     log(`log-writer recordRunStart failed (non-fatal): ${(e.message || '').slice(0, 200)}`);
   }
@@ -282,7 +283,7 @@ app.post('/run-helper', async (req, res) => {
     const durationMs = Date.now() - t0;
     if (runState) {
       try {
-        logWriter.recordRunEnd({
+        await logWriter.recordRunEnd({
           runId: runState.runId, agent, status: 'success',
           output, stderr, exitCode, durationMs,
           paths: runState, inputPayload,
@@ -294,7 +295,7 @@ app.post('/run-helper', async (req, res) => {
     const durationMs = Date.now() - t0;
     if (runState) {
       try {
-        logWriter.recordRunEnd({
+        await logWriter.recordRunEnd({
           runId: runState.runId, agent, status: 'fail',
           output: e.output || '', stderr: e.error || '',
           exitCode: e.code, durationMs, error: e.error,
@@ -314,19 +315,15 @@ app.post('/run-helper', async (req, res) => {
 // GET /logs/:runid/download                → same bundle as a downloadable JSON
 const RUNID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-app.get('/logs', (req, res) => {
+app.get('/logs', async (req, res) => {
   try {
-    const runs = logWriter.listRuns({
+    const runs = await logWriter.listRuns({
       agent: req.query.agent || null,
       status: req.query.status || null,
       limit: req.query.limit,
       offset: req.query.offset,
     });
-    // K1 · attach a human-readable narrative per row using output-renderers.
-    // Best-effort: an unparseable / missing output just renders the generic
-    // "<Agent> ran <action>" line, which is still better than no narrative.
     const action = (r) => {
-      // input_payload usually has { command, args, ... }
       const ip = r.input_payload || {};
       return ip.command || ip.action || 'run';
     };
@@ -342,18 +339,18 @@ app.get('/logs', (req, res) => {
   }
 });
 
-app.get('/logs/:runid', (req, res) => {
+app.get('/logs/:runid', async (req, res) => {
   const runId = req.params.runid;
   if (!RUNID_RE.test(runId)) return res.status(400).json({ error: 'invalid runid (uuid expected)' });
-  const bundle = logWriter.loadRunBundle(runId);
+  const bundle = await logWriter.loadRunBundle(runId);
   if (bundle.error) return res.status(404).json(bundle);
   res.json({ ok: true, ...bundle });
 });
 
-app.get('/logs/:runid/download', (req, res) => {
+app.get('/logs/:runid/download', async (req, res) => {
   const runId = req.params.runid;
   if (!RUNID_RE.test(runId)) return res.status(400).json({ error: 'invalid runid (uuid expected)' });
-  const bundle = logWriter.loadRunBundle(runId);
+  const bundle = await logWriter.loadRunBundle(runId);
   if (bundle.error) return res.status(404).json(bundle);
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="run-${bundle.run.agent}-${runId.slice(0,8)}.json"`);
@@ -502,11 +499,9 @@ app.post('/auth/logout', (req, res) => {
 });
 
 // ── F7 · settings (gated) ───────────────────────────────────────────────
-app.get('/settings', auth.middleware, (_, res) => {
+app.get('/settings', auth.middleware, async (_, res) => {
   try {
-    const sql = `SELECT row_to_json(s) FROM (SELECT id, sandbox_mode, monthly_cap_usd, auth_session_hours, anthropic_key_present, openai_key_present, updated_at::text FROM dashboard_settings WHERE id = 1) s;`;
-    const out = spawnSync('docker', ['exec', '-i', PG_CONTAINER, 'psql', '-U', 'postgres', '-d', 'postgres', '-tA', '-c', sql], { encoding: 'utf-8' });
-    const json = (out.stdout || '').trim();
+    const json = await db.queryValue(`SELECT row_to_json(s) FROM (SELECT id, sandbox_mode, monthly_cap_usd, auth_session_hours, anthropic_key_present, openai_key_present, updated_at::text FROM dashboard_settings WHERE id = 1) s;`);
     res.json({ ok: true, settings: json ? JSON.parse(json) : null,
       auth_initialized: auth.isInitialized(),
       env_keys: {
@@ -526,7 +521,7 @@ app.get('/settings', auth.middleware, (_, res) => {
   }
 });
 
-app.patch('/settings', auth.middleware, (req, res) => {
+app.patch('/settings', auth.middleware, async (req, res) => {
   const allowed = ['sandbox_mode', 'monthly_cap_usd', 'auth_session_hours'];
   const updates = [];
   for (const k of allowed) {
@@ -540,9 +535,8 @@ app.patch('/settings', auth.middleware, (req, res) => {
   }
   if (updates.length === 0) return res.status(400).json({ error: 'no allowed fields' });
   updates.push('updated_at = NOW()');
-  const sql = `UPDATE dashboard_settings SET ${updates.join(', ')} WHERE id = 1;`;
   try {
-    spawnSync('docker', ['exec', '-i', PG_CONTAINER, 'psql', '-U', 'postgres', '-d', 'postgres', '-c', sql], { encoding: 'utf-8' });
+    await db.query(`UPDATE dashboard_settings SET ${updates.join(', ')} WHERE id = 1;`);
     log(`settings.patch fields=${Object.keys(req.body).join(',')}`);
     res.json({ ok: true });
   } catch (e) {
@@ -1200,9 +1194,9 @@ app.get('/kb/recall/preview', auth.middleware, async (req, res) => {
 // real cost so the Overview cost widget reflects actual spend (not just
 // helper-spawn costs). Without this, daneshyar/compose calls leave no trace
 // in agent_runs.cost_usd_actual and the spend dashboard reads as $0.
-function _logAnthropic(agent, action, r, payload) {
+async function _logAnthropic(agent, action, r, payload) {
   try {
-    logWriter.logApiCall({
+    await logWriter.logApiCall({
       agent, action,
       costUsd: r.cost_usd || 0,
       model: r.model,
@@ -1219,7 +1213,7 @@ app.post('/daneshyar/parse', auth.middleware, async (req, res) => {
     const { text, country, hint } = req.body || {};
     const r = await daneshyar.parse({ text, country, hint });
     if (!r.ok) return res.status(400).json(r);
-    _logAnthropic('daneshyar', 'parse', r, { country, hint, text_chars: (text || '').length });
+    await _logAnthropic('daneshyar', 'parse', r, { country, hint, text_chars: (text || '').length });
     log(`daneshyar.parse country=${r.detected_country || '?'} entries=${r.entries.length} cost=$${(r.cost_usd||0).toFixed(4)}`);
     res.json(r);
   } catch (e) { res.status(500).json({ ok: false, error: e.message.slice(0, 300) }); }
@@ -1229,7 +1223,7 @@ app.post('/daneshyar/parse-and-save', auth.middleware, async (req, res) => {
     const { text, country, hint } = req.body || {};
     const r = await daneshyar.parseAndSave({ text, country, hint });
     if (!r.ok) return res.status(400).json(r);
-    _logAnthropic('daneshyar', 'parse-and-save', r, { country, hint, text_chars: (text || '').length });
+    await _logAnthropic('daneshyar', 'parse-and-save', r, { country, hint, text_chars: (text || '').length });
     log(`daneshyar.parse-and-save saved=${r.saved.length} cost=$${(r.cost_usd||0).toFixed(4)}`);
     res.json(r);
   } catch (e) { res.status(500).json({ ok: false, error: e.message.slice(0, 300) }); }
@@ -1238,7 +1232,7 @@ app.post('/daneshyar/verify/:id', auth.middleware, async (req, res) => {
   try {
     const r = await daneshyar.verify({ id: req.params.id });
     if (!r.ok) return res.status(404).json(r);
-    _logAnthropic('daneshyar', 'verify', r, { kb_id: req.params.id });
+    await _logAnthropic('daneshyar', 'verify', r, { kb_id: req.params.id });
     log(`daneshyar.verify ${req.params.id.slice(0,8)} verdict=${r.verdict} cost=$${(r.cost_usd||0).toFixed(4)}`);
     res.json(r);
   } catch (e) { res.status(500).json({ ok: false, error: e.message.slice(0, 300) }); }
@@ -1312,7 +1306,7 @@ app.post('/daneshyar/upload-and-parse', auth.middleware, async (req, res) => {
         ? await daneshyar.parseAndSave({ text, country, hint: hintWithFilename })
         : await daneshyar.parse({ text, country, hint: hintWithFilename });
       if (!r.ok) return res.status(400).json(r);
-      _logAnthropic('daneshyar', save ? 'upload-and-save' : 'upload-and-preview', r, { filename: safeName, bytes: buf.length, country });
+      await _logAnthropic('daneshyar', save ? 'upload-and-save' : 'upload-and-preview', r, { filename: safeName, bytes: buf.length, country });
       log(`daneshyar.upload-and-parse file="${safeName}" bytes=${buf.length} text_chars=${text.length} ` +
           (save ? `saved=${r.saved.length}` : `preview_entries=${r.entries.length}`) +
           ` cost=$${(r.cost_usd||0).toFixed(4)}`);
@@ -1335,7 +1329,7 @@ app.post('/daneshyar/find-more/:id', auth.middleware, async (req, res) => {
   try {
     const r = await daneshyar.findMore({ id: req.params.id });
     if (!r.ok) return res.status(404).json(r);
-    _logAnthropic('daneshyar', 'find-more', r, { kb_id: req.params.id });
+    await _logAnthropic('daneshyar', 'find-more', r, { kb_id: req.params.id });
     log(`daneshyar.find-more ${req.params.id.slice(0,8)} suggestions=${r.missing_facts.length} cost=$${(r.cost_usd||0).toFixed(4)}`);
     res.json(r);
   } catch (e) { res.status(500).json({ ok: false, error: e.message.slice(0, 300) }); }
@@ -1355,20 +1349,11 @@ app.post('/afshin/archive/:mediaId', auth.middleware, async (req, res) => {
   res.json(r);
 });
 
-// ── Compose-IG psql helper (used by the gate routes) ────────────────────
-// CRITICAL on Windows: spawnSync's `encoding: 'utf-8'` for INPUT goes through
-// the OS pipe which mangles multi-byte UTF-8 (Persian/Arabic) via cp1252.
-// Pass an explicit Buffer for input + leave stdout encoding implicit,
-// then decode the returned Buffer ourselves.
-function _composePsql(sql) {
-  const r = spawnSync('docker',
-    ['exec', '-i', PG_CONTAINER, 'psql', '-U', 'postgres', '-d', 'postgres', '-tA', '-v', 'ON_ERROR_STOP=1'],
-    { input: Buffer.from(sql, 'utf-8') });
-  if (r.status !== 0) {
-    const err = (r.stderr || Buffer.alloc(0)).toString('utf-8');
-    throw new Error(`psql (${r.status}): ${err.slice(0, 400)}`);
-  }
-  return (r.stdout || Buffer.alloc(0)).toString('utf-8').trim();
+// ── Compose-IG psql helper [cloud build] ─────────────────────────────
+// Was a docker-shell-out in the local sandbox. Now goes through the
+// shared pg pool. Async, so the 6 callers below all `await`.
+async function _composePsql(sql) {
+  return await db.queryValue(sql);
 }
 function _qStr(v) { return v == null ? 'NULL' : `'${String(v).replace(/'/g, "''")}'`; }
 function _qJson(v) { return v == null ? 'NULL' : `'${JSON.stringify(v).replace(/'/g, "''")}'::jsonb`; }
@@ -1400,7 +1385,7 @@ app.post('/compose/approve-plan', auth.middleware, async (req, res) => {
             NOW(), 'founder', 0,
             ${_qJson({ tone, source: 'compose-ig' })});
   `;
-  try { _composePsql(planSql); }
+  try { await _composePsql(planSql); }
   catch (e) { return res.status(500).json({ ok: false, error: 'failed to save: ' + e.message.slice(0, 200) }); }
 
   log(`compose.approve-plan id=${id.slice(0,8)} topic="${topic.slice(0,60)}"`);
@@ -1430,7 +1415,7 @@ app.post('/compose/approve-plan', auth.middleware, async (req, res) => {
   // Move Afshin's draft path to OUR row, then archive the row Afshin created
   // so it doesn't pollute the gallery as a separate item.
   try {
-    _composePsql(`
+    await _composePsql(`
       UPDATE media_library
          SET draft_path = ${_qStr(draftResp.draft_path)},
              draft_cost_usd = ${draftResp.draft_cost_usd || 0}
@@ -1457,7 +1442,7 @@ app.post('/compose/approve-plan', auth.middleware, async (req, res) => {
 //   Body: { media_id, language: 'en'|'fa'|'ar' | 'all' }
 //   Action: insert one or three scheduled_posts rows with status='ready_to_post'
 //           and approved_for_posting_at = NOW(). No actual posting happens.
-app.post('/compose/approve-for-posting', auth.middleware, (req, res) => {
+app.post('/compose/approve-for-posting', auth.middleware, async (req, res) => {
   const { media_id, language } = req.body || {};
   if (!media_id) return res.status(400).json({ ok: false, error: 'media_id required' });
   const requested = language === 'all' ? ['en', 'fa', 'ar'] : [language];
@@ -1468,7 +1453,7 @@ app.post('/compose/approve-for-posting', auth.middleware, (req, res) => {
   // Load the media row
   let row;
   try {
-    const out = _composePsql(`
+    const out = await _composePsql(`
       SELECT row_to_json(m) FROM (
         SELECT id, kind, topic, captions, design_plan, render_path, draft_path
         FROM media_library WHERE id = ${_qStr(media_id)}
@@ -1503,7 +1488,7 @@ app.post('/compose/approve-for-posting', auth.middleware, (req, res) => {
       RETURNING id::text;`;
     try {
       // psql -tA on RETURNING outputs "<uuid>\nINSERT 0 1" — take only the uuid.
-      const out = _composePsql(sql);
+      const out = await _composePsql(sql);
       const id = out.split(/[\r\n]+/)[0].trim();
       insertedIds.push({ language: lang, scheduled_post_id: id });
     } catch (e) {
@@ -1519,9 +1504,9 @@ app.post('/compose/approve-for-posting', auth.middleware, (req, res) => {
 });
 
 // GET /compose/recent — last 10 compose runs (for the "Recent posts" strip)
-app.get('/compose/recent', (_, res) => {
+app.get('/compose/recent', async (_, res) => {
   try {
-    const out = _composePsql(`
+    const out = await _composePsql(`
       SELECT COALESCE(json_agg(row_to_json(s) ORDER BY created_at DESC), '[]'::json)
       FROM (
         SELECT id::text, topic, draft_path, render_path, plan_approved_at::text, created_at::text,
@@ -1539,9 +1524,9 @@ app.get('/compose/recent', (_, res) => {
 });
 
 // GET /compose/:mediaId — full row including captions + design_plan
-app.get('/compose/:mediaId', (req, res) => {
+app.get('/compose/:mediaId', async (req, res) => {
   try {
-    const out = _composePsql(`
+    const out = await _composePsql(`
       SELECT row_to_json(m) FROM (
         SELECT id::text, topic, kind, dimensions, captions, design_plan,
                draft_path, render_path, render_cost_usd,
@@ -1830,16 +1815,16 @@ app.post('/agent/:name/chat', async (req, res) => {
   }
 });
 
-app.get('/agent/:name/chats', (req, res) => {
+app.get('/agent/:name/chats', async (req, res) => {
   const { name } = req.params;
   if (!AGENT_NAME_RE.test(name)) return res.status(400).json({ error: 'invalid agent name' });
-  res.json({ ok: true, chats: anthropicChat.listChats(name, parseInt(req.query.limit, 10) || 20) });
+  res.json({ ok: true, chats: await anthropicChat.listChats(name, parseInt(req.query.limit, 10) || 20) });
 });
 
-app.get('/agent/:name/chats/:chatId', (req, res) => {
+app.get('/agent/:name/chats/:chatId', async (req, res) => {
   const { name, chatId } = req.params;
   if (!AGENT_NAME_RE.test(name)) return res.status(400).json({ error: 'invalid agent name' });
-  const c = anthropicChat.getChat(chatId);
+  const c = await anthropicChat.getChat(chatId);
   if (!c) return res.status(404).json({ error: 'chat not found' });
   res.json({ ok: true, chat: c });
 });

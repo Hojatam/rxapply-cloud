@@ -13,6 +13,37 @@ Format:
 
 ---
 
+## 2026-05-01 · M6 · anthropic-chat + log-writer + server.js inline (pg port DONE)
+
+- `anthropic-chat.js` ported. `streamChat`, `recentRuns`, `getChat`,
+  `listChats`, `createChat`, `appendMessages` all async. `streamChat`
+  now runs `recentRuns / agentMemory.renderAsBlock / KB.renderAsBlock`
+  concurrently via `Promise.all` to shave a round-trip off chat boot.
+- `log-writer.js` ported. `recordRunStart`, `recordRunEnd`, `recordAction`,
+  `listRuns`, `loadRunBundle`, `logApiCall` all async. Internal
+  `_psqlExecScript` is now a thin wrapper around `db.queryValue` for
+  any future legacy callers.
+- `server.js` 3 inline `_psql` calls (settings GET/PATCH + `_composePsql`)
+  replaced with the pg pool. Removed unused `spawnSync` import. 6
+  compose routes (`/compose/approve-for-posting`, `/compose/recent`,
+  `/compose/:mediaId`) marked async.
+- 6 `_logAnthropic` call sites updated to await the now-async helper.
+- Updated callers to await: `/run-helper` (recordRunStart/End),
+  `/logs` (listRuns), `/logs/:runid[/download]` (loadRunBundle),
+  `/agent/:name/chats[/:chatId]` (listChats/getChat).
+
+**End-of-port verification:**
+- `node -c` syntax check passed on all 17 ported modules.
+- Full proxy boot test against local Supabase:
+    - Listened on :7778 ✓
+    - 13 tools synced to Postgres ✓
+    - `/health` returned 200 ✓
+    - Zero startup errors ✓
+
+Track 1 #1 (pg-client port) is **DONE**. The cloud proxy no longer
+shells out to docker for any DB call. All ~17 modules use the same
+single pg pool defined in `cowork-proxy/db.js`.
+
 ## 2026-05-01 · M5 · auth, output-renderers, pipeline-runner, afshin-router ported
 
 - `auth.js` ported. Sync `middleware()` preserved (Express requires it)
