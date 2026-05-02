@@ -36,45 +36,47 @@ function _safeEval(expr, carry, asBoolean = false) {
   return vm.runInContext(src, ctx, { timeout: 1000, displayErrors: false });
 }
 
-const PG_CONTAINER  = process.env.SUPABASE_DB_CONTAINER || 'supabase_db_rxapply-test';
 const AGENTS_DIR    = path.resolve(__dirname, '..', 'agents');
 const PYTHON_BIN    = process.env.PYTHON_BIN || 'python';
-const PIPELINES_DIR = path.resolve(__dirname, '..', 'pipelines');
 
-function _ensurePipelinesDir() {
-  if (!fs.existsSync(PIPELINES_DIR)) fs.mkdirSync(PIPELINES_DIR, { recursive: true });
+// M19 cloud hardening: Postgres is the single source of truth for
+// pipelines. Railway's container fs is volatile (every redeploy wipes
+// it), so the previous "save to file AND mirror to DB" was guaranteed
+// to lose data. Now we:
+//   - save: DB only
+//   - load: DB only
+//   - list: DB only
+//   - delete: DB only
+// Local dev opt-in: set PIPELINES_DISK_MIRROR=true to also write a
+// debug copy under cowork-proxy/.local-storage/pipelines/.
+const PIPELINES_DIR = path.resolve(__dirname, '.local-storage', 'pipelines');
+const DISK_MIRROR  = process.env.PIPELINES_DISK_MIRROR === 'true';
+
+function _maybeMirror(slug, payload) {
+  if (!DISK_MIRROR) return;
+  try {
+    if (!fs.existsSync(PIPELINES_DIR)) fs.mkdirSync(PIPELINES_DIR, { recursive: true });
+    fs.writeFileSync(path.join(PIPELINES_DIR, `${slug}.json`),
+                     JSON.stringify(payload, null, 2), 'utf-8');
+  } catch (_) { /* best effort */ }
 }
 
 function _safeName(name) {
   return /^[a-zA-Z0-9][a-zA-Z0-9 _\-]{0,79}$/.test(name);
 }
-
 function _slug(name) {
   return name.replace(/[^a-zA-Z0-9_\-]/g, '_').toLowerCase();
 }
 
 // ── Save ──────────────────────────────────────────────────────────────
-// Cloud build note: in Railway the local filesystem is volatile (resets
-// on each deploy). A future hardening will flip the source of truth from
-// disk to DB for pipelines. For now we keep the dual-write so local dev
-// of the cloud build still works the same way.
-
 async function savePipeline({ name, description, graphData }) {
   if (!name || !_safeName(name)) return { ok: false, error: 'name must be 1–80 chars, alphanumeric/space/_/-' };
   if (!graphData || typeof graphData !== 'object') return { ok: false, error: 'graphData required (Drawflow export JSON)' };
 
-  _ensurePipelinesDir();
   const slug = _slug(name);
-  const filePath = path.join(PIPELINES_DIR, `${slug}.json`);
-
-  // Count nodes
   const nodes = Object.values((graphData.drawflow && graphData.drawflow.Home && graphData.drawflow.Home.data) || {});
   const nodeCount = nodes.length;
 
-  const payload = { name, description: description || '', graphData, savedAt: new Date().toISOString() };
-  fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf-8');
-
-  // Mirror to DB (idempotent upsert).
   try {
     await query(`
       INSERT INTO pipelines (name, description, graph_data, node_count, updated_at)
@@ -85,59 +87,66 @@ async function savePipeline({ name, description, graphData }) {
             node_count  = ${nodeCount},
             updated_at  = NOW();
     `);
-  } catch (_) { /* DB sync optional — file is the source of truth */ }
+  } catch (e) {
+    return { ok: false, error: 'DB write failed: ' + e.message.slice(0, 200) };
+  }
 
-  return { ok: true, name, slug, nodeCount, filePath };
+  _maybeMirror(slug, { name, description: description || '', graphData, savedAt: new Date().toISOString() });
+
+  return { ok: true, name, slug, nodeCount };
 }
 
 // ── Load ──────────────────────────────────────────────────────────────
-
-function loadPipeline(name) {
-  _ensurePipelinesDir();
-  const slug = _slug(name);
-  const filePath = path.join(PIPELINES_DIR, `${slug}.json`);
-  if (!fs.existsSync(filePath)) return { ok: false, error: `pipeline "${name}" not found` };
+async function loadPipeline(name) {
   try {
-    const payload = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-    return { ok: true, ...payload };
+    const r = await query(`
+      SELECT name, description, graph_data, updated_at::text AS saved_at
+        FROM pipelines WHERE name = ${q(name)};`);
+    if (!r.rows || !r.rows.length) return { ok: false, error: `pipeline "${name}" not found` };
+    const row = r.rows[0];
+    return {
+      ok: true,
+      name: row.name,
+      description: row.description || '',
+      graphData: row.graph_data,
+      savedAt: row.saved_at,
+    };
   } catch (e) {
-    return { ok: false, error: 'corrupt pipeline file: ' + e.message };
+    return { ok: false, error: 'DB read failed: ' + e.message.slice(0, 200) };
   }
 }
 
 // ── List ──────────────────────────────────────────────────────────────
-
-function listPipelines() {
-  _ensurePipelinesDir();
-  const files = fs.readdirSync(PIPELINES_DIR).filter(f => f.endsWith('.json'));
-  const items = [];
-  for (const f of files) {
-    try {
-      const raw = JSON.parse(fs.readFileSync(path.join(PIPELINES_DIR, f), 'utf-8'));
-      const nodes = Object.values((raw.graphData && raw.graphData.drawflow && raw.graphData.drawflow.Home && raw.graphData.drawflow.Home.data) || {});
-      items.push({
-        name: raw.name,
-        description: raw.description || '',
-        nodeCount: nodes.length,
-        savedAt: raw.savedAt,
-        slug: _slug(raw.name),
-      });
-    } catch (_) { /* skip corrupt files */ }
-  }
-  items.sort((a, b) => (b.savedAt || '').localeCompare(a.savedAt || ''));
-  return items;
+async function listPipelines() {
+  try {
+    const r = await query(`
+      SELECT name, description, node_count, updated_at::text AS saved_at
+        FROM pipelines
+        ORDER BY updated_at DESC;`);
+    return (r.rows || []).map(row => ({
+      name:        row.name,
+      description: row.description || '',
+      nodeCount:   row.node_count || 0,
+      savedAt:     row.saved_at,
+      slug:        _slug(row.name),
+    }));
+  } catch (_) { return []; }
 }
 
 // ── Delete ──────────────────────────────────────────────────────────
-
 async function deletePipeline(name) {
-  _ensurePipelinesDir();
-  const slug = _slug(name);
-  const filePath = path.join(PIPELINES_DIR, `${slug}.json`);
-  if (!fs.existsSync(filePath)) return { ok: false, error: 'not found' };
-  fs.unlinkSync(filePath);
-  try { await query(`DELETE FROM pipelines WHERE name = ${q(name)};`); } catch (_) {}
-  return { ok: true };
+  try {
+    const r = await query(`DELETE FROM pipelines WHERE name = ${q(name)};`);
+    if (!r.rowCount) return { ok: false, error: 'not found' };
+    // Best-effort cleanup of disk mirror (only exists when DISK_MIRROR=true).
+    try {
+      const fp = path.join(PIPELINES_DIR, `${_slug(name)}.json`);
+      if (fs.existsSync(fp)) fs.unlinkSync(fp);
+    } catch (_) {}
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: 'DB delete failed: ' + e.message.slice(0, 200) };
+  }
 }
 
 // ── Topological sort ──────────────────────────────────────────────────

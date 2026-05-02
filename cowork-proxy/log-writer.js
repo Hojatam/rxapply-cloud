@@ -30,6 +30,21 @@ const LOGS_ROOT     = path.resolve(__dirname, '..', 'logs');
 const RETENTION_DAYS = 30;
 const GZIP_AFTER_DAYS = 7;
 
+// M19 cloud hardening:
+//   The proxy has always written full run-log bundles to disk under
+//   ../logs/YYYY-MM-DD/<agent>-<runid>.json plus raw .stdout/.stderr.
+//   On Railway that path is wiped on every redeploy — which means
+//   /logs/:runid/download silently breaks for every run from before
+//   the latest deploy.
+//
+//   Postgres (agent_runs.{input,output,error}_payload) already holds
+//   the structured I/O. The disk bundles are mostly diagnostic.
+//
+//   We now gate disk writes behind RUN_LOGS_TO_DISK=true. Default OFF
+//   in cloud — agent_runs is the source of truth. Local dev can turn
+//   it on if they want grep-friendly text files alongside the DB rows.
+const RUN_LOGS_TO_DISK = process.env.RUN_LOGS_TO_DISK === 'true';
+
 // pg-backed DB client (cloud build).
 const { query, queryValue, q: _q, qJson: _qjson } = require('./db');
 
@@ -51,9 +66,19 @@ function _ensureDir(p) {
 
 function _filesFor(runId, agent) {
   const dateDir = _todayDir();
+  const base = `${agent}-${runId.slice(0, 8)}`;
+  if (!RUN_LOGS_TO_DISK) {
+    // Disk writes disabled (cloud default). Return paths that look
+    // sane for callers that build URLs from `relativeBundlePath`, but
+    // never touch the filesystem.
+    return {
+      logDir: null, base,
+      bundlePath: null, stdoutPath: null, stderrPath: null,
+      relativeBundlePath: null,
+    };
+  }
   const logDir = path.join(LOGS_ROOT, dateDir);
   _ensureDir(logDir);
-  const base = `${agent}-${runId.slice(0, 8)}`;
   return {
     logDir,
     base,
@@ -134,12 +159,15 @@ async function recordRunEnd({ runId, agent, status = 'success', output = '', std
                               paths = null, inputPayload = null }) {
   if (!paths) paths = _filesFor(runId, agent || 'unknown');
 
-  // 1. Write raw stdout/stderr.
-  try {
-    if (output)  fs.writeFileSync(paths.stdoutPath, output);
-    if (stderr)  fs.writeFileSync(paths.stderrPath, stderr);
-  } catch (e) {
-    console.warn('[log-writer] failed to write log files:', e.message);
+  // 1. Write raw stdout/stderr — only when RUN_LOGS_TO_DISK=true (off
+  //    in cloud; agent_runs is the source of truth there).
+  if (RUN_LOGS_TO_DISK) {
+    try {
+      if (output && paths.stdoutPath) fs.writeFileSync(paths.stdoutPath, output);
+      if (stderr && paths.stderrPath) fs.writeFileSync(paths.stderrPath, stderr);
+    } catch (e) {
+      console.warn('[log-writer] failed to write log files:', e.message);
+    }
   }
 
   // 2. Detect parsedOutput if it looks like JSON.
@@ -161,28 +189,30 @@ async function recordRunEnd({ runId, agent, status = 'success', output = '', std
     stderr_excerpt: (stderr || '').slice(0, 4000),
   } : null;
 
-  // 3. Write the bundle file (one JSON document with everything except big stdout/stderr).
-  const bundle = {
-    run_id: runId,
-    agent,
-    status,
-    duration_ms: durationMs,
-    exit_code: exitCode,
-    cost_usd_actual: costUsd,
-    started_at: inputPayload?.started_at,
-    finished_at: new Date().toISOString(),
-    input_payload: inputPayload,
-    output_payload: outputPayload,
-    error_payload: errorPayload,
-    files: {
-      stdout: fs.existsSync(paths.stdoutPath) ? path.basename(paths.stdoutPath) : null,
-      stderr: fs.existsSync(paths.stderrPath) ? path.basename(paths.stderrPath) : null,
-    },
-  };
-  try {
-    fs.writeFileSync(paths.bundlePath, JSON.stringify(bundle, null, 2));
-  } catch (e) {
-    console.warn('[log-writer] failed to write bundle:', e.message);
+  // 3. Write the bundle file — only when disk logging is on.
+  if (RUN_LOGS_TO_DISK && paths.bundlePath) {
+    const bundle = {
+      run_id: runId,
+      agent,
+      status,
+      duration_ms: durationMs,
+      exit_code: exitCode,
+      cost_usd_actual: costUsd,
+      started_at: inputPayload?.started_at,
+      finished_at: new Date().toISOString(),
+      input_payload: inputPayload,
+      output_payload: outputPayload,
+      error_payload: errorPayload,
+      files: {
+        stdout: paths.stdoutPath && fs.existsSync(paths.stdoutPath) ? path.basename(paths.stdoutPath) : null,
+        stderr: paths.stderrPath && fs.existsSync(paths.stderrPath) ? path.basename(paths.stderrPath) : null,
+      },
+    };
+    try {
+      fs.writeFileSync(paths.bundlePath, JSON.stringify(bundle, null, 2));
+    } catch (e) {
+      console.warn('[log-writer] failed to write bundle:', e.message);
+    }
   }
 
   // 4. Update agent_runs.
@@ -283,14 +313,15 @@ async function loadRunBundle(runId) {
     actions = out ? JSON.parse(out) : [];
   } catch (_) { /* tolerate */ }
 
-  // 3. Raw stdout/stderr from disk if available.
+  // 3. Raw stdout/stderr from disk if available. Skipped entirely
+  //    when RUN_LOGS_TO_DISK=false — the structured input/output
+  //    payloads in agent_runs already cover what the dashboard renders.
   let stdout = null, stderr = null;
-  if (run.log_file_path) {
+  if (RUN_LOGS_TO_DISK && run.log_file_path) {
     const bundleAbs = path.resolve(__dirname, '..', run.log_file_path);
     const baseAbs = bundleAbs.replace(/\.json$/, '');
     try { stdout = fs.readFileSync(baseAbs + '.stdout', 'utf-8'); } catch (_) {}
     try { stderr = fs.readFileSync(baseAbs + '.stderr', 'utf-8'); } catch (_) {}
-    // If gzipped (after 7d), try .stdout.gz / .stderr.gz
     if (stdout == null) {
       try { stdout = zlib.gunzipSync(fs.readFileSync(baseAbs + '.stdout.gz')).toString('utf-8'); } catch (_) {}
     }
@@ -304,9 +335,11 @@ async function loadRunBundle(runId) {
 
 /**
  * Retention: gzip files older than 7 days, delete files older than 30.
- * Idempotent. Safe to call on every proxy startup.
+ * Idempotent. Safe to call on every proxy startup. No-op when disk
+ * logging is disabled (cloud default).
  */
 function cleanupOldLogs() {
+  if (!RUN_LOGS_TO_DISK) return { gzipped: 0, deleted: 0, skipped: 'disk_logging_disabled' };
   if (!fs.existsSync(LOGS_ROOT)) return { gzipped: 0, deleted: 0 };
   let gzipped = 0, deleted = 0;
   const now = Date.now();
