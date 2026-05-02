@@ -24,6 +24,8 @@ cowork-proxy/public/team/team-original.jpg
 cowork-proxy/runs/
 cowork-proxy/startup.out
 cowork-proxy/startup.err
+# Local-disk storage fallback (used when R2 isn't configured)
+cowork-proxy/.local-storage/
 
 # Docker volumes / data
 supabase/.branches/

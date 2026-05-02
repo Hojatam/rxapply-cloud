@@ -24,13 +24,15 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { spawnSync } = require('child_process');
 const cost = require('./cost');
+const storage = require('./storage');
 
-const PG_CONTAINER    = process.env.SUPABASE_DB_CONTAINER || 'supabase_db_rxapply-test';
 const ANTHROPIC_KEY   = () => process.env.ANTHROPIC_API_KEY || '';
 const agentModels = require('./agent-models');
 
+// ASSETS_ROOT is kept for backward-compat (express.static still serves
+// /assets/generated for any pre-existing local files), but new drafts +
+// renders go through storage.js instead.
 const ASSETS_ROOT = path.resolve(__dirname, '..', 'assets', 'generated');
 const DRAFTS_DIR  = path.join(ASSETS_ROOT, 'drafts');
 const RENDERS_DIR = path.join(ASSETS_ROOT, 'renders');
@@ -298,9 +300,13 @@ async function generateDraft({ kind, topic, language, notes }) {
   const draftCost    = agentModels.calcCost(draftModel, inputTokens, outputTokens);
 
   const id       = crypto.randomUUID();
-  const draftRel = path.join('assets', 'generated', 'drafts', `${id}.svg`).replace(/\\/g, '/');
-  const draftAbs = path.join(DRAFTS_DIR, `${id}.svg`);
-  fs.writeFileSync(draftAbs, svg, 'utf-8');
+  // Cloud build: SVG drafts go to object storage. The DB column stores the
+  // storage key (not a fs path); the dashboard uses storage.urlFor() to
+  // resolve it to a fetchable URL (R2 CDN if R2_PUBLIC_URL set, /storage
+  // proxy otherwise).
+  const draftKey = storage.KEYS.DRAFT(id);
+  await storage.put({ key: draftKey, body: Buffer.from(svg, 'utf-8'), contentType: 'image/svg+xml' });
+  const draftRel = draftKey;
 
   const sql = `
     INSERT INTO media_library (id, kind, topic, language, prompt, draft_path, dimensions, draft_cost_usd, metadata)
@@ -530,22 +536,22 @@ async function generateRender({ mediaId, prompt, modelKey }) {
 
   if (!result.ok) return result;
 
-  // Save the image file.
-  _ensureDirs();
-  const renderAbs = path.join(RENDERS_DIR, `${mediaId}.png`);
+  // Save the rendered image to object storage. The provider may give us
+  // a buffer, a base64 string, or a URL we need to fetch ourselves.
+  let buf;
   if (result.buffer) {
-    fs.writeFileSync(renderAbs, result.buffer);
+    buf = result.buffer;
   } else if (result.b64) {
-    fs.writeFileSync(renderAbs, Buffer.from(result.b64, 'base64'));
+    buf = Buffer.from(result.b64, 'base64');
   } else if (result.url) {
     const ir = await fetch(result.url);
-    const buf = Buffer.from(await ir.arrayBuffer());
-    fs.writeFileSync(renderAbs, buf);
+    buf = Buffer.from(await ir.arrayBuffer());
   } else {
     return { ok: false, error: 'provider returned no image data' };
   }
-
-  const renderRel = path.join('assets', 'generated', 'renders', `${mediaId}.png`).replace(/\\/g, '/');
+  const renderKey = storage.KEYS.RENDER(mediaId);
+  await storage.put({ key: renderKey, body: buf, contentType: 'image/png' });
+  const renderRel = renderKey;
   const renderCost = model.costEst;
 
   const sql = `
@@ -577,7 +583,28 @@ async function gallery({ kind = null, approved = null, limit = 50 } = {}) {
           FROM media_library WHERE ${where.join(' AND ')}
           ORDER BY created_at DESC LIMIT ${limit}) s;
   `;
-  try { return JSON.parse(await queryValue(sql)); } catch (_) { return []; }
+  try {
+    const rows = JSON.parse(await queryValue(sql));
+    // Resolve storage keys to URLs the dashboard can fetch directly. For
+    // legacy on-disk paths (`assets/generated/...`) we leave them alone —
+    // express.static still serves them. For storage keys (`media/...`)
+    // we hand back the URL the storage backend exposes.
+    return rows.map(r => ({
+      ...r,
+      draft_url:  r.draft_path  ? _resolveAssetUrl(r.draft_path)  : null,
+      render_url: r.render_path ? _resolveAssetUrl(r.render_path) : null,
+    }));
+  } catch (_) { return []; }
+}
+
+// Decide if a stored path is a legacy on-disk asset (starts with
+// "assets/generated/") or a new storage key. Legacy assets are served
+// by express.static at the same path; new keys go through storage.urlFor().
+function _resolveAssetUrl(p) {
+  if (!p) return null;
+  if (p.startsWith('http://') || p.startsWith('https://')) return p;
+  if (p.startsWith('assets/generated/')) return '/' + p;
+  return storage.urlFor(p);
 }
 
 async function approve(mediaId, approved = true) {

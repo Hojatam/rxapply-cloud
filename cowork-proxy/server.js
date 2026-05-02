@@ -28,6 +28,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const db = require('./db');                          // T0 · pg client (cloud build)
+const storage = require('./storage');                // T0 · object storage (R2 / local fallback)
 const logWriter = require('./log-writer');           // F2 · L2 logs
 const auth = require('./auth');                       // F7 · session auth
 const promptVersions = require('./prompt-versions');  // F7 · SKILL.md history
@@ -1077,85 +1078,86 @@ app.post('/agents/hire', auth.middleware, async (req, res) => {
 });
 
 // ════════════════════════════════════════════════════════════════════════
-// Per-agent avatar upload · stored at cowork-proxy/public/team/agents/<name>.<ext>
-// served at /static/team/agents/<name>.<ext>. Replaces the 5×5 sprite face for
-// that one agent only. The dashboard fetches /agents/avatars on boot and uses
-// custom URLs when present, sprite as fallback otherwise.
+// Per-agent avatar upload · stored in object storage (R2 in cloud, local
+// fallback in dev) under `avatars/<name>.<ext>`. Index of (agent → ext)
+// kept in `dashboard_settings.avatars_jsonb` so listing is one DB read
+// rather than an O(N) bucket-list. Dashboard fetches /agents/avatars on
+// boot, caches the URL map in localStorage.
 // ════════════════════════════════════════════════════════════════════════
 
-const AVATAR_DIR = path.resolve(__dirname, 'public', 'team', 'agents');
 const AVATAR_EXTS = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
-function _ensureAvatarDir() { try { fs.mkdirSync(AVATAR_DIR, { recursive: true }); } catch (_) {} }
 
-// Find any existing file matching <name>.<ext> regardless of extension.
-function _findAvatarFile(name) {
-  _ensureAvatarDir();
-  for (const ext of AVATAR_EXTS) {
-    const p = path.join(AVATAR_DIR, `${name}.${ext}`);
-    if (fs.existsSync(p)) return { path: p, ext };
-  }
-  return null;
-}
-
-// Internal: write a base64-encoded image to disk. Removes any prior avatar
-// for this agent (different extension) so we don't end up with name.jpg AND
-// name.png lying around.
-function _saveAgentAvatar(name, b64, ext) {
-  if (!AGENT_NAME_RE.test(name)) throw new Error('invalid agent name');
-  const safeExt = String(ext || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 4);
-  if (!AVATAR_EXTS.includes(safeExt)) throw new Error(`unsupported extension: ${safeExt}`);
-  const buf = Buffer.from(String(b64), 'base64');
-  if (!buf || buf.length === 0) throw new Error('empty content');
-  if (buf.length > 5 * 1024 * 1024) throw new Error('avatar too large (max 5MB)');
-  // Remove any prior avatar with a different extension.
-  const prior = _findAvatarFile(name);
-  if (prior) { try { fs.unlinkSync(prior.path); } catch (_) {} }
-  _ensureAvatarDir();
-  const target = path.join(AVATAR_DIR, `${name}.${safeExt}`);
-  fs.writeFileSync(target, buf);
-  return { ok: true, path: target, url: `/static/team/agents/${name}.${safeExt}`, bytes: buf.length };
-}
-
-// GET /agents/avatars → { agentName: '/static/team/agents/<name>.<ext>', ... }
-// One JSON for all agents — the dashboard caches this on boot, so per-row
-// rendering is zero-cost (no per-agent fetch).
-app.get('/agents/avatars', (req, res) => {
-  _ensureAvatarDir();
-  const out = {};
+async function _readAvatarIndex() {
   try {
-    for (const f of fs.readdirSync(AVATAR_DIR)) {
-      const m = f.match(/^([a-z0-9_-]+)\.(jpg|jpeg|png|webp|gif)$/i);
-      if (m) out[m[1]] = `/static/team/agents/${f}`;
-    }
-  } catch (_) {}
+    const raw = await db.queryValue(`SELECT avatars FROM dashboard_settings WHERE id = 1;`);
+    return raw ? (JSON.parse(raw) || {}) : {};
+  } catch (_) { return {}; }
+}
+async function _writeAvatarIndex(map) {
+  await db.query(`UPDATE dashboard_settings
+                     SET avatars = ${db.q(JSON.stringify(map))}::jsonb,
+                         updated_at = NOW()
+                   WHERE id = 1;`);
+}
+
+// GET /agents/avatars → { agentName: '<storage url>', … }
+app.get('/agents/avatars', async (_req, res) => {
+  const idx = await _readAvatarIndex();
+  const out = {};
+  for (const [name, ext] of Object.entries(idx)) {
+    out[name] = storage.urlFor(storage.KEYS.AVATAR(name, ext));
+  }
   res.json({ ok: true, avatars: out });
 });
 
 // POST /agents/:name/avatar  🔒
 //   Body JSON: { content_b64, ext }
 //   Replaces the agent's avatar. Max 5MB. Allowed: jpg, jpeg, png, webp, gif.
-app.post('/agents/:name/avatar', auth.middleware, (req, res) => {
+app.post('/agents/:name/avatar', auth.middleware, async (req, res) => {
   const name = req.params.name;
   if (!AGENT_NAME_RE.test(name)) return res.status(400).json({ ok: false, error: 'invalid agent name' });
   const { content_b64, ext } = req.body || {};
   if (!content_b64) return res.status(400).json({ ok: false, error: 'content_b64 required' });
+  const safeExt = String(ext || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 4);
+  if (!AVATAR_EXTS.includes(safeExt)) {
+    return res.status(400).json({ ok: false, error: `unsupported extension: ${safeExt}` });
+  }
+  const buf = Buffer.from(String(content_b64), 'base64');
+  if (!buf || buf.length === 0) return res.status(400).json({ ok: false, error: 'empty content' });
+  if (buf.length > 5 * 1024 * 1024) return res.status(400).json({ ok: false, error: 'avatar too large (max 5MB)' });
+
   try {
-    const r = _saveAgentAvatar(name, content_b64, ext || 'jpg');
-    log(`avatar.save name=${name} bytes=${r.bytes} ext=.${(ext || 'jpg').toLowerCase()}`);
-    res.json(r);
+    const idx = await _readAvatarIndex();
+    // Remove the prior file (different extension) before overwriting the index.
+    const priorExt = idx[name];
+    if (priorExt && priorExt !== safeExt) {
+      await storage.remove(storage.KEYS.AVATAR(name, priorExt));
+    }
+    const key = storage.KEYS.AVATAR(name, safeExt);
+    await storage.put({
+      key, body: buf,
+      contentType: `image/${safeExt === 'jpg' ? 'jpeg' : safeExt}`,
+    });
+    idx[name] = safeExt;
+    await _writeAvatarIndex(idx);
+    log(`avatar.save name=${name} bytes=${buf.length} ext=.${safeExt} backend=${storage.BACKEND}`);
+    res.json({ ok: true, key, url: storage.urlFor(key), bytes: buf.length });
   } catch (e) {
-    res.status(400).json({ ok: false, error: e.message.slice(0, 300) });
+    res.status(500).json({ ok: false, error: e.message.slice(0, 300) });
   }
 });
 
 // DELETE /agents/:name/avatar  🔒  →  reverts to the 5×5 sprite face
-app.delete('/agents/:name/avatar', auth.middleware, (req, res) => {
+app.delete('/agents/:name/avatar', auth.middleware, async (req, res) => {
   const name = req.params.name;
   if (!AGENT_NAME_RE.test(name)) return res.status(400).json({ ok: false, error: 'invalid agent name' });
-  const found = _findAvatarFile(name);
-  if (!found) return res.json({ ok: true, removed: false });
   try {
-    fs.unlinkSync(found.path);
+    const idx = await _readAvatarIndex();
+    const ext = idx[name];
+    if (!ext) return res.json({ ok: true, removed: false });
+    await storage.remove(storage.KEYS.AVATAR(name, ext));
+    delete idx[name];
+    await _writeAvatarIndex(idx);
     log(`avatar.delete name=${name}`);
     res.json({ ok: true, removed: true });
   } catch (e) {
@@ -1770,6 +1772,12 @@ app.use('/assets/generated', express.static(afshin.ASSETS_ROOT));
 // Serve bundled vendor libraries (Drawflow etc.) from cowork-proxy/public/.
 // Fixes broken jsdelivr/unpkg CDN access on networks that block them.
 app.use('/static', express.static(path.resolve(__dirname, 'public')));
+
+// Object-storage proxy. Used for the local-disk fallback in dev, and as
+// an authenticated read path for any future private R2 buckets. When
+// R2_PUBLIC_URL is configured, the dashboard fetches assets directly
+// from the CDN and this route is rarely hit.
+app.get('/storage/*', storage.serveHandler);
 
 // Serve dashboard.html at /dashboard so we can hit it from a real http:// origin
 // (Chrome extensions + the Claude-in-Chrome MCP can't access file:// URLs).

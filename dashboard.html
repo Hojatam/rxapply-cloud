@@ -6227,8 +6227,11 @@ async function loadDesigns() {
 // fallback when there's no rendered PNG yet. The gradient uses brand navy →
 // teal so even an "empty" card feels intentional, not broken.
 function renderDesignCard(d) {
-  const draftUrl  = d.draft_path  ? `${PROXY}/${d.draft_path}`  : null;
-  const renderUrl = d.render_path ? `${PROXY}/${d.render_path}` : null;
+  // Prefer the server-resolved URL (set by /afshin/gallery in the cloud
+  // build — handles R2 vs local-disk transparently). Fall back to the
+  // legacy `${PROXY}/${path}` shape so the local sandbox still works.
+  const draftUrl  = d.draft_url  || (d.draft_path  ? `${PROXY}/${d.draft_path}`  : null);
+  const renderUrl = d.render_url || (d.render_path ? `${PROXY}/${d.render_path}` : null);
   // Choose preview content: rendered PNG > SVG draft > gradient placeholder.
   const preview = renderUrl
     ? `<div class="design-preview" style="background:none;">

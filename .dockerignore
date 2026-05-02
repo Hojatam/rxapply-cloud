@@ -25,6 +25,7 @@ yarn-debug.log*
 **/proxy.out
 **/proxy*.log
 cowork-proxy/runs/
+cowork-proxy/.local-storage/
 logs/
 
 # Environment / secrets — must NEVER end up in the image

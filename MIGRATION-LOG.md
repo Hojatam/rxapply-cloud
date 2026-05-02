@@ -13,6 +13,54 @@ Format:
 
 ---
 
+## 2026-05-01 · M9 · Cloudflare R2 storage layer (Track 1 #2 DONE)
+
+Volatile-fs problem solved. All file uploads now flow through a single
+storage abstraction that picks R2 in cloud and disk in dev.
+
+- New **`cowork-proxy/storage.js`** — S3-SDK-backed adapter with a
+  local-disk fallback. Public API: `put`, `get`, `remove`, `exists`,
+  `urlFor`, `serveHandler`. Backend auto-detected from env (`R2_*`
+  vars present → R2; otherwise local under `.local-storage/`).
+- Key naming convention exposed via `storage.KEYS`:
+    avatars/<agent>.<ext>
+    media/drafts/<id>.svg
+    media/renders/<id>.png
+    kb/uploads/<id>/<filename>
+- Express route **`GET /storage/*`** mounted in server.js — streams
+  any object back. Used for the local-fallback path and as an
+  authenticated read path for private R2 buckets. When `R2_PUBLIC_URL`
+  is set (custom domain like `media.rxapply.com`), the dashboard
+  fetches assets directly from the CDN instead.
+
+**Avatars refactored** (server.js):
+- New `dashboard_settings.avatars` jsonb column (migration
+  `20260514000000_avatars_index.sql`) maps agent → ext. Replaces the
+  on-disk directory scan with a single DB read.
+- Avatar upload now: `storage.put(KEYS.AVATAR(name, ext), buf)` →
+  index update → return `storage.urlFor(...)`.
+- Avatar delete: `storage.remove(...)` → index update.
+
+**Afshin draft + render** (afshin-router.js):
+- SVG drafts: `storage.put(KEYS.DRAFT(id), svg)` instead of
+  `fs.writeFileSync(DRAFTS_DIR/...)`.
+- PNG renders: same pattern.
+- `gallery()` now adds `draft_url` and `render_url` (resolved via
+  `storage.urlFor`) to each row. Legacy on-disk paths
+  (`assets/generated/...`) still resolve via express.static for
+  backward-compat with the local sandbox.
+
+**dashboard.html** updated: prefers `d.draft_url`/`d.render_url`
+when present, falls back to the legacy `${PROXY}/${path}` shape.
+
+**Smoke test (local fallback, no R2 creds):**
+- POST /agents/test/avatar → key `avatars/test.png`, 70 bytes ✓
+- /agents/avatars returns the index ✓
+- GET /storage/avatars/test.png → 200, image/png, file present ✓
+
+Track 1 #2 (R2 storage) is **DONE**. Cloud build can now survive a
+Railway redeploy without losing avatars, drafts, or renders.
+
 ## 2026-05-01 · M8 · Dockerfile + railway.json + Procfile (Track 1 #4+#5 DONE)
 
 Containerised the cloud build. First deployable artefact.
