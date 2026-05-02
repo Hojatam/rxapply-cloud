@@ -1660,6 +1660,45 @@ app.post('/compose/runs/:id/cancel', auth.middleware, async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// M30 · Publish a finished render to the n8n publish webhook.
+//   Body: { lang }
+//   Env:  N8N_PUBLISH_WEBHOOK  — full URL to n8n's webhook node
+app.post('/compose/runs/:id/publish', auth.middleware, async (req, res) => {
+  try {
+    const url = process.env.N8N_PUBLISH_WEBHOOK;
+    if (!url) {
+      return res.status(400).json({
+        ok: false, error: 'N8N_PUBLISH_WEBHOOK env var not set',
+        hint: 'In Railway → cowork-proxy service → Variables, add:\nN8N_PUBLISH_WEBHOOK=https://n8n.rxapply.com/webhook/<your-webhook-id>',
+      });
+    }
+    const run = await composeOrchestrator.getRun(req.params.id);
+    if (!run) return res.status(404).json({ ok: false, error: 'run not found' });
+    const lang = (req.body && req.body.lang) || run.master_lang;
+    const stage = (run.stages || []).find(s => s.stage_name === 'render' && (s.lang || run.master_lang) === lang);
+    if (!stage || !stage.output) return res.status(400).json({ ok: false, error: `no rendered output for lang=${lang}` });
+
+    const payload = {
+      run_id: run.id,
+      recipe: run.recipe_id,
+      lang,
+      topic: run.topic,
+      audience: run.audience,
+      options: run.options,
+      output: stage.output,
+      published_at: new Date().toISOString(),
+    };
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const responseText = await r.text();
+    log(`compose.publish run=${run.id} lang=${lang} → n8n ${r.status}`);
+    res.json({ ok: r.ok, status: r.status, response: responseText.slice(0, 500) });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // GET /compose/recent — last 10 compose runs (for the "Recent posts" strip)
 app.get('/compose/recent', async (_, res) => {
   try {
