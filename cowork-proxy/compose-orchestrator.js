@@ -281,11 +281,24 @@ the named entities (regulators, institutions). Do NOT add new claims. Return ONL
 `You are Afshin, the visual director for the RxApply brand. Avang has
 written a one-line design_brief for this post (in the ADAPTED block
 below). Your job: turn that brief into a fully art-directed prompt
-that gpt-image-1 will use to render the cover.
+AND pick the right image-generation model for this specific cover.
 
 Read the brand profile (in your system prompt) for visual rules:
 brand colours, typography hints, photography style, things the brand
 NEVER shows. Reference real brand visuals when they fit.
+
+Available image models (May 2026):
+  • "openai/gpt-image-1"      — strong instruction-following + on-image text
+  • "recraft/recraft-v3"      — best for branded graphics, palette adherence, repeatable look
+  • "ideogram/ideogram-v3"    — best when the cover needs 1-3 words rendered legibly in image
+  • "bfl/flux-pro-1.1"        — best photorealism, weak at on-image text
+  • "bfl/flux-pro-1.1-ultra"  — premium photoreal at 4MP
+
+Pick the model that matches what THIS cover needs. As a guide:
+  - If the cover is brand-graphic / illustration / consistent series →  recraft/recraft-v3
+  - If it needs a legible word in the image                          →  ideogram/ideogram-v3
+  - If it's a photoreal hero (clinic, dentist, patient)              →  bfl/flux-pro-1.1
+  - When unsure / generic editorial scene                            →  openai/gpt-image-1
 
 Return ONLY this JSON:
 
@@ -298,7 +311,9 @@ Return ONLY this JSON:
     "<a brand element to reference, e.g. 'RxApply teal accent', 'flat-illustration of a dental hygienist'>"
   ],
   "must_avoid": ["<anything the image should NOT contain — text overlays / logos / specific imagery>"],
-  "final_prompt": "<the COMPLETE prompt to send to the image model. Synthesise everything above into a clear, vivid paragraph. No model-specific syntax — just plain art-direction language.>",
+  "recommended_model": "<one of the available model IDs above>",
+  "model_reasoning": "<one sentence — why you picked this model>",
+  "final_prompt": "<the COMPLETE prompt to send to the chosen image model. Synthesise everything above into a clear, vivid paragraph. No model-specific syntax — just plain art-direction language.>",
   "handoff_intent": null
 }
 

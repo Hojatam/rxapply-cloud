@@ -1593,6 +1593,14 @@ app.get('/compose/recipes', (_req, res) => {
   catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// M38 · List available image-gen models for the run-form picker.
+app.get('/compose/image-models', (_req, res) => {
+  try {
+    const composeImage = require('./compose-image');
+    res.json({ ok: true, models: composeImage.listAvailableModels() });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 app.get('/compose/runs', async (req, res) => {
   try {
     const items = await composeOrchestrator.listRuns({

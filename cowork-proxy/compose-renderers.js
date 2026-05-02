@@ -463,12 +463,23 @@ illustration style, clean composition, minimal text overlay, no logo.`;
   }
   if (!brief.trim()) throw new Error('no design brief available for image stage');
 
+  // M38 · model selection signals (priority handled inside generateCover):
+  //   1. Founder's per-run UI override
+  //   2. Afshin's recommended_model from the design stage
+  //   3. Recipe's default_image_model
+  const runOption = (run.options && run.options.image_model) || null;
+  const designSuggestion = (source && source.recommended_model) || null;
+  const recipeDefault = (recipe && recipe.default_image_model) || null;
+
   const r = await composeImage.generateCover({
     prompt: brief,
     runId: run.id,
     lang: lang || run.master_lang,
     recipeId: recipe && recipe.id,
     topic: run.topic,
+    runOption,
+    designSuggestion,
+    recipeDefault,
   });
   if (!r.ok) throw new Error(r.error || 'image generation failed');
 
@@ -497,6 +508,7 @@ illustration style, clean composition, minimal text overlay, no logo.`;
     agent_run_id: r.agent_run_id,
     prompt: brief,
     afshin_direction: designContext,  // shown in the preview when present
+    model_label: r.model_label || null,
   };
 }
 

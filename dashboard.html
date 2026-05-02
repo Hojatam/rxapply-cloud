@@ -6141,6 +6141,13 @@ function coRenderForm() {
             </div>
           `).join('')}
         </div>
+        <div id="co-image-model-row" class="mt-3" style="display:none;">
+          <label class="text-xs text-slate-500 mb-1 block">Image model (Afshin will pick one if you leave it on auto)</label>
+          <select id="co-opt-image_model" data-key="image_model" class="co-select" style="max-width:380px;">
+            <option value="">— Auto (Afshin picks) —</option>
+          </select>
+          <div id="co-image-model-hint" class="text-xs mt-1" style="color:var(--text-muted,#64748b);"></div>
+        </div>
       </div>
     ` : ''}
 
@@ -6150,6 +6157,45 @@ function coRenderForm() {
     </div>
   `;
   coRebuildLangChecks();
+  coWireImageModelPicker();
+}
+
+// M38 · Populate the image-model picker from /compose/image-models, and
+// show/hide it based on the with_image checkbox state.
+async function coWireImageModelPicker() {
+  const row = $('co-image-model-row');
+  const sel = $('co-opt-image_model');
+  const hint = $('co-image-model-hint');
+  const withImageEl = $('co-opt-with_image');
+  if (!row || !sel) return;
+
+  // Toggle visibility based on with_image
+  const updateVisibility = () => {
+    row.style.display = (withImageEl && withImageEl.checked) ? '' : 'none';
+  };
+  if (withImageEl) {
+    withImageEl.addEventListener('change', updateVisibility);
+    updateVisibility();
+  } else {
+    row.style.display = ''; // recipes without with_image: keep visible
+  }
+
+  try {
+    const j = await fetch(`${PROXY}/compose/image-models`).then(r => r.json());
+    if (!j.ok) throw new Error(j.error || 'failed');
+    const models = j.models || [];
+    sel.innerHTML = `<option value="">— Auto (Afshin picks) —</option>` + models.map(m => {
+      const tag = m.available ? '' : ' (key not set)';
+      return `<option value="${m.id}" ${m.available ? '' : 'disabled'} title="${escapeHtml(m.notes || '')}">${escapeHtml(m.label)} · $${m.cost_usd}${tag}</option>`;
+    }).join('');
+    sel.addEventListener('change', () => {
+      const m = models.find(x => x.id === sel.value);
+      if (hint) hint.textContent = m ? m.notes : 'Auto: Afshin chooses based on the brief — Recraft for branded graphics, Ideogram for typography, Flux for photoreal, GPT Image for general.';
+    });
+    if (hint) hint.textContent = 'Auto: Afshin chooses based on the brief — Recraft for branded graphics, Ideogram for typography, Flux for photoreal, GPT Image for general.';
+  } catch (e) {
+    if (hint) hint.textContent = `Failed to load models: ${e.message}`;
+  }
 }
 
 function coRebuildLangChecks() {
@@ -6469,9 +6515,14 @@ function coRenderStageOutput(stage, expandedByDefault) {
           ${avoid.length ? `
             <div class="mt-2"><div class="text-xs uppercase tracking-wider text-rose-700">Must avoid</div>
               <ul class="text-xs list-disc pl-5 mt-1" style="color:#9f1239;">${avoid.map(r => `<li>${escapeHtml(r)}</li>`).join('')}</ul></div>` : ''}
+          ${out.recommended_model ? `
+            <div class="mt-3 p-2 rounded" style="background:#ede9fe;color:#4c1d95;font-size:12px;">
+              <strong>Model pick:</strong> <span class="mono">${escapeHtml(out.recommended_model)}</span>
+              ${out.model_reasoning ? `<div class="mt-1" style="color:#5b21b6;">${escapeHtml(out.model_reasoning)}</div>` : ''}
+            </div>` : ''}
           ${out.final_prompt ? `
-            <div class="mt-3">
-              <div class="text-xs uppercase tracking-wider text-slate-500 mb-1">Final prompt to gpt-image-1</div>
+            <div class="mt-2">
+              <div class="text-xs uppercase tracking-wider text-slate-500 mb-1">Final prompt to image model</div>
               <div class="text-xs mono p-2 rounded" style="background:#f8fafc;line-height:1.5;white-space:pre-wrap;">${escapeHtml(out.final_prompt)}</div>
             </div>` : ''}
         `;
@@ -6639,7 +6690,7 @@ function _coRenderImageState(stage) {
               onerror="this.parentElement.parentElement.innerHTML='<div style=&quot;padding:32px;color:#dc2626;font-size:12px;&quot;>Image generated but URL <span class=mono>'+this.src.replace(/[<>&\"]/g,'')+'</span> failed to load. Check R2_PUBLIC_URL or /storage route.</div>';" />
       </div>
       <div class="text-xs text-slate-400 mt-2 text-center">
-        cover · ${escapeHtml(o.model || '')} · ${escapeHtml(o.size || '')} · $${Number(o.cost_usd || 0).toFixed(4)}
+        cover · <strong style="color:#4c1d95;">${escapeHtml(o.model_label || o.model || '')}</strong> · ${escapeHtml(o.size || '')} · $${Number(o.cost_usd || 0).toFixed(4)}
         ${o.media_id ? ` · <a href="#" onclick="navigate('designs');return false;" class="text-indigo-600 underline">Designs ↗</a>` : ''}
       </div>
       ${dirHtml}
