@@ -19,39 +19,29 @@
 // to a generic "<Agent> ran <action>" line.
 // =====================================================================
 
-const { spawnSync } = require('child_process');
-const PG_CONTAINER = process.env.SUPABASE_DB_CONTAINER || 'supabase_db_rxapply-test';
-
-function _psql(sql) {
-  const r = spawnSync('docker',
-    ['exec', '-i', PG_CONTAINER, 'psql', '-U', 'postgres', '-d', 'postgres', '-tA', '-v', 'ON_ERROR_STOP=1'],
-    { input: Buffer.from(sql, 'utf-8') });
-  if (r.status !== 0) {
-    throw new Error(`psql (${r.status}): ${(r.stderr || Buffer.alloc(0)).toString('utf-8').slice(0, 300)}`);
-  }
-  return (r.stdout || Buffer.alloc(0)).toString('utf-8').trim();
-}
+const { query, queryValue, q } = require('./db');
 
 // Cache the renderers map for 60s — edited rarely, read constantly.
+// `render()` itself is sync (called inside renderer pipelines), so we
+// keep a synchronous getter backed by a background-refreshed cache.
 let _renderersCache = null;
 let _renderersStamp = 0;
 const RENDERERS_TTL_MS = 60_000;
 
-function _loadRenderers() {
+async function refresh() {
   try {
-    const raw = _psql(`SELECT output_renderers FROM dashboard_settings WHERE id = 1;`);
-    return raw ? JSON.parse(raw) : {};
+    const raw = await queryValue(`SELECT output_renderers FROM dashboard_settings WHERE id = 1;`);
+    _renderersCache = raw ? JSON.parse(raw) : {};
+    _renderersStamp = Date.now();
   } catch (_) {
-    return {};
-  }
-}
-function _getRenderers() {
-  const now = Date.now();
-  if (!_renderersCache || (now - _renderersStamp) > RENDERERS_TTL_MS) {
-    _renderersCache = _loadRenderers();
-    _renderersStamp = now;
+    _renderersCache = _renderersCache || {};
   }
   return _renderersCache;
+}
+function _getRenderers() {
+  if (_renderersCache && (Date.now() - _renderersStamp) < RENDERERS_TTL_MS) return _renderersCache;
+  refresh().catch(() => {});
+  return _renderersCache || {};
 }
 function invalidate() {
   _renderersCache = null;
@@ -172,32 +162,28 @@ function render(agent, action, output, meta = {}) {
 }
 
 // Save an updated renderers map. Only edits the {agent} subtree.
-function setRendererForAgent(agent, perActionMap) {
+async function setRendererForAgent(agent, perActionMap) {
   if (!agent || !perActionMap || typeof perActionMap !== 'object') {
     return { ok: false, error: 'agent + perActionMap required' };
   }
   const cur = _getRenderers();
   cur[agent] = { ...(cur[agent] || {}), ...perActionMap };
-  // strip empty strings ⇒ deleting a template
   for (const [k, v] of Object.entries(cur[agent])) {
     if (typeof v !== 'string' || v.trim() === '') delete cur[agent][k];
   }
   if (Object.keys(cur[agent]).length === 0) delete cur[agent];
   try {
-    const sql = `UPDATE dashboard_settings
-                    SET output_renderers = '${JSON.stringify(cur).replace(/'/g, "''")}'::jsonb,
+    await query(`UPDATE dashboard_settings
+                    SET output_renderers = ${q(JSON.stringify(cur))}::jsonb,
                         updated_at = NOW()
-                  WHERE id = 1;`;
-    _psql(sql);
-    invalidate();
+                  WHERE id = 1;`);
+    await refresh();
     return { ok: true, agent };
   } catch (e) {
     return { ok: false, error: e.message.slice(0, 300) };
   }
 }
 
-function listAll() {
-  return _getRenderers();
-}
+function listAll() { return _getRenderers(); }
 
-module.exports = { render, setRendererForAgent, listAll, invalidate };
+module.exports = { render, setRendererForAgent, listAll, invalidate, refresh };

@@ -156,39 +156,40 @@ function _ensureDirs() {
   });
 }
 
-function _psql(script) {
-  const r = spawnSync('docker',
-    ['exec', '-i', PG_CONTAINER, 'psql', '-U', 'postgres', '-d', 'postgres', '-tA', '-v', 'ON_ERROR_STOP=1'],
-    { input: script, encoding: 'utf-8' });
-  if (r.status !== 0) throw new Error(`psql (${r.status}): ${(r.stderr || '').slice(0, 500)}`);
-  return (r.stdout || '').trim();
-}
+// pg-backed DB client (cloud build).
+const { query, queryValue, queryReturning, q: _q } = require('./db');
 
-function _q(v) {
-  if (v == null) return 'NULL';
-  if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';
-  if (typeof v === 'number') return String(v);
-  return `'${String(v).replace(/'/g, "''")}'`;
+// Cache image_model_defaults so getModelDefaults stays sync (called on
+// every render path). Refreshed on each setModelDefault.
+let _imgDefaultsCache = null;
+async function _refreshImgDefaults() {
+  try {
+    const raw = await queryValue(`SELECT image_model_defaults FROM dashboard_settings WHERE id = 1;`);
+    _imgDefaultsCache = raw ? JSON.parse(raw) : {};
+  } catch (_) {
+    _imgDefaultsCache = _imgDefaultsCache || {};
+  }
 }
 
 // ── Per-kind model defaults ────────────────────────────────────────────
 
 function getModelDefaults() {
-  try {
-    const raw = _psql(`SELECT image_model_defaults FROM dashboard_settings WHERE id = 1;`);
-    return raw ? JSON.parse(raw) : {};
-  } catch (_) { return {}; }
+  if (_imgDefaultsCache) return _imgDefaultsCache;
+  _refreshImgDefaults().catch(() => {});
+  return _imgDefaultsCache || {};
 }
 
-function setModelDefault(kind, modelKey) {
+async function setModelDefault(kind, modelKey) {
   if (!KIND_SPECS[kind]) return { ok: false, error: `unknown kind: ${kind}` };
   if (modelKey && !MODEL_REGISTRY[modelKey]) return { ok: false, error: `unknown model: ${modelKey}` };
   try {
     const current = getModelDefaults();
     if (modelKey) current[kind] = modelKey;
     else delete current[kind];
-    const sql = `UPDATE dashboard_settings SET image_model_defaults = '${JSON.stringify(current).replace(/'/g,"''")}'::jsonb, updated_at = NOW() WHERE id = 1;`;
-    _psql(sql);
+    await query(`UPDATE dashboard_settings
+                    SET image_model_defaults = ${_q(JSON.stringify(current))}::jsonb, updated_at = NOW()
+                  WHERE id = 1;`);
+    await _refreshImgDefaults();
     return { ok: true, kind, model_key: modelKey || null };
   } catch (e) {
     return { ok: false, error: e.message.slice(0, 200) };
@@ -305,15 +306,15 @@ async function generateDraft({ kind, topic, language, notes }) {
     INSERT INTO media_library (id, kind, topic, language, prompt, draft_path, dimensions, draft_cost_usd, metadata)
     VALUES (${_q(id)}, ${_q(kind)}, ${_q(topic)}, ${_q(language || 'en')}, ${_q(prompt)},
             ${_q(draftRel)}, ${_q(KIND_SPECS[kind].dim)}, ${draftCost.toFixed(6)},
-            '${JSON.stringify({ model: draftModel, input_tokens: inputTokens, output_tokens: outputTokens })}'::jsonb);
+            ${_q(JSON.stringify({ model: draftModel, input_tokens: inputTokens, output_tokens: outputTokens }))}::jsonb);
   `;
-  try { _psql(sql); }
+  try { await query(sql); }
   catch (e) { return { ok: false, error: 'DB insert failed: ' + e.message.slice(0, 200), id, draftRel }; }
 
   // K2 · Episodic memory of this draft. Tags include the kind so Afshin
   // can prefer past examples of the same kind on next call.
   try {
-    agentMemory.write({
+    await agentMemory.write({
       agent: 'afshin', type: 'episodic',
       content: agentMemory.summarizeForEpisodic({
         agent: 'afshin', action: 'draft',
@@ -483,7 +484,7 @@ async function generateRender({ mediaId, prompt, modelKey }) {
   // Fetch the DB row first to get kind + approval status.
   const rowSql = `SELECT row_to_json(r) FROM (SELECT id::text, kind, topic, language, draft_path, approved, dimensions FROM media_library WHERE id = ${_q(mediaId)}) r;`;
   let row;
-  try { row = JSON.parse(_psql(rowSql)); } catch (e) { return { ok: false, error: 'media not found' }; }
+  try { row = JSON.parse(await queryValue(rowSql)); } catch (e) { return { ok: false, error: 'media not found' }; }
   if (!row) return { ok: false, error: 'media not found' };
   if (!row.approved) return { ok: false, error: 'draft must be approved before render' };
 
@@ -550,10 +551,10 @@ async function generateRender({ mediaId, prompt, modelKey }) {
   const sql = `
     UPDATE media_library
     SET render_path = ${_q(renderRel)}, render_cost_usd = ${renderCost},
-        metadata = COALESCE(metadata, '{}'::jsonb) || '{"render_model": "${resolvedKey}"}'::jsonb
+        metadata = COALESCE(metadata, '{}'::jsonb) || ${_q(JSON.stringify({ render_model: resolvedKey }))}::jsonb
     WHERE id = ${_q(mediaId)};
   `;
-  try { _psql(sql); }
+  try { await query(sql); }
   catch (e) { return { ok: false, error: 'DB update failed: ' + e.message.slice(0, 200), render_path: renderRel }; }
 
   return { ok: true, id: mediaId, render_path: renderRel, render_cost_usd: renderCost,
@@ -562,7 +563,7 @@ async function generateRender({ mediaId, prompt, modelKey }) {
 
 // ── Gallery ──────────────────────────────────────────────────────────
 
-function gallery({ kind = null, approved = null, limit = 50 } = {}) {
+async function gallery({ kind = null, approved = null, limit = 50 } = {}) {
   limit = Math.min(Math.max(parseInt(limit) || 50, 1), 200);
   const where = ['archived = false'];
   if (kind) where.push(`kind = ${_q(kind)}`);
@@ -576,22 +577,21 @@ function gallery({ kind = null, approved = null, limit = 50 } = {}) {
           FROM media_library WHERE ${where.join(' AND ')}
           ORDER BY created_at DESC LIMIT ${limit}) s;
   `;
-  try { return JSON.parse(_psql(sql)); } catch (_) { return []; }
+  try { return JSON.parse(await queryValue(sql)); } catch (_) { return []; }
 }
 
-function approve(mediaId, approved = true) {
+async function approve(mediaId, approved = true) {
   const sql = `
     UPDATE media_library SET approved = ${approved ? 'TRUE' : 'FALSE'},
                               approved_at = ${approved ? 'NOW()' : 'NULL'}
     WHERE id = ${_q(mediaId)} RETURNING id::text;
   `;
-  try { return { ok: true, id: _psql(sql) }; }
+  try { return { ok: true, id: await queryReturning(sql) }; }
   catch (e) { return { ok: false, error: e.message.slice(0, 200) }; }
 }
 
-function archive(mediaId) {
-  const sql = `UPDATE media_library SET archived = true WHERE id = ${_q(mediaId)};`;
-  try { _psql(sql); return { ok: true }; }
+async function archive(mediaId) {
+  try { await query(`UPDATE media_library SET archived = true WHERE id = ${_q(mediaId)};`); return { ok: true }; }
   catch (e) { return { ok: false, error: e.message.slice(0, 200) }; }
 }
 

@@ -456,7 +456,7 @@ app.get('/auth/status', (_, res) => {
   });
 });
 
-app.post('/auth/set-password', (req, res) => {
+app.post('/auth/set-password', async (req, res) => {
   // First-time bootstrap: anyone can set the password if none exists.
   // Once initialized, must be authenticated to change it.
   const { password, current } = req.body || {};
@@ -464,13 +464,13 @@ app.post('/auth/set-password', (req, res) => {
   if (auth.isInitialized()) {
     // Re-key requires current password.
     if (!current) return res.status(400).json({ error: 'current password required to change' });
-    const v = auth.login(current);
+    const v = await auth.login(current);
     if (!v.ok) return res.status(401).json({ error: 'current password incorrect' });
   }
-  const r = auth.setPassword(password);
+  const r = await auth.setPassword(password);
   if (!r.ok) return res.status(400).json(r);
   // Auto-login after set.
-  const lr = auth.login(password);
+  const lr = await auth.login(password);
   if (lr.ok) {
     res.setHeader('Set-Cookie', `rxapply_session=${lr.token}; HttpOnly; Path=/; Max-Age=${(lr.expiresAt - Date.now()) / 1000 | 0}; SameSite=Lax`);
   }
@@ -478,10 +478,10 @@ app.post('/auth/set-password', (req, res) => {
   res.json({ ok: true, token: lr.token, expiresAt: lr.expiresAt });
 });
 
-app.post('/auth/login', (req, res) => {
+app.post('/auth/login', async (req, res) => {
   const { password } = req.body || {};
   if (!password) return res.status(400).json({ error: 'password required' });
-  const r = auth.login(password);
+  const r = await auth.login(password);
   if (!r.ok) {
     log(`auth.login fail`);
     return res.status(401).json(r);
@@ -642,10 +642,10 @@ app.get('/afshin/models', (_, res) => {
   res.json({ ok: true, models: afshin.listModels(), kinds: afshin.getKindDefaults() });
 });
 
-app.patch('/afshin/models/defaults', auth.middleware, (req, res) => {
+app.patch('/afshin/models/defaults', auth.middleware, async (req, res) => {
   const { kind, model_key } = req.body || {};
   if (!kind) return res.status(400).json({ error: 'send {kind, model_key}' });
-  const r = afshin.setModelDefault(kind, model_key || null);
+  const r = await afshin.setModelDefault(kind, model_key || null);
   if (!r.ok) return res.status(400).json(r);
   log(`afshin.setDefault kind=${kind} model=${model_key || 'cleared'}`);
   res.json(r);
@@ -807,8 +807,8 @@ async function _executeApprovedAction(row) {
 app.get('/renderers', (_, res) => {
   res.json({ ok: true, renderers: renderers.listAll() });
 });
-app.patch('/renderers/:agent', auth.middleware, (req, res) => {
-  const r = renderers.setRendererForAgent(req.params.agent, req.body || {});
+app.patch('/renderers/:agent', auth.middleware, async (req, res) => {
+  const r = await renderers.setRendererForAgent(req.params.agent, req.body || {});
   if (!r.ok) return res.status(400).json(r);
   log(`renderers.set ${req.params.agent}`);
   res.json(r);
@@ -1341,16 +1341,16 @@ app.post('/daneshyar/find-more/:id', auth.middleware, async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message.slice(0, 300) }); }
 });
 
-app.post('/afshin/approve/:mediaId', auth.middleware, (req, res) => {
+app.post('/afshin/approve/:mediaId', auth.middleware, async (req, res) => {
   const approved = req.body && req.body.approved !== undefined ? !!req.body.approved : true;
-  const r = afshin.approve(req.params.mediaId, approved);
+  const r = await afshin.approve(req.params.mediaId, approved);
   log(`afshin.approve id=${req.params.mediaId} approved=${approved}`);
   if (!r.ok) return res.status(400).json(r);
   res.json(r);
 });
 
-app.post('/afshin/archive/:mediaId', auth.middleware, (req, res) => {
-  const r = afshin.archive(req.params.mediaId);
+app.post('/afshin/archive/:mediaId', auth.middleware, async (req, res) => {
+  const r = await afshin.archive(req.params.mediaId);
   if (!r.ok) return res.status(400).json(r);
   res.json(r);
 });
@@ -1743,13 +1743,13 @@ app.post('/compose/instagram', auth.middleware, async (req, res) => {
   });
 });
 
-app.get('/afshin/gallery', (req, res) => {
+app.get('/afshin/gallery', async (req, res) => {
   const opts = {};
   if (req.query.kind) opts.kind = req.query.kind;
   if (req.query.approved === 'true')  opts.approved = true;
   if (req.query.approved === 'false') opts.approved = false;
   if (req.query.limit) opts.limit = parseInt(req.query.limit, 10);
-  res.json({ ok: true, items: afshin.gallery(opts), kinds: Object.keys(afshin.KIND_SPECS) });
+  res.json({ ok: true, items: await afshin.gallery(opts), kinds: Object.keys(afshin.KIND_SPECS) });
 });
 
 // Serve generated assets (drafts SVG + renders PNG) read-only.
@@ -1905,22 +1905,22 @@ app.get('/pipelines', (_, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-app.post('/pipelines', auth.middleware, (req, res) => {
+app.post('/pipelines', auth.middleware, async (req, res) => {
   const { name, description, graphData } = req.body || {};
-  const r = pipelineRunner.savePipeline({ name, description, graphData });
+  const r = await pipelineRunner.savePipeline({ name, description, graphData });
   if (!r.ok) return res.status(400).json(r);
   log(`pipelines.save name=${name} nodes=${r.nodeCount}`);
   res.json(r);
 });
 
 app.get('/pipelines/:name', (req, res) => {
-  const r = pipelineRunner.loadPipeline(req.params.name);
+  const r = pipelineRunner.loadPipeline(req.params.name);   // file-only read; sync
   if (!r.ok) return res.status(404).json(r);
   res.json(r);
 });
 
-app.delete('/pipelines/:name', auth.middleware, (req, res) => {
-  const r = pipelineRunner.deletePipeline(req.params.name);
+app.delete('/pipelines/:name', auth.middleware, async (req, res) => {
+  const r = await pipelineRunner.deletePipeline(req.params.name);
   if (!r.ok) return res.status(404).json(r);
   log(`pipelines.delete name=${req.params.name}`);
   res.json(r);

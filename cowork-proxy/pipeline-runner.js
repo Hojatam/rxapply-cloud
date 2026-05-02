@@ -22,6 +22,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const { spawnSync, spawn } = require('child_process');
+const { query, q, qJson } = require('./db');
 
 // ── Sandboxed eval helper (H-5) ───────────────────────────────────────
 // Runs user-supplied JS expressions in a vm context with NO access to
@@ -52,24 +53,13 @@ function _slug(name) {
   return name.replace(/[^a-zA-Z0-9_\-]/g, '_').toLowerCase();
 }
 
-function _psql(script) {
-  const r = spawnSync('docker',
-    ['exec', '-i', PG_CONTAINER, 'psql', '-U', 'postgres', '-d', 'postgres', '-tA', '-v', 'ON_ERROR_STOP=1'],
-    { input: script, encoding: 'utf-8' });
-  if (r.status !== 0) throw new Error(`psql: ${(r.stderr || '').slice(0, 300)}`);
-  return (r.stdout || '').trim();
-}
-
-function _q(v) {
-  if (v == null) return 'NULL';
-  if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';
-  if (typeof v === 'number') return String(v);
-  return `'${String(v).replace(/'/g, "''")}'`;
-}
-
 // ── Save ──────────────────────────────────────────────────────────────
+// Cloud build note: in Railway the local filesystem is volatile (resets
+// on each deploy). A future hardening will flip the source of truth from
+// disk to DB for pipelines. For now we keep the dual-write so local dev
+// of the cloud build still works the same way.
 
-function savePipeline({ name, description, graphData }) {
+async function savePipeline({ name, description, graphData }) {
   if (!name || !_safeName(name)) return { ok: false, error: 'name must be 1–80 chars, alphanumeric/space/_/-' };
   if (!graphData || typeof graphData !== 'object') return { ok: false, error: 'graphData required (Drawflow export JSON)' };
 
@@ -84,20 +74,17 @@ function savePipeline({ name, description, graphData }) {
   const payload = { name, description: description || '', graphData, savedAt: new Date().toISOString() };
   fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf-8');
 
-  // Mirror to DB (idempotent upsert)
+  // Mirror to DB (idempotent upsert).
   try {
-    const safeGraph = JSON.stringify(graphData).replace(/'/g, "''");
-    const safeDesc  = (description || '').replace(/'/g, "''");
-    const sql = `
+    await query(`
       INSERT INTO pipelines (name, description, graph_data, node_count, updated_at)
-      VALUES (${_q(name)}, ${_q(description || '')}, '${safeGraph}'::jsonb, ${nodeCount}, NOW())
+      VALUES (${q(name)}, ${q(description || '')}, ${qJson(graphData)}, ${nodeCount}, NOW())
       ON CONFLICT (name) DO UPDATE
-        SET description = ${_q(description || '')},
-            graph_data  = '${safeGraph}'::jsonb,
+        SET description = ${q(description || '')},
+            graph_data  = ${qJson(graphData)},
             node_count  = ${nodeCount},
             updated_at  = NOW();
-    `;
-    _psql(sql);
+    `);
   } catch (_) { /* DB sync optional — file is the source of truth */ }
 
   return { ok: true, name, slug, nodeCount, filePath };
@@ -143,13 +130,13 @@ function listPipelines() {
 
 // ── Delete ──────────────────────────────────────────────────────────
 
-function deletePipeline(name) {
+async function deletePipeline(name) {
   _ensurePipelinesDir();
   const slug = _slug(name);
   const filePath = path.join(PIPELINES_DIR, `${slug}.json`);
   if (!fs.existsSync(filePath)) return { ok: false, error: 'not found' };
   fs.unlinkSync(filePath);
-  try { _psql(`DELETE FROM pipelines WHERE name = ${_q(name)};`); } catch (_) {}
+  try { await query(`DELETE FROM pipelines WHERE name = ${q(name)};`); } catch (_) {}
   return { ok: true };
 }
 

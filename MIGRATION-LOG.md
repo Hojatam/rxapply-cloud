@@ -13,6 +13,31 @@ Format:
 
 ---
 
+## 2026-05-01 · M5 · auth, output-renderers, pipeline-runner, afshin-router ported
+
+- `auth.js` ported. Sync `middleware()` preserved (Express requires it)
+  via cache-backed `isInitialized()`. `setPassword`, `login` async.
+  `refresh()` does the boot-time async load. Reads `totp_secret` column
+  too (placeholder for Track1#6 2FA work).
+- `output-renderers.js` ported. `render()` stays sync (called inside
+  pipeline output formatters). `setRendererForAgent` async.
+- `pipeline-runner.js` ported (the 4 `_psql` calls). `savePipeline` and
+  `deletePipeline` now async. Added comment noting Railway fs is volatile
+  and pipelines DB will become source of truth in a future hardening.
+- `afshin-router.js` 10 `_psql` calls replaced with `pg` queries.
+  `gallery`, `approve`, `archive`, `setModelDefault` async. Cache for
+  `image_model_defaults` so `getModelDefaults()` stays sync.
+- Updated server.js callers: `/auth/set-password`, `/auth/login`,
+  `/agent-models/defaults`, `/renderers/:agent`, `/pipelines POST/DELETE`,
+  `/afshin/gallery`, `/afshin/approve/:id`, `/afshin/archive/:id`,
+  `/afshin/models/defaults`.
+- `services.js` left as-is (shells out to docker, not psql — local-dev
+  only; cloud build will surface it as a managed-services health panel
+  in a separate refactor).
+
+15 of ~17 modules ported. Remaining: anthropic-chat (7), log-writer (11),
+plus 3 inline `_psql` calls in server.js itself.
+
 ## 2026-05-01 · M4 · brand-profile + prompt-versions + tools/* tree ported
 
 - `brand-profile.js` ported. `set` async; `get` and `renderAsPromptBlock`
