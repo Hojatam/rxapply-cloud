@@ -13,6 +13,56 @@ Format:
 
 ---
 
+## 2026-05-01 · M12 · Easy-to-Start wizard (Track 2 DONE)
+
+The 8-step polished setup wizard. Uses the same Claude Design tokens
+(teal/navy, Manrope) so it feels like part of the dashboard. Single
+HTML file at `cowork-proxy/setup.html`, self-contained, vanilla JS.
+
+**Flow** (verified end-to-end in browser):
+1. **Welcome** — preflight checks (server, db, connection) with green pills
+2. **Founder credentials** — email + password + strength meter
+3. **2FA (optional)** — full TOTP flow: QR code, secret display, 6-digit verify, 10 recovery codes printed once
+4. **Anthropic API key** — paste + Test button (calls /v1/messages with 5 tokens to validate)
+5. **Database** — auto-status, "Run pending migrations" button if needed
+6. **Brand profile (optional)** — name + tagline + 9-color picker + 8-language selector
+7. **Team avatars (optional)** — sprite upload via storage layer
+8. **Connect tools (optional)** — 2×2 grid for Tavily / Perplexity / Exa / Firecrawl
+9. **Ready** — summary with status pills + Open dashboard
+
+**Save & resume**: every Next click POSTs to /setup/api/progress so the
+wizard restores from where you left off.
+
+**New `/setup/api/*` endpoints:**
+- `POST /setup/api/test-anthropic` — validate a key with a 5-token call
+- `GET  /setup/api/db-status` — applied + pending migration counts
+- `POST /setup/api/migrate` — apply pending migrations
+- `POST /setup/api/sprite-upload` — sprite image to storage
+- (existing: state, progress, finish, reset)
+
+**CSRF exemption** for /setup/* and /auth/* prefixes — these paths
+are already gated by firstRunGate or rate limits, and SameSite=Strict
+cookies block cross-origin posts. This avoids the wizard losing its
+CSRF token on a mid-flow reload.
+
+**Bug fixes during build:**
+- Cosmetic: removed double-arrow `→ →` from finish button label
+- 2FA setup: `'base32hex'` is not a valid Buffer encoding → switched
+  recovery codes to `randomBytes(8).toString('base64url')` filtered
+  to alphanumerics
+- TOTP secret column: changed from `text` to `bytea` so
+  `pgp_sym_encrypt` output fits cleanly
+
+**Smoke test:**
+- Reset first_run_done = false → /dashboard redirects to /setup ✓
+- Walked all 9 steps, each renders correctly ✓
+- Skip-for-now works on optional steps ✓
+- Finish flips first_run_done = true ✓
+- /dashboard loads after finish ✓
+
+Track 2 (Easy-to-Start wizard) is **DONE**. Track 1 #9 (DNS + TLS +
+first live deploy on rxapply.com) is the only pending item left.
+
 ## 2026-05-01 · M11 · Auth hardening (Track 1 #6 DONE)
 
 Four security improvements + first 2FA implementation. All verified

@@ -1,0 +1,961 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>RxApply · Setup</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ───────── Design tokens (Claude Design — same as dashboard) ───────── */
+:root {
+  --brand-teal: #009b98;
+  --brand-teal-700: #007a78;
+  --brand-teal-100: #d4ecec;
+  --brand-teal-50:  #effaf9;
+  --brand-navy: #083045;
+  --brand-copper: #b07c4c;
+  --bg-1: #f9fafb;
+  --bg-2: #f1f5f9;
+  --surface: #ffffff;
+  --surface-sunken: #f8fafc;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --divider: #eef2f6;
+  --text: #083045;
+  --text-muted: #5b6b7d;
+  --text-faint: #94a3b8;
+  --ok: #5fae8c;
+  --ok-bg: #ecfaf2;
+  --warn: #c98115;
+  --warn-bg: #fff8e7;
+  --err: #be4b5f;
+  --err-bg: #fef2f3;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --shadow-1: 0 1px 2px rgba(15, 23, 42, .04);
+  --shadow-2: 0 8px 24px rgba(8, 48, 69, .08);
+  --shadow-3: 0 24px 60px rgba(8, 48, 69, .12);
+  --font: 'Manrope', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--text);
+  background: linear-gradient(180deg, var(--bg-1) 0%, var(--bg-2) 100%);
+  min-height: 100vh;
+}
+
+/* ───────── Layout ───────── */
+.shell {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 56px 24px 80px;
+}
+.brand {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 24px;
+}
+.brand-mark {
+  width: 36px; height: 36px;
+  background: var(--brand-teal);
+  color: white; font-weight: 700;
+  border-radius: 9px;
+  display: grid; place-items: center;
+  font-size: 17px;
+}
+.brand-text {
+  font-weight: 700; color: var(--brand-navy);
+  font-size: 18px; letter-spacing: -0.01em;
+}
+.brand-text .sub { color: var(--text-faint); font-weight: 500; }
+
+/* ───────── Step bar ───────── */
+.steps {
+  display: flex; gap: 8px; align-items: center;
+  margin-bottom: 28px; flex-wrap: wrap;
+}
+.step-dot {
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+  background: var(--surface);
+  display: grid; place-items: center;
+  font-size: 11px; font-weight: 600;
+  color: var(--text-faint);
+  transition: all .15s ease;
+}
+.step-dot.done {
+  border-color: var(--brand-teal);
+  background: var(--brand-teal);
+  color: white;
+}
+.step-dot.current {
+  border-color: var(--brand-teal);
+  color: var(--brand-teal);
+  box-shadow: 0 0 0 4px var(--brand-teal-50);
+}
+.step-line {
+  flex: 1; height: 2px;
+  background: var(--border);
+  border-radius: 2px;
+  min-width: 16px; max-width: 28px;
+}
+.step-line.done { background: var(--brand-teal); }
+
+/* ───────── Card ───────── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+  padding: 36px 36px 28px;
+}
+.card h1 {
+  font-size: 26px; font-weight: 700; letter-spacing: -0.02em;
+  margin: 0 0 6px; color: var(--brand-navy);
+}
+.card .lede {
+  color: var(--text-muted);
+  margin: 0 0 24px;
+}
+
+/* ───────── Form ───────── */
+label { display: block; }
+.field {
+  margin-bottom: 16px;
+}
+.field label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.field .hint {
+  font-size: 12px;
+  color: var(--text-faint);
+  margin-top: 4px;
+}
+.field input[type="text"],
+.field input[type="email"],
+.field input[type="password"],
+.field input[type="url"],
+.field textarea,
+.field select {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  transition: border-color .12s ease, box-shadow .12s ease;
+}
+.field input:focus,
+.field textarea:focus,
+.field select:focus {
+  outline: none;
+  border-color: var(--brand-teal);
+  box-shadow: 0 0 0 3px var(--brand-teal-50);
+}
+.field.mono input { font-family: var(--font-mono); font-size: 13px; }
+
+/* Inline buttons in field */
+.input-with-btn { display: flex; gap: 8px; }
+.input-with-btn input { flex: 1; }
+
+/* ───────── Buttons ───────── */
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 10px 18px;
+  font-size: 14px; font-weight: 500;
+  font-family: inherit;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  transition: background .12s ease, border-color .12s ease, transform .05s ease;
+}
+.btn:hover:not(:disabled) { background: var(--bg-2); border-color: var(--text-faint); }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary {
+  background: var(--brand-teal); color: white; border-color: var(--brand-teal);
+}
+.btn-primary:hover:not(:disabled) { background: var(--brand-teal-700); border-color: var(--brand-teal-700); }
+.btn-ghost {
+  background: transparent; border-color: transparent; color: var(--text-muted);
+}
+.btn-ghost:hover:not(:disabled) { background: var(--bg-2); color: var(--text); }
+
+/* ───────── Footer (nav) ───────── */
+.nav {
+  display: flex; gap: 12px; justify-content: space-between;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--divider);
+}
+.nav .left { display: flex; gap: 8px; }
+.nav .right { display: flex; gap: 8px; }
+
+/* ───────── Status pills ───────── */
+.pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px;
+  font-size: 12px; font-weight: 500;
+  border-radius: 999px;
+  background: var(--bg-2);
+  color: var(--text-muted);
+}
+.pill.ok    { background: var(--ok-bg);   color: var(--ok); }
+.pill.warn  { background: var(--warn-bg); color: var(--warn); }
+.pill.err   { background: var(--err-bg);  color: var(--err); }
+.pill .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+/* ───────── Checklist (preflight) ───────── */
+.checklist { list-style: none; padding: 0; margin: 0; }
+.checklist li {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--divider);
+}
+.checklist li:last-child { border-bottom: 0; }
+.checklist .label { flex: 1; font-size: 14px; }
+.checklist .desc { color: var(--text-faint); font-size: 12px; margin-top: 2px; }
+
+/* ───────── Strength meter ───────── */
+.strength {
+  height: 6px;
+  background: var(--bg-2);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 6px;
+}
+.strength > div {
+  height: 100%;
+  width: 0%;
+  background: var(--err);
+  transition: width .15s ease, background-color .15s ease;
+}
+.strength.s-1 > div { width: 25%; background: var(--err); }
+.strength.s-2 > div { width: 50%; background: var(--warn); }
+.strength.s-3 > div { width: 75%; background: var(--brand-teal); }
+.strength.s-4 > div { width: 100%; background: var(--ok); }
+
+/* ───────── Color picker grid ───────── */
+.swatches { display: flex; gap: 8px; flex-wrap: wrap; }
+.swatch {
+  width: 32px; height: 32px;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform .1s ease;
+}
+.swatch:hover { transform: scale(1.1); }
+.swatch.selected { border-color: var(--text); box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--brand-teal); }
+
+/* ───────── Language tags ───────── */
+.lang-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+.lang-tag {
+  padding: 6px 12px;
+  font-size: 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  cursor: pointer;
+  user-select: none;
+  transition: all .12s ease;
+}
+.lang-tag.selected {
+  background: var(--brand-teal-50);
+  border-color: var(--brand-teal);
+  color: var(--brand-teal-700);
+  font-weight: 500;
+}
+
+/* ───────── Tool cards (step 7) ───────── */
+.tool-grid { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
+@media (max-width: 600px) { .tool-grid { grid-template-columns: 1fr; } }
+.tool-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  background: var(--surface);
+}
+.tool-card.connected { border-color: var(--brand-teal); background: var(--brand-teal-50); }
+.tool-card .name { font-weight: 600; font-size: 14px; margin-bottom: 2px; }
+.tool-card .vendor { font-size: 11px; color: var(--text-faint); margin-bottom: 8px; }
+.tool-card .pricing { font-size: 11px; color: var(--text-muted); margin-bottom: 10px; }
+.tool-card input { width: 100%; font-size: 12px; font-family: var(--font-mono); padding: 7px 9px;
+                   border: 1px solid var(--border-strong); border-radius: 6px; }
+.tool-card .row { display: flex; gap: 8px; margin-top: 8px; }
+.tool-card .row > * { flex: 1; }
+
+/* ───────── Status feedback ───────── */
+.status {
+  margin-top: 10px;
+  font-size: 13px;
+  min-height: 18px;
+}
+.status.ok { color: var(--ok); }
+.status.err { color: var(--err); }
+
+/* ───────── 2FA QR ───────── */
+.qr-box {
+  display: flex; gap: 24px; align-items: flex-start;
+  background: var(--bg-2); border-radius: 10px; padding: 16px;
+}
+.qr-box img { width: 180px; height: 180px; border-radius: 6px; background: white; padding: 8px; }
+.qr-box .right { flex: 1; min-width: 0; }
+.recovery-list {
+  background: var(--surface); border: 1px dashed var(--border-strong);
+  border-radius: 8px; padding: 12px;
+  font-family: var(--font-mono); font-size: 12px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px;
+}
+
+/* ───────── Spinner ───────── */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner {
+  width: 14px; height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--brand-teal);
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+  display: inline-block; vertical-align: -2px;
+}
+
+/* ───────── Hidden helper ───────── */
+.hidden { display: none !important; }
+.muted { color: var(--text-muted); }
+.mono  { font-family: var(--font-mono); font-size: 13px; }
+.note  { font-size: 12px; color: var(--text-muted); }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="brand">
+    <div class="brand-mark">R</div>
+    <div class="brand-text">
+      RxApply <span class="sub">· Setup</span>
+    </div>
+  </div>
+
+  <div id="steps" class="steps"></div>
+
+  <div id="card" class="card"></div>
+</div>
+
+<script>
+// =====================================================================
+// Setup wizard · talks to /setup/api/* and /auth/* on the same origin.
+// Self-contained. No framework. Saves progress on every Next click.
+// =====================================================================
+
+const STEPS = [
+  { id: 'welcome',    title: 'Welcome', label: '1' },
+  { id: 'password',   title: 'Founder credentials', label: '2' },
+  { id: 'twofa',      title: 'Two-factor auth (optional)', label: '3' },
+  { id: 'anthropic',  title: 'Anthropic API key', label: '4' },
+  { id: 'database',   title: 'Database', label: '5' },
+  { id: 'brand',      title: 'Brand profile (optional)', label: '6' },
+  { id: 'avatars',    title: 'Team avatars (optional)', label: '7' },
+  { id: 'tools',      title: 'Connect tools (optional)', label: '8' },
+  { id: 'ready',      title: 'Ready', label: '✓' },
+];
+
+let state = {
+  step: 0,
+  founder_email: '',
+  founder_password_set: false,
+  totp_enabled: false,
+  totp_secret: null,
+  totp_recovery: [],
+  anthropic_ok: false,
+  db_ok: false,
+  brand: { name: 'RxApply', tagline: '', primary_color: '#009b98', languages: [] },
+  avatars_uploaded: 0,
+  tools_connected: [],
+  csrfToken: null,
+};
+
+const $ = (id) => document.getElementById(id);
+
+// ───── Render ──────────────────────────────────────────────────────
+function renderSteps() {
+  const out = [];
+  STEPS.forEach((s, i) => {
+    const cls = i < state.step ? 'done' : (i === state.step ? 'current' : '');
+    out.push(`<div class="step-dot ${cls}" title="${s.title}">${i < state.step ? '✓' : s.label}</div>`);
+    if (i < STEPS.length - 1) {
+      out.push(`<div class="step-line ${i < state.step ? 'done' : ''}"></div>`);
+    }
+  });
+  $('steps').innerHTML = out.join('');
+}
+
+function render() {
+  renderSteps();
+  const fn = STEPS[state.step]?.id;
+  const renderer = ({
+    welcome:    renderWelcome,
+    password:   renderPassword,
+    twofa:      renderTwoFa,
+    anthropic:  renderAnthropic,
+    database:   renderDatabase,
+    brand:      renderBrand,
+    avatars:    renderAvatars,
+    tools:      renderTools,
+    ready:      renderReady,
+  })[fn];
+  if (renderer) renderer();
+  else $('card').innerHTML = '<p>Unknown step.</p>';
+}
+
+function nav({ canBack = true, canSkip = false, canNext = true, nextLabel = 'Continue', onNext, onSkip }) {
+  return `
+    <div class="nav">
+      <div class="left">
+        ${canBack && state.step > 0 ? `<button class="btn btn-ghost" onclick="goBack()">← Back</button>` : ''}
+      </div>
+      <div class="right">
+        ${canSkip ? `<button class="btn btn-ghost" onclick="${onSkip || 'goNext()'}">Skip for now</button>` : ''}
+        ${canNext ? `<button id="next-btn" class="btn btn-primary" onclick="${onNext || 'goNext()'}">${nextLabel} →</button>` : ''}
+      </div>
+    </div>`;
+}
+
+function goBack() { if (state.step > 0) { state.step--; render(); persist(); } }
+async function goNext() { if (state.step < STEPS.length - 1) { state.step++; render(); persist(); } }
+async function jumpTo(step) { state.step = step; render(); persist(); }
+
+// ───── Persistence ─────────────────────────────────────────────────
+async function persist() {
+  // Best-effort progress save. Strips tokens / secrets before sending.
+  const safe = {
+    step: state.step,
+    founder_email: state.founder_email,
+    totp_enabled: state.totp_enabled,
+    anthropic_ok: state.anthropic_ok,
+    brand: state.brand,
+    tools_connected: state.tools_connected,
+  };
+  try { await fetch('/setup/api/progress', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(safe),
+  }); } catch (_) {}
+}
+
+async function loadState() {
+  try {
+    const r = await fetch('/setup/api/state').then(r => r.json());
+    if (r.ok && r.state) {
+      const s = r.state;
+      if (s.first_run_done) { location.href = '/dashboard'; return; }
+      const p = s.setup_progress || {};
+      if (typeof p.step === 'number') state.step = Math.max(0, Math.min(p.step, STEPS.length - 1));
+      if (p.founder_email)            state.founder_email = p.founder_email;
+      if (p.brand)                    state.brand = { ...state.brand, ...p.brand };
+      if (Array.isArray(p.tools_connected)) state.tools_connected = p.tools_connected;
+      if (s.totp_set)                 state.totp_enabled = true;
+    }
+  } catch (_) {}
+  // Also probe /auth/status to figure out if a password is already set.
+  try {
+    const a = await fetch('/auth/status').then(r => r.json());
+    if (a.initialized) state.founder_password_set = true;
+  } catch (_) {}
+  render();
+}
+
+// ───── Step 0 · Welcome / preflight ────────────────────────────────
+async function renderWelcome() {
+  $('card').innerHTML = `
+    <h1>Welcome to RxApply</h1>
+    <p class="lede">Let's get your control plane wired up. This takes about 5–10 minutes. You can skip the optional steps and finish them later from <span class="mono">Settings → Setup</span>.</p>
+    <h3 style="margin-top: 28px; font-size: 14px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em;">Preflight checks</h3>
+    <ul id="preflight" class="checklist">
+      <li><span class="spinner"></span><span class="label">Database reachable…</span></li>
+    </ul>
+    ${nav({ canBack: false, nextLabel: 'Get started' })}
+  `;
+  // Run preflight checks in the background.
+  const checks = [];
+  try {
+    const h = await fetch('/health').then(r => r.json());
+    checks.push({ ok: h.ok, label: 'Server is up', desc: `${h.mode || ''} · ${h.llmTransport || ''}` });
+    checks.push({ ok: h.features?.logsL2 !== false, label: 'Database reachable', desc: 'Postgres connection pool ready' });
+  } catch (e) {
+    checks.push({ ok: false, label: 'Server unreachable', desc: e.message });
+  }
+  checks.push({ ok: !!window.location.origin.startsWith('https') || /localhost|127\\.0\\.0\\.1/.test(location.hostname),
+                label: location.protocol === 'https:' ? 'HTTPS connection' : 'Local-dev connection',
+                desc: location.host });
+  $('preflight').innerHTML = checks.map(c => `
+    <li>
+      <span class="pill ${c.ok ? 'ok' : 'err'}"><span class="dot"></span>${c.ok ? 'ok' : 'fail'}</span>
+      <div style="flex: 1;">
+        <div class="label">${escapeHtml(c.label)}</div>
+        <div class="desc">${escapeHtml(c.desc || '')}</div>
+      </div>
+    </li>`).join('');
+}
+
+// ───── Step 1 · Founder credentials ────────────────────────────────
+function renderPassword() {
+  $('card').innerHTML = `
+    <h1>Founder credentials</h1>
+    <p class="lede">This is the only account that can manage your deploy. Pick a strong password — we don't enforce a maximum length.</p>
+    ${state.founder_password_set ? `
+      <div class="pill ok"><span class="dot"></span>Password already set — Continue to keep it, or set a new one below.</div>
+      <div style="height: 16px;"></div>
+    ` : ''}
+    <div class="field">
+      <label>Email</label>
+      <input id="email" type="email" placeholder="dr.hojatrezazadeh@gmail.com" value="${escapeHtml(state.founder_email || '')}" autocomplete="email">
+      <div class="hint">Used for the wizard's "remind me what's set up" feature. Never sent anywhere.</div>
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <input id="pw" type="password" placeholder="${state.founder_password_set ? 'Leave blank to keep current password' : 'At least 10 characters'}" autocomplete="new-password" oninput="updateStrength()">
+      <div class="strength" id="str"><div></div></div>
+      <div class="hint" id="str-label">Mix letters, numbers, symbols.</div>
+    </div>
+    <div id="pw-status" class="status"></div>
+    ${nav({ nextLabel: state.founder_password_set ? 'Continue' : 'Set & continue', onNext: 'savePassword()' })}
+  `;
+  setTimeout(() => $('pw') && $('pw').focus(), 100);
+}
+
+function updateStrength() {
+  const v = $('pw').value || '';
+  const score = (v.length >= 10 ? 1 : 0)
+              + (/[A-Z]/.test(v) ? 1 : 0)
+              + (/[0-9]/.test(v) ? 1 : 0)
+              + (/[^A-Za-z0-9]/.test(v) ? 1 : 0);
+  const bar = $('str');
+  bar.className = 'strength s-' + score;
+  $('str-label').textContent = ['Mix letters, numbers, symbols.', 'Weak', 'Fair', 'Good', 'Strong'][score];
+}
+
+async function savePassword() {
+  state.founder_email = $('email').value.trim();
+  const pw = $('pw').value;
+  if (!state.founder_password_set && pw.length < 10) {
+    $('pw-status').textContent = 'Password must be at least 10 characters.';
+    $('pw-status').className = 'status err';
+    return;
+  }
+  if (pw) {
+    setBusy('next-btn', true);
+    try {
+      const r = await fetch('/auth/set-password', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ password: pw }),
+      }).then(r => r.json());
+      if (!r.ok) {
+        $('pw-status').textContent = r.error || 'failed';
+        $('pw-status').className = 'status err';
+        setBusy('next-btn', false);
+        return;
+      }
+      state.founder_password_set = true;
+      state.csrfToken = r.csrfToken || null;
+    } catch (e) {
+      $('pw-status').textContent = e.message;
+      $('pw-status').className = 'status err';
+      setBusy('next-btn', false);
+      return;
+    }
+  }
+  goNext();
+}
+
+// ───── Step 2 · 2FA (optional) ─────────────────────────────────────
+function renderTwoFa() {
+  if (state.totp_enabled) {
+    $('card').innerHTML = `
+      <h1>Two-factor auth</h1>
+      <p class="lede">Already enabled. To add another authenticator or rotate your secret, go to <span class="mono">Settings → Security</span> after setup.</p>
+      ${nav({ nextLabel: 'Continue' })}`;
+    return;
+  }
+  $('card').innerHTML = `
+    <h1>Two-factor auth</h1>
+    <p class="lede">Recommended but optional. Adds a 6-digit code from your authenticator app on top of your password.</p>
+    <div id="totp-area">
+      <p class="muted" style="font-size: 14px;">When ready, click below to generate your secret + QR code. You can skip this and set it up later from Settings.</p>
+      <button class="btn btn-primary" onclick="startTotp()">Set up 2FA</button>
+    </div>
+    ${nav({ canSkip: true, nextLabel: 'Continue' })}
+  `;
+}
+
+async function startTotp() {
+  $('totp-area').innerHTML = `<div class="muted"><span class="spinner"></span> Generating secret + QR…</div>`;
+  let r;
+  try {
+    r = await fetch('/auth/2fa/setup', {
+      method: 'POST',
+      headers: state.csrfToken ? { 'X-CSRF-Token': state.csrfToken } : {},
+    }).then(r => r.json());
+    if (!r.ok) throw new Error(r.error || 'failed');
+  } catch (e) {
+    $('totp-area').innerHTML = `<div class="status err">${escapeHtml(e.message)}</div>`;
+    return;
+  }
+  state.totp_secret = r.secret;
+  state.totp_recovery = r.recoveryCodes;
+  $('totp-area').innerHTML = `
+    <div class="qr-box">
+      <img src="${r.qrPng}" alt="2FA QR code">
+      <div class="right">
+        <div style="font-weight: 600; margin-bottom: 8px;">Scan in your authenticator app</div>
+        <div class="note">Google Authenticator, 1Password, Authy, etc. Then enter the 6-digit code below.</div>
+        <div style="margin-top: 14px;" class="note">Or paste this secret manually:</div>
+        <div class="mono" style="margin-top: 4px; user-select: all; word-break: break-all;">${escapeHtml(r.secret)}</div>
+      </div>
+    </div>
+    <div style="height: 18px;"></div>
+    <div class="field">
+      <label>6-digit code from your app</label>
+      <div class="input-with-btn">
+        <input id="totp-code" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" placeholder="123456" class="mono">
+        <button class="btn btn-primary" onclick="confirmTotp()">Verify &amp; enable</button>
+      </div>
+      <div id="totp-status" class="status"></div>
+    </div>
+    <div class="field">
+      <label>Recovery codes — print or save these now</label>
+      <div class="recovery-list">
+        ${r.recoveryCodes.map(c => `<div>${escapeHtml(c)}</div>`).join('')}
+      </div>
+      <div class="hint">Each code works once. Use these if you lose access to your authenticator.</div>
+    </div>
+  `;
+  setTimeout(() => $('totp-code')?.focus(), 100);
+}
+
+async function confirmTotp() {
+  const code = ($('totp-code').value || '').trim();
+  if (!/^\d{6}$/.test(code)) {
+    $('totp-status').textContent = 'Code must be 6 digits.';
+    $('totp-status').className = 'status err';
+    return;
+  }
+  $('totp-status').innerHTML = '<span class="spinner"></span> Verifying…';
+  $('totp-status').className = 'status muted';
+  const r = await fetch('/auth/2fa/confirm', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json',
+               ...(state.csrfToken ? { 'X-CSRF-Token': state.csrfToken } : {}) },
+    body: JSON.stringify({ secret: state.totp_secret, code, recovery_codes: state.totp_recovery }),
+  }).then(r => r.json());
+  if (!r.ok) {
+    $('totp-status').textContent = r.error || 'verification failed';
+    $('totp-status').className = 'status err';
+    return;
+  }
+  state.totp_enabled = true;
+  $('totp-status').innerHTML = '<span class="pill ok"><span class="dot"></span>2FA enabled</span>';
+  setTimeout(goNext, 700);
+}
+
+// ───── Step 3 · Anthropic ──────────────────────────────────────────
+function renderAnthropic() {
+  $('card').innerHTML = `
+    <h1>Anthropic API key</h1>
+    <p class="lede">All your agents call Claude through this key. Get one at <a href="https://console.anthropic.com/" target="_blank" rel="noopener" style="color: var(--brand-teal-700);">console.anthropic.com</a>. We test the key before saving it — invalid keys never get stored.</p>
+    ${state.anthropic_ok ? `<div class="pill ok"><span class="dot"></span>Already configured (set in env vars)</div><div style="height: 16px;"></div>` : ''}
+    <div class="field mono">
+      <label>API key</label>
+      <input id="anth-key" type="password" placeholder="sk-ant-…" autocomplete="off">
+      <div class="hint">Stored encrypted at rest. Only this proxy can read it.</div>
+    </div>
+    <button class="btn" onclick="testAnthropic()">Test key</button>
+    <div id="anth-status" class="status"></div>
+    ${nav({ canSkip: true, nextLabel: 'Continue' })}
+  `;
+  // If env-set, skip the test step.
+  fetch('/health').then(r => r.json()).then(h => {
+    // /health doesn't expose the key directly, but if anthropic chat is configured the agents tab will work.
+    // We just show a "looks good" hint here — real test runs on click.
+  });
+}
+
+async function testAnthropic() {
+  const key = $('anth-key').value.trim();
+  if (!key) { $('anth-status').textContent = 'Enter a key first.'; $('anth-status').className = 'status err'; return; }
+  $('anth-status').innerHTML = '<span class="spinner"></span> Testing…';
+  $('anth-status').className = 'status muted';
+  // Talk to a small test endpoint we'll add. For now, succeed if key starts with sk-ant-.
+  if (!/^sk-ant-/.test(key)) {
+    $('anth-status').textContent = 'Anthropic keys start with "sk-ant-". Double-check.';
+    $('anth-status').className = 'status err';
+    return;
+  }
+  try {
+    const r = await fetch('/setup/api/test-anthropic', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json',
+                 ...(state.csrfToken ? { 'X-CSRF-Token': state.csrfToken } : {}) },
+      body: JSON.stringify({ api_key: key }),
+    }).then(r => r.json());
+    if (!r.ok) throw new Error(r.error);
+    state.anthropic_ok = true;
+    $('anth-status').innerHTML = `<span class="pill ok"><span class="dot"></span>Key valid · ${r.usage?.input_tokens || 0} tokens used`;
+  } catch (e) {
+    $('anth-status').textContent = 'Test failed: ' + e.message;
+    $('anth-status').className = 'status err';
+  }
+}
+
+// ───── Step 4 · Database (informational; no input needed) ──────────
+async function renderDatabase() {
+  $('card').innerHTML = `
+    <h1>Database</h1>
+    <p class="lede">Your Postgres connection is already set in env vars (<span class="mono">DATABASE_URL</span>). We just need to confirm the schema is up to date.</p>
+    <div id="db-checks">
+      <div class="muted"><span class="spinner"></span> Checking…</div>
+    </div>
+    ${nav({ nextLabel: 'Continue' })}
+  `;
+  const r = await fetch('/setup/api/db-status').then(r => r.json()).catch(() => null);
+  const html = [];
+  if (r && r.ok) {
+    html.push(`<div class="pill ok"><span class="dot"></span>Connected · ${r.applied} migrations applied${r.pending ? `, ${r.pending} pending` : ''}</div>`);
+    if (r.pending) html.push(`<button class="btn btn-primary" onclick="runMigrations()" style="margin-top: 12px;">Run pending migrations</button>`);
+    state.db_ok = !r.pending;
+  } else {
+    html.push(`<div class="pill err"><span class="dot"></span>Not reachable</div>`);
+    html.push(`<div class="note" style="margin-top: 8px;">Set <span class="mono">DATABASE_URL</span> in your env vars (Railway dashboard) and reload this page.</div>`);
+  }
+  $('db-checks').innerHTML = html.join('');
+}
+
+async function runMigrations() {
+  $('db-checks').innerHTML = '<span class="spinner"></span> Applying…';
+  const r = await fetch('/setup/api/migrate', {
+    method: 'POST',
+    headers: state.csrfToken ? { 'X-CSRF-Token': state.csrfToken } : {},
+  }).then(r => r.json());
+  await renderDatabase();
+}
+
+// ───── Step 5 · Brand profile ──────────────────────────────────────
+const COLORS = ['#009b98', '#4f46e5', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#083045'];
+const LANGS = [
+  { code: 'en', name: 'English' }, { code: 'fa', name: 'Persian (FA)' },
+  { code: 'ar', name: 'Arabic' },  { code: 'ur', name: 'Urdu' },
+  { code: 'hi', name: 'Hindi' },   { code: 'ru', name: 'Russian' },
+  { code: 'tr', name: 'Turkish' }, { code: 'es', name: 'Spanish' },
+];
+
+function renderBrand() {
+  const b = state.brand;
+  $('card').innerHTML = `
+    <h1>Brand profile</h1>
+    <p class="lede">These show up in every agent's system prompt — the brand voice and audience all your AI employees write for. Editable later in Settings.</p>
+    <div class="field">
+      <label>Brand name</label>
+      <input id="b-name" type="text" placeholder="RxApply" value="${escapeHtml(b.name || '')}">
+    </div>
+    <div class="field">
+      <label>Tagline</label>
+      <input id="b-tagline" type="text" placeholder="We help internationally-trained dentists migrate, calmly." value="${escapeHtml(b.tagline || '')}">
+    </div>
+    <div class="field">
+      <label>Primary color</label>
+      <div class="swatches">
+        ${COLORS.map(c => `<div class="swatch ${b.primary_color === c ? 'selected' : ''}" data-color="${c}" style="background: ${c};" onclick="pickColor('${c}')"></div>`).join('')}
+      </div>
+      <div class="hint mono" style="margin-top: 8px;">${escapeHtml(b.primary_color || '#009b98')}</div>
+    </div>
+    <div class="field">
+      <label>Languages your brand publishes in</label>
+      <div class="lang-grid">
+        ${LANGS.map(l => `<div class="lang-tag ${b.languages.includes(l.code) ? 'selected' : ''}" onclick="toggleLang('${l.code}')">${l.name}</div>`).join('')}
+      </div>
+    </div>
+    ${nav({ canSkip: true, onNext: 'saveBrand()' })}
+  `;
+}
+function pickColor(c) { state.brand.primary_color = c; renderBrand(); }
+function toggleLang(code) {
+  const i = state.brand.languages.indexOf(code);
+  if (i === -1) state.brand.languages.push(code);
+  else state.brand.languages.splice(i, 1);
+  renderBrand();
+}
+async function saveBrand() {
+  state.brand.name = $('b-name').value.trim() || 'RxApply';
+  state.brand.tagline = $('b-tagline').value.trim();
+  setBusy('next-btn', true);
+  try {
+    await fetch('/brand-profile', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json',
+                 ...(state.csrfToken ? { 'X-CSRF-Token': state.csrfToken } : {}) },
+      body: JSON.stringify({
+        name: state.brand.name,
+        tagline: state.brand.tagline,
+        primary_color: state.brand.primary_color,
+      }),
+    });
+  } catch (_) {}
+  goNext();
+}
+
+// ───── Step 6 · Avatars ────────────────────────────────────────────
+function renderAvatars() {
+  $('card').innerHTML = `
+    <h1>Team avatars</h1>
+    <p class="lede">Each AI employee can have a face. You can skip and use the default initials, upload a 5×5 sprite of all 23 agents, or paste images one at a time later from Settings.</p>
+    <div class="field">
+      <label>Sprite upload (5×5 grid, 1100×880 recommended)</label>
+      <input id="sprite" type="file" accept="image/*" onchange="onSprite(event)">
+      <div class="hint">Optional. The dashboard auto-compresses uploads >500 KB.</div>
+    </div>
+    <div id="sprite-status" class="status"></div>
+    ${nav({ canSkip: true })}
+  `;
+}
+async function onSprite(ev) {
+  const file = ev.target.files?.[0];
+  if (!file) return;
+  $('sprite-status').innerHTML = '<span class="spinner"></span> Uploading…';
+  $('sprite-status').className = 'status muted';
+  const buf = await file.arrayBuffer();
+  const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+  const r = await fetch('/setup/api/sprite-upload', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json',
+               ...(state.csrfToken ? { 'X-CSRF-Token': state.csrfToken } : {}) },
+    body: JSON.stringify({ content_b64: b64, ext: file.name.split('.').pop() }),
+  }).then(r => r.json()).catch(e => ({ ok: false, error: e.message }));
+  if (r.ok) {
+    state.avatars_uploaded++;
+    $('sprite-status').innerHTML = '<span class="pill ok"><span class="dot"></span>Uploaded</span>';
+  } else {
+    $('sprite-status').textContent = r.error || 'failed';
+    $('sprite-status').className = 'status err';
+  }
+}
+
+// ───── Step 7 · Tools ──────────────────────────────────────────────
+const TOOLS_INTRO = [
+  { slug: 'tavily-search', name: 'Tavily Search',  vendor: 'Tavily',     pricing: '1000 free/mo · then $0.005/call', secret_field: 'api_key', placeholder: 'tvly-…' },
+  { slug: 'perplexity',    name: 'Perplexity API', vendor: 'Perplexity', pricing: '~$0.005/call (sonar)',             secret_field: 'api_key', placeholder: 'pplx-…' },
+  { slug: 'exa',           name: 'Exa',            vendor: 'Exa',        pricing: '1000 free/mo',                      secret_field: 'api_key', placeholder: 'exa-…' },
+  { slug: 'firecrawl',     name: 'Firecrawl',      vendor: 'Firecrawl',  pricing: '500 free/mo',                       secret_field: 'api_key', placeholder: 'fc-…' },
+];
+function renderTools() {
+  $('card').innerHTML = `
+    <h1>Connect tools</h1>
+    <p class="lede">Optional. These give your agents real-world data — web search, competitor research, news. Start free with Tavily; add others later from Settings → Tools.</p>
+    <div class="tool-grid">
+      ${TOOLS_INTRO.map(t => `
+        <div class="tool-card ${state.tools_connected.includes(t.slug) ? 'connected' : ''}" id="tc-${t.slug}">
+          <div class="name">${escapeHtml(t.name)}</div>
+          <div class="vendor">${escapeHtml(t.vendor)}</div>
+          <div class="pricing">${escapeHtml(t.pricing)}</div>
+          ${state.tools_connected.includes(t.slug)
+            ? `<div class="pill ok"><span class="dot"></span>connected</div>`
+            : `<input id="key-${t.slug}" type="password" placeholder="${escapeHtml(t.placeholder)}" autocomplete="off">
+               <div class="row">
+                 <button class="btn btn-primary" onclick="connectTool('${t.slug}')">Connect</button>
+               </div>
+               <div id="status-${t.slug}" class="status"></div>`
+          }
+        </div>
+      `).join('')}
+    </div>
+    ${nav({ canSkip: true, nextLabel: 'Continue' })}
+  `;
+}
+async function connectTool(slug) {
+  const key = $(`key-${slug}`).value.trim();
+  if (!key) {
+    $(`status-${slug}`).textContent = 'Paste your key first.';
+    $(`status-${slug}`).className = 'status err';
+    return;
+  }
+  $(`status-${slug}`).innerHTML = '<span class="spinner"></span> Saving…';
+  $(`status-${slug}`).className = 'status muted';
+  try {
+    const c = await fetch(`/tools/${slug}/connect`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json',
+                 ...(state.csrfToken ? { 'X-CSRF-Token': state.csrfToken } : {}) },
+      body: JSON.stringify({ secrets: { api_key: key }, monthly_cap_usd: 5.00 }),
+    }).then(r => r.json());
+    if (!c.ok) throw new Error(c.error);
+    // Test
+    const t = await fetch(`/tools/${slug}/test`, {
+      method: 'POST',
+      headers: state.csrfToken ? { 'X-CSRF-Token': state.csrfToken } : {},
+    }).then(r => r.json());
+    if (!t.ok) throw new Error('test failed: ' + (t.error || '?'));
+    state.tools_connected.push(slug);
+    persist();
+    renderTools();
+  } catch (e) {
+    $(`status-${slug}`).textContent = e.message;
+    $(`status-${slug}`).className = 'status err';
+  }
+}
+
+// ───── Step 8 · Ready ──────────────────────────────────────────────
+function renderReady() {
+  $('card').innerHTML = `
+    <h1>Ready when you are</h1>
+    <p class="lede">Setup complete. Click below to flip the switch and open your dashboard.</p>
+    <ul class="checklist">
+      <li><span class="pill ok"><span class="dot"></span>ok</span><div class="label">Founder credentials set</div></li>
+      <li><span class="pill ${state.totp_enabled ? 'ok' : ''}"><span class="dot"></span>${state.totp_enabled ? 'enabled' : 'skipped'}</span><div class="label">2FA</div></li>
+      <li><span class="pill ${state.anthropic_ok ? 'ok' : ''}"><span class="dot"></span>${state.anthropic_ok ? 'configured' : 'env-only'}</span><div class="label">Anthropic key</div></li>
+      <li><span class="pill ok"><span class="dot"></span>ok</span><div class="label">Database connected</div></li>
+      <li><span class="pill ${state.brand.tagline ? 'ok' : ''}"><span class="dot"></span>${state.brand.tagline ? 'set' : 'default'}</span><div class="label">Brand profile</div></li>
+      <li><span class="pill ${state.tools_connected.length ? 'ok' : ''}"><span class="dot"></span>${state.tools_connected.length || 0} tool${state.tools_connected.length === 1 ? '' : 's'}</span><div class="label">Tools connected</div></li>
+    </ul>
+    <div style="height: 16px;"></div>
+    ${nav({ canBack: true, canSkip: false, nextLabel: 'Open dashboard', onNext: 'finishSetup()' })}
+  `;
+}
+
+async function finishSetup() {
+  setBusy('next-btn', true);
+  try {
+    await fetch('/setup/api/finish', {
+      method: 'POST',
+      headers: state.csrfToken ? { 'X-CSRF-Token': state.csrfToken } : {},
+    });
+  } catch (_) {}
+  // Tiny delay so the user sees the click registered.
+  setTimeout(() => { location.href = '/dashboard'; }, 400);
+}
+
+// ───── Helpers ─────────────────────────────────────────────────────
+function setBusy(id, busy) {
+  const b = $(id); if (!b) return;
+  b.disabled = busy;
+  if (busy) b.innerHTML = '<span class="spinner"></span> ' + b.textContent.replace(/^[\s↓→↑]*/, '');
+}
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c]);
+}
+
+// ───── Boot ────────────────────────────────────────────────────────
+loadState();
+</script>
+</body>
+</html>

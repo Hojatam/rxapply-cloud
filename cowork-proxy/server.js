@@ -51,6 +51,7 @@ const daneshyar = require('./daneshyar-router');       // K6 · Daneshyar parse/
 const toolsRouter   = require('./tools/router');       // T1 · tools framework REST surface
 const toolsRegistry = require('./tools/registry');     // T1 · static tool catalog
 const toolsRuntime  = require('./tools/runtime');      // T1 · executes per-call gating + cost
+const migrate       = require('./migrate');            // T0 · migration runner (used by /setup + boot)
 
 const app = express();
 
@@ -258,72 +259,7 @@ app.use(auth.csrfMiddleware);
 // routes are the JSON layer the wizard talks to.
 
 app.get('/setup', (_req, res) => {
-  res.set('Content-Type', 'text/html; charset=utf-8');
-  res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8">
-    <title>RxApply · First-run setup</title>
-    <meta name="viewport" content="width=device-width,initial-scale=1">
-    <style>
-      body { font: 16px/1.5 -apple-system, BlinkMacSystemFont, sans-serif; max-width: 640px; margin: 60px auto; padding: 0 20px; color: #083045; }
-      h1 { font-size: 28px; margin-bottom: 6px; }
-      .sub { color: #666; margin-bottom: 32px; }
-      .ok { color: #009b98; }
-      .warn { color: #b07c4c; }
-      code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 14px; }
-      .panel { border: 1px solid #e2e8f0; border-radius: 12px; padding: 22px; margin-top: 22px; background: #fafafa; }
-      input, button { font: inherit; padding: 8px 12px; border-radius: 6px; border: 1px solid #cbd5e1; }
-      button { background: #009b98; color: white; cursor: pointer; padding: 10px 18px; border: 0; }
-      button:hover { background: #007a78; }
-    </style></head><body>
-    <h1>RxApply · First-run setup</h1>
-    <div class="sub">A polished 8-step wizard ships with the next release. For now, this single-page form gets your deploy through the bootstrap.</div>
-    <div class="panel">
-      <p>You're seeing this page because <code>dashboard_settings.first_run_done</code> is <code>false</code>. Once you finish the steps below, the gate lifts and <a href="/dashboard">/dashboard</a> becomes reachable.</p>
-      <h3>Status</h3>
-      <ul>
-        <li>Database: <span id="db" class="ok">checking…</span></li>
-        <li>Anthropic API key: <span id="anth">checking…</span></li>
-        <li>Storage: <span id="store">checking…</span></li>
-        <li>Founder password: <span id="auth">checking…</span></li>
-      </ul>
-      <h3>Finish setup</h3>
-      <p>Pick a strong founder password and click Finish. (The full wizard adds 2FA, brand profile, and tool keys.)</p>
-      <input id="pw" type="password" placeholder="founder password (≥10 chars)" style="width: 70%;" autofocus>
-      <button onclick="finish()">Finish setup</button>
-      <div id="msg" style="margin-top: 14px; min-height: 20px;"></div>
-    </div>
-    <script>
-      async function check() {
-        try {
-          const h = await fetch('/health').then(r => r.json());
-          document.getElementById('db').className = h.features?.logsL2 ? 'ok' : 'warn';
-          document.getElementById('db').textContent = h.features?.logsL2 ? 'reachable ✓' : 'unreachable';
-          document.getElementById('anth').className = 'ok';
-          document.getElementById('anth').textContent = 'configured ✓';
-          document.getElementById('store').className = 'ok';
-          document.getElementById('store').textContent = 'configured ✓';
-          const a = await fetch('/auth/status').then(r => r.json());
-          document.getElementById('auth').textContent = a.initialized ? 'set ✓' : 'NOT set — pick one below';
-          document.getElementById('auth').className = a.initialized ? 'ok' : 'warn';
-        } catch (e) { console.error(e); }
-      }
-      async function finish() {
-        const pw = document.getElementById('pw').value;
-        const msg = document.getElementById('msg');
-        if (pw.length < 10) { msg.innerHTML = '<span class="warn">Password must be at least 10 characters.</span>'; return; }
-        msg.textContent = 'Setting password…';
-        const r = await fetch('/auth/set-password', {
-          method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ password: pw }),
-        }).then(r => r.json());
-        if (!r.ok) { msg.innerHTML = '<span class="warn">' + (r.error || 'failed') + '</span>'; return; }
-        msg.textContent = 'Marking setup as done…';
-        const f = await fetch('/setup/api/finish', { method: 'POST' }).then(r => r.json());
-        if (!f.ok) { msg.innerHTML = '<span class="warn">' + (f.error || 'failed') + '</span>'; return; }
-        msg.innerHTML = '<span class="ok">All done. Redirecting to dashboard…</span>';
-        setTimeout(() => { location.href = '/dashboard'; }, 800);
-      }
-      check();
-    </script></body></html>`);
+  res.sendFile(path.resolve(__dirname, 'setup.html'));
 });
 
 // /setup/api/* — JSON layer the wizard UI talks to.
@@ -356,6 +292,79 @@ app.post('/setup/api/finish', async (_req, res) => {
     log('setup.finish');
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Validate an Anthropic API key by making a 5-token call. Used by the
+// wizard's "Test key" button before the founder commits to it.
+app.post('/setup/api/test-anthropic', async (req, res) => {
+  const { api_key } = req.body || {};
+  if (!api_key || typeof api_key !== 'string') return res.status(400).json({ ok: false, error: 'api_key required' });
+  if (!/^sk-ant-/.test(api_key)) return res.status(400).json({ ok: false, error: 'looks malformed (expected sk-ant-…)' });
+  try {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': api_key,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 5,
+        messages: [{ role: 'user', content: 'ping' }],
+      }),
+    });
+    if (!r.ok) {
+      const errText = await r.text();
+      return res.status(400).json({ ok: false, error: `Anthropic ${r.status}: ${errText.slice(0, 200)}` });
+    }
+    const j = await r.json();
+    res.json({ ok: true, usage: j.usage || null });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// DB status — applied + pending migrations.
+app.get('/setup/api/db-status', async (_req, res) => {
+  try {
+    const s = await migrate.status();
+    res.json({ ok: true, applied: s.applied.length, pending: s.pending.length, total: s.total, pending_list: s.pending });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Apply pending migrations (idempotent).
+app.post('/setup/api/migrate', async (_req, res) => {
+  try {
+    const r = await migrate.apply({ log: () => {} });
+    res.json({ ok: !r.failed, ...r });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Sprite upload (5×5 team sprite) — saved to storage at static/team/team.jpg.
+// Auto-detects extension from upload; everything is normalised to JPEG via
+// the front-end (PNG is fine too — just larger). 5MB cap.
+app.post('/setup/api/sprite-upload', async (req, res) => {
+  const { content_b64, ext } = req.body || {};
+  if (!content_b64) return res.status(400).json({ ok: false, error: 'content_b64 required' });
+  const safeExt = String(ext || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 4) || 'jpg';
+  const buf = Buffer.from(content_b64, 'base64');
+  if (buf.length > 5 * 1024 * 1024) return res.status(400).json({ ok: false, error: 'sprite too large (max 5MB)' });
+  try {
+    // Sprite lives at a fixed key — the dashboard CSS references team.jpg.
+    await storage.put({
+      key: `team/team.${safeExt}`,
+      body: buf,
+      contentType: `image/${safeExt === 'jpg' ? 'jpeg' : safeExt}`,
+    });
+    res.json({ ok: true, bytes: buf.length, url: storage.urlFor(`team/team.${safeExt}`) });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message.slice(0, 300) });
+  }
 });
 
 // Manual reset (debug / re-run wizard).
@@ -2246,7 +2255,6 @@ app.use('/tools', toolsRouter);
 //   2. _refreshFirstRun() seeds the first-run cache so middleware doesn't
 //      block on a cold call.
 //   3. tools registry sync.
-const migrate = require('./migrate');
 (async () => {
   try {
     const r = await migrate.runIfNeeded();

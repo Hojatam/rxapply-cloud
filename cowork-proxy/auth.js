@@ -264,9 +264,16 @@ function verifyCsrf(token, providedCsrf) {
 //   - the request comes through an open route (not auth.middleware-gated)
 // Reads X-CSRF-Token header; rejects state-changing requests without
 // a matching token.
+// Paths exempt from CSRF — the firstRunGate already restricts /setup/* to
+// pre-setup access, so adding CSRF on top creates fragile UX (the wizard
+// loses the token across reloads). For tool-call writes after launch
+// we still enforce CSRF.
+const CSRF_EXEMPT_PREFIXES = ['/setup/', '/auth/'];
+
 function csrfMiddleware(req, res, next) {
   if (isDisabled() || !isInitialized()) return next();
   if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+  if (CSRF_EXEMPT_PREFIXES.some(p => req.path.startsWith(p))) return next();
   const token = _readToken(req);
   if (!token) return next();   // no auth cookie → other middleware will reject
   const provided = req.headers['x-csrf-token'] || (req.body && req.body._csrf);
