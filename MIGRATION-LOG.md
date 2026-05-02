@@ -13,6 +13,68 @@ Format:
 
 ---
 
+## 2026-05-01 · M10 · Migration runner + first-run middleware (Track 1 #8 DONE)
+
+The cloud build now self-provisions its schema on first deploy and
+gates the dashboard until the founder finishes setup.
+
+**Migration runner (`cowork-proxy/migrate.js`)**
+- Reads `supabase/migrations/*.sql` in filename order. Tracks applied
+  versions in a `schema_migrations(version, applied_at)` table.
+- Each migration runs inside a transaction; on failure the runner
+  ROLLBACKs and exits 1 (so Railway's release-command halts the deploy).
+- CLI flags:
+    `node migrate.js`            apply pending
+    `node migrate.js --status`   list applied vs pending
+    `node migrate.js --pretend`  dry run
+    `node migrate.js --baseline` mark all local files as applied without
+                                 running them (for adopting an existing DB)
+- `migrate.runIfNeeded()` is called at boot (server.js) so a fresh
+  Railway deploy provisions schema before serving its first request.
+  Disable via `MIGRATE_ON_BOOT=false` env when you'd rather apply by hand.
+
+**First-run gate (`firstRunGate` middleware in server.js)**
+- Reads cached `dashboard_settings.first_run_done`. If false:
+    - `Accept: text/html` → 302 redirect to `/setup`
+    - JSON / fetch         → 503 `{ ok:false, error:'setup_required' }`
+- Allowlist: `/health`, `/config.js`, `/setup*`, `/static`, `/storage`,
+  `/auth/*`. Everything else (the dashboard, /tools, /agents, /kb, …)
+  is gated until `first_run_done = true`.
+- Cache TTL: 30s. Refreshed on boot and after `POST /setup/api/finish`.
+
+**`/setup` placeholder UI** — single-page HTML (4.1 KB) that:
+1. Probes /health, /auth/status to show what's set up
+2. Captures founder password (delegates to `/auth/set-password`)
+3. POSTs `/setup/api/finish` to flip `first_run_done`
+4. Redirects to `/dashboard`
+The polished 8-step wizard ships in Track 2 (next milestone).
+
+**`/setup/api/*`** — JSON layer for the wizard:
+- `GET  /setup/api/state`    cursor + flags
+- `POST /setup/api/progress` save resumable state
+- `POST /setup/api/finish`   mark first_run_done = true
+- `POST /setup/api/reset`    🔒 re-engage gate (debug)
+
+**Schema migration `20260515000000_first_run.sql`** adds:
+- `first_run_done   boolean default false`
+- `setup_progress   jsonb   default '{}'`
+- `totp_secret      text`               (placeholder for Track 1 #6)
+- `totp_recovery    jsonb   default '[]'`
+- `founder_email    text`
+
+**Smoke test (local Supabase, fresh first_run_done = false):**
+- `GET /dashboard` (Accept: html) → 302 /setup ✓
+- `GET /dashboard` (Accept: json) → 503 setup_required ✓
+- `GET /setup`                    → 200 HTML, 4.1 KB ✓
+- `GET /setup/api/state`          → JSON cursor + flags ✓
+- `GET /tools` (gated)            → 503 ✓
+- `GET /health` (allowlisted)     → 200 ✓
+- `POST /setup/api/finish`        → flips done ✓
+- `GET /tools` (after finish)     → 200 with 13 tools ✓
+- Migration runner on boot logged: `already up to date (17 applied)` ✓
+
+Track 1 #8 (migration runner + first-run middleware) is **DONE**.
+
 ## 2026-05-01 · M9 · Cloudflare R2 storage layer (Track 1 #2 DONE)
 
 Volatile-fs problem solved. All file uploads now flow through a single

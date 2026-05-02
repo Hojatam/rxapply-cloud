@@ -170,7 +170,194 @@ function runHelper({ agent, command = 'help', args = [], stdin = null, timeoutMs
   });
 }
 
+// ── First-run state ─────────────────────────────────────────────────────────
+// Cached so the middleware below stays sync (Express requires it). Refreshed
+// on boot and after the wizard finishes. Default behaviour: if the column
+// is missing or unreadable, treat as DONE so we never block the dashboard
+// on a transient DB hiccup.
+
+let _firstRunCache = { done: true, stamp: 0 };
+const FIRST_RUN_TTL_MS = 30_000;
+
+async function _refreshFirstRun() {
+  try {
+    const raw = await db.queryValue(`SELECT first_run_done FROM dashboard_settings WHERE id = 1;`);
+    _firstRunCache = { done: raw === 'true', stamp: Date.now() };
+  } catch (_) {
+    // Column might not exist yet (very early in a fresh deploy, before
+    // migrations run). Default to "done" so /setup doesn't loop on itself.
+    _firstRunCache = { done: true, stamp: Date.now() };
+  }
+}
+
+function _isFirstRunDone() {
+  if (Date.now() - _firstRunCache.stamp > FIRST_RUN_TTL_MS) {
+    _refreshFirstRun().catch(() => {});
+  }
+  return _firstRunCache.done;
+}
+
+// Routes that are reachable BEFORE the wizard finishes. Anything else
+// gets redirected to /setup. Order matters; the most-specific prefixes
+// come first.
+const SETUP_ALLOWLIST = new Set([
+  '/health', '/config.js',
+  '/setup', '/setup/',
+  '/static',                 // sprite + drawflow vendor
+  '/storage',                // local-fallback object reads
+  '/auth/status', '/auth/set-password', '/auth/login', '/auth/logout',
+]);
+
+function _isSetupAllowed(url) {
+  if (url === '/' || url === '/dashboard') return false;       // → redirect
+  for (const prefix of SETUP_ALLOWLIST) {
+    if (url === prefix || url.startsWith(prefix + '/') || url.startsWith(prefix + '?')) {
+      return true;
+    }
+  }
+  // The setup wizard's own API surface lives under /setup/*.
+  return url.startsWith('/setup/');
+}
+
+// First-run middleware. Mounted before all other routes.
+function firstRunGate(req, res, next) {
+  if (_isFirstRunDone()) return next();
+  if (_isSetupAllowed(req.path)) return next();
+  // For HTML navigations, redirect. For API calls, return 503 so the
+  // dashboard can show a "setup not finished" banner.
+  const wantsHtml = (req.headers.accept || '').includes('text/html');
+  if (wantsHtml) {
+    res.redirect(302, '/setup');
+  } else {
+    res.status(503).json({ ok: false, error: 'setup_required', wizard_url: '/setup' });
+  }
+}
+
 // ── routes ──────────────────────────────────────────────────────────────────
+
+// First-run gate. Redirects non-allowlisted requests to /setup until the
+// wizard finishes. Mount BEFORE any handler that should be gated.
+app.use(firstRunGate);
+
+// ── /setup · wizard surface ──────────────────────────────────────────
+// The full wizard UI ships in Track 2 as part of dashboard.html. For
+// now /setup serves a one-page placeholder that lets the founder finish
+// the boot sequence enough to use the dashboard. The /setup/api/*
+// routes are the JSON layer the wizard talks to.
+
+app.get('/setup', (_req, res) => {
+  res.set('Content-Type', 'text/html; charset=utf-8');
+  res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8">
+    <title>RxApply · First-run setup</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <style>
+      body { font: 16px/1.5 -apple-system, BlinkMacSystemFont, sans-serif; max-width: 640px; margin: 60px auto; padding: 0 20px; color: #083045; }
+      h1 { font-size: 28px; margin-bottom: 6px; }
+      .sub { color: #666; margin-bottom: 32px; }
+      .ok { color: #009b98; }
+      .warn { color: #b07c4c; }
+      code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 14px; }
+      .panel { border: 1px solid #e2e8f0; border-radius: 12px; padding: 22px; margin-top: 22px; background: #fafafa; }
+      input, button { font: inherit; padding: 8px 12px; border-radius: 6px; border: 1px solid #cbd5e1; }
+      button { background: #009b98; color: white; cursor: pointer; padding: 10px 18px; border: 0; }
+      button:hover { background: #007a78; }
+    </style></head><body>
+    <h1>RxApply · First-run setup</h1>
+    <div class="sub">A polished 8-step wizard ships with the next release. For now, this single-page form gets your deploy through the bootstrap.</div>
+    <div class="panel">
+      <p>You're seeing this page because <code>dashboard_settings.first_run_done</code> is <code>false</code>. Once you finish the steps below, the gate lifts and <a href="/dashboard">/dashboard</a> becomes reachable.</p>
+      <h3>Status</h3>
+      <ul>
+        <li>Database: <span id="db" class="ok">checking…</span></li>
+        <li>Anthropic API key: <span id="anth">checking…</span></li>
+        <li>Storage: <span id="store">checking…</span></li>
+        <li>Founder password: <span id="auth">checking…</span></li>
+      </ul>
+      <h3>Finish setup</h3>
+      <p>Pick a strong founder password and click Finish. (The full wizard adds 2FA, brand profile, and tool keys.)</p>
+      <input id="pw" type="password" placeholder="founder password (≥10 chars)" style="width: 70%;" autofocus>
+      <button onclick="finish()">Finish setup</button>
+      <div id="msg" style="margin-top: 14px; min-height: 20px;"></div>
+    </div>
+    <script>
+      async function check() {
+        try {
+          const h = await fetch('/health').then(r => r.json());
+          document.getElementById('db').className = h.features?.logsL2 ? 'ok' : 'warn';
+          document.getElementById('db').textContent = h.features?.logsL2 ? 'reachable ✓' : 'unreachable';
+          document.getElementById('anth').className = 'ok';
+          document.getElementById('anth').textContent = 'configured ✓';
+          document.getElementById('store').className = 'ok';
+          document.getElementById('store').textContent = 'configured ✓';
+          const a = await fetch('/auth/status').then(r => r.json());
+          document.getElementById('auth').textContent = a.initialized ? 'set ✓' : 'NOT set — pick one below';
+          document.getElementById('auth').className = a.initialized ? 'ok' : 'warn';
+        } catch (e) { console.error(e); }
+      }
+      async function finish() {
+        const pw = document.getElementById('pw').value;
+        const msg = document.getElementById('msg');
+        if (pw.length < 10) { msg.innerHTML = '<span class="warn">Password must be at least 10 characters.</span>'; return; }
+        msg.textContent = 'Setting password…';
+        const r = await fetch('/auth/set-password', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ password: pw }),
+        }).then(r => r.json());
+        if (!r.ok) { msg.innerHTML = '<span class="warn">' + (r.error || 'failed') + '</span>'; return; }
+        msg.textContent = 'Marking setup as done…';
+        const f = await fetch('/setup/api/finish', { method: 'POST' }).then(r => r.json());
+        if (!f.ok) { msg.innerHTML = '<span class="warn">' + (f.error || 'failed') + '</span>'; return; }
+        msg.innerHTML = '<span class="ok">All done. Redirecting to dashboard…</span>';
+        setTimeout(() => { location.href = '/dashboard'; }, 800);
+      }
+      check();
+    </script></body></html>`);
+});
+
+// /setup/api/* — JSON layer the wizard UI talks to.
+app.get('/setup/api/state', async (_req, res) => {
+  try {
+    const raw = await db.queryValue(`SELECT row_to_json(s) FROM (
+      SELECT first_run_done, setup_progress, founder_email, totp_secret IS NOT NULL AS totp_set
+      FROM dashboard_settings WHERE id = 1
+    ) s;`);
+    res.json({ ok: true, state: raw ? JSON.parse(raw) : { first_run_done: false } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.post('/setup/api/progress', async (req, res) => {
+  try {
+    await db.query(`UPDATE dashboard_settings
+                       SET setup_progress = ${db.q(JSON.stringify(req.body || {}))}::jsonb,
+                           updated_at = NOW()
+                     WHERE id = 1;`);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.post('/setup/api/finish', async (_req, res) => {
+  try {
+    await db.query(`UPDATE dashboard_settings
+                       SET first_run_done = true, updated_at = NOW()
+                     WHERE id = 1;`);
+    await _refreshFirstRun();
+    log('setup.finish');
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Manual reset (debug / re-run wizard).
+app.post('/setup/api/reset', auth.middleware, async (_req, res) => {
+  try {
+    await db.query(`UPDATE dashboard_settings
+                       SET first_run_done = false, setup_progress = '{}'::jsonb,
+                           updated_at = NOW()
+                     WHERE id = 1;`);
+    await _refreshFirstRun();
+    log('setup.reset');
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
 
 // /config.js · runtime configuration injected into dashboard.html.
 // Replaces the previously-hardcoded SUPABASE_URL/KEY/etc. so the HTML
@@ -2010,9 +2197,26 @@ const PORT = Number(process.env.PORT) || 7777;
 // T1 · Tools framework — mount the router and seed the catalog into Postgres
 // on boot so the UI's catalog list never lags behind the registry.
 app.use('/tools', toolsRouter);
-toolsRegistry.sync()
-  .then(n => console.log(`  tools registry: synced ${n} tools to Postgres`))
-  .catch(e => console.error(`  tools registry sync failed: ${e.message}`));
+
+// Boot sequence: migrate → refresh caches → start listening.
+//   1. migrate.runIfNeeded() applies any pending SQL migrations. Set
+//      MIGRATE_ON_BOOT=false in env to skip (e.g. if you're applying
+//      migrations from CI instead).
+//   2. _refreshFirstRun() seeds the first-run cache so middleware doesn't
+//      block on a cold call.
+//   3. tools registry sync.
+const migrate = require('./migrate');
+(async () => {
+  try {
+    const r = await migrate.runIfNeeded();
+    if (r && r.failed) console.error(`[boot] migration FAILED: ${r.failed.error || r.failed}`);
+  } catch (e) { console.error(`[boot] migrate.runIfNeeded threw: ${e.message}`); }
+  await _refreshFirstRun();
+  try {
+    const n = await toolsRegistry.sync();
+    console.log(`  tools registry: synced ${n} tools to Postgres`);
+  } catch (e) { console.error(`  tools registry sync failed: ${e.message}`); }
+})();
 
 app.listen(PORT, () => {
   console.log(`cowork-proxy listening on :${PORT}`);
