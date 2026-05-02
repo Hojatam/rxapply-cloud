@@ -273,11 +273,111 @@ function telegram({ source, run, lang }) {
   };
 }
 
-// Stubs for M27 + M28 — replaced by full implementations later.
+// ── Facebook ──────────────────────────────────────────────────────────
+// Facebook posts have no hard length limit but engagement drops sharply
+// past ~80-100 words. We warn if the post exceeds 250 words.
+const FB_SOFT_CAP_WORDS = 250;
+
+function facebook({ source, run, lang }) {
+  const f = _fields(source);
+  const hook  = String(f.hook || '').trim();
+  const body  = String(f.body || '').trim();
+  const cta   = String(f.cta_text || '').trim();
+  const ctaUrl = String((run.options && run.options.primary_cta) || '').trim();
+  const imgBrief = String(f.image_brief || '').trim();
+
+  // Facebook strips most markdown when posting via the API; normalise to plain text.
+  const fullText = [hook, body, cta && ctaUrl ? `${cta}\n${ctaUrl}` : (cta || ctaUrl)].filter(Boolean).join('\n\n');
+  const plain = _mdToPlain(fullText);
+  const wordCount = _wordCount(plain);
+
+  return {
+    _renderer: 'facebook',
+    lang: lang || run.master_lang,
+    hook,
+    body,
+    cta_text: cta || null,
+    cta_url: ctaUrl || null,
+    image_brief: imgBrief || null,
+    full_text: plain,
+    char_count: plain.length,
+    word_count: wordCount,
+    over_soft_cap: wordCount > FB_SOFT_CAP_WORDS,
+    page_handle: (run.options && run.options.page_handle) || null,
+  };
+}
+
+// ── X thread ──────────────────────────────────────────────────────────
+// X (Twitter) caps each tweet at 280 chars (URLs count as 23). The adapt
+// stage produces structured tweet content; this renderer enforces the cap
+// per tweet and re-splits if any tweet exceeds it.
+const X_TWEET_LIMIT = 280;
+
+function _splitTweet(text, limit = X_TWEET_LIMIT) {
+  const t = String(text || '').trim();
+  if (t.length <= limit) return [t];
+  // Greedy split on sentence / clause boundaries.
+  const out = [];
+  let remaining = t;
+  while (remaining.length > limit) {
+    let cut = remaining.lastIndexOf('. ', limit);
+    if (cut < limit * 0.5) cut = remaining.lastIndexOf(' ', limit);
+    if (cut < 1) cut = limit;
+    out.push(remaining.slice(0, cut).trim());
+    remaining = remaining.slice(cut).trim();
+  }
+  if (remaining) out.push(remaining);
+  return out;
+}
+
+function xThread({ source, run, lang }) {
+  const f = _fields(source);
+  const hook    = _mdToPlain(String(f.hook_tweet || '').trim());
+  const closing = _mdToPlain(String(f.closing_tweet || '').trim());
+  const bodyArr = Array.isArray(f.body_tweets) ? f.body_tweets : (f.body_tweets ? [String(f.body_tweets)] : []);
+  const ctaUrl = String((run.options && run.options.primary_cta) || '').trim();
+  const maxTweets = Math.max(3, Math.min(20, Number((run.options && run.options.max_tweets) || 10)));
+
+  // Build the ordered tweet list. Each entry might exceed 280 chars; split it.
+  let tweets = [];
+  if (hook) tweets.push(...(_splitTweet(hook)));
+  for (const t of bodyArr) {
+    tweets.push(...(_splitTweet(_mdToPlain(String(t)))));
+  }
+  if (closing) {
+    const closingFull = ctaUrl ? `${closing}\n${ctaUrl}`.trim() : closing;
+    tweets.push(...(_splitTweet(closingFull)));
+  }
+  // Filter out empties & enforce maxTweets cap.
+  tweets = tweets.map(s => s.trim()).filter(Boolean);
+  const truncated = tweets.length > maxTweets;
+  if (truncated) tweets = tweets.slice(0, maxTweets);
+
+  // Number them as "1/N", "2/N", …
+  const total = tweets.length;
+  const numbered = tweets.map((t, i) => {
+    const tag = ` ${i + 1}/${total}`;
+    // Only add the numbering if it fits.
+    return (t.length + tag.length <= X_TWEET_LIMIT) ? (t + tag) : t;
+  });
+
+  return {
+    _renderer: 'x-thread',
+    lang: lang || run.master_lang,
+    tweets: numbered,
+    tweet_count: numbered.length,
+    truncated,
+    cta_url: ctaUrl || null,
+    char_counts: numbered.map(t => t.length),
+    over_limit_indices: numbered.map((t, i) => t.length > X_TWEET_LIMIT ? i : -1).filter(i => i >= 0),
+  };
+}
+
+// IG renderer — full impl ships in M28 when we port the existing IG flow.
 function _stub(name, source, run, recipe, lang) {
   return {
     _renderer: name,
-    _format_warning: `Renderer "${name}" is a stub; full implementation lands in M27/M28.`,
+    _format_warning: `Renderer "${name}" is a stub; full implementation lands in M28.`,
     lang: lang || run.master_lang,
     fields: _fields(source),
   };
@@ -289,9 +389,9 @@ module.exports = {
   'email-html':  emailHtml,
   'seo-article': seoArticle,
   'telegram':    telegram,
-  // M27 stubs
-  'facebook':    ({ source, run, recipe, lang }) => _stub('facebook', source, run, recipe, lang),
-  'x-thread':    ({ source, run, recipe, lang }) => _stub('x-thread', source, run, recipe, lang),
-  // M28 stub (IG port)
+  // M27
+  'facebook':    facebook,
+  'x-thread':    xThread,
+  // M28 (IG port pending)
   'ig':          ({ source, run, recipe, lang }) => _stub('ig', source, run, recipe, lang),
 };
