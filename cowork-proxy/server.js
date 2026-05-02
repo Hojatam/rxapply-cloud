@@ -2037,6 +2037,12 @@ app.use('/static', express.static(path.resolve(__dirname, 'public')));
 // from the CDN and this route is rarely hit.
 app.get('/storage/*', storage.serveHandler);
 
+// Root → dashboard. Without this, hitting bare https://rxapply.com after
+// the wizard is finished returns Express's default "Cannot GET /". The
+// firstRunGate redirects to /setup until setup is done; once first_run_done
+// flips to true we always land here on /dashboard.
+app.get('/', (_, res) => res.redirect(302, '/dashboard'));
+
 // Serve dashboard.html at /dashboard so we can hit it from a real http:// origin
 // (Chrome extensions + the Claude-in-Chrome MCP can't access file:// URLs).
 app.get('/dashboard', (_, res) => {
