@@ -9,8 +9,8 @@
 ALTER TABLE dashboard_settings
   ADD COLUMN IF NOT EXISTS first_run_done   boolean DEFAULT false,
   ADD COLUMN IF NOT EXISTS setup_progress   jsonb   DEFAULT '{}'::jsonb,
-  ADD COLUMN IF NOT EXISTS totp_secret      text,                       -- 2FA shared secret (encrypted at rest by app)
-  ADD COLUMN IF NOT EXISTS totp_recovery    jsonb   DEFAULT '[]'::jsonb,-- one-time recovery codes
+  ADD COLUMN IF NOT EXISTS totp_secret      bytea,                      -- 2FA shared secret (pgp_sym_encrypt → bytea)
+  ADD COLUMN IF NOT EXISTS totp_recovery    jsonb   DEFAULT '[]'::jsonb,-- one-time recovery codes (sha256 hashes)
   ADD COLUMN IF NOT EXISTS founder_email    text;                       -- captured in step 2
 
 -- Make sure the singleton row exists. Idempotent.

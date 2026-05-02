@@ -13,6 +13,67 @@ Format:
 
 ---
 
+## 2026-05-01 · M11 · Auth hardening (Track 1 #6 DONE)
+
+Four security improvements + first 2FA implementation. All verified
+end-to-end on the local Supabase.
+
+**1. Login rate limit**
+- `express-rate-limit` mounted on `POST /auth/login`. 5 attempts per 15
+  minutes per IP. Sixth → 429.
+- `app.set('trust proxy', 1)` in production so Railway's reverse-proxy
+  IPs are unwrapped correctly for fingerprinting.
+
+**2. Cookie hardening**
+- New `auth.buildSessionCookie(name, value, opts)` helper.
+- HttpOnly + `SameSite=Strict` always.
+- `Secure` flag in production (when `NODE_ENV=production`).
+- All four auth routes (`set-password`, `login`, `logout`) use it.
+
+**3. CSRF gate**
+- New `auth.csrfMiddleware` mounted globally after firstRunGate.
+- State-changing requests (POST/PATCH/DELETE) must include
+  `X-CSRF-Token` header matching the session's CSRF token (returned
+  in the login response).
+- Skips: GET/HEAD/OPTIONS · `AUTH_DISABLED=1` (dev) · pre-bootstrap
+  (no password set yet) · requests with no auth token (other gates
+  reject those).
+- Constant-time compare via `crypto.timingSafeEqual`.
+
+**4. TOTP 2FA**
+- `setupTotp()` generates a 16-char base32 secret + a 6×6 QR data-URL
+  + 10 recovery codes. Returned to the wizard; **not persisted** yet.
+- `confirmTotpSetup({ secret, code, recoveryCodes })` verifies the
+  first code, then persists:
+    - `totp_secret`     bytea  (pgp_sym_encrypt with SECRETS_KEY)
+    - `totp_recovery`   jsonb  (sha256-hashed recovery codes)
+- `disableTotp()` clears both columns.
+- `login(password, totpCode)` requires the second factor when
+  `totp_secret` is set. Recovery codes are single-use (removed
+  from the array after consumption).
+- New routes: `POST /auth/2fa/setup` · `POST /auth/2fa/confirm` ·
+  `POST /auth/2fa/disable` (all 🔒 auth-gated).
+
+**Schema**: migration `20260515000000_first_run.sql` updated — `totp_secret`
+column type changed from `text` → `bytea` (so `pgp_sym_encrypt` output
+fits cleanly).
+
+**Dashboard**: new `setAuthFromLogin()` helper stores both auth + CSRF
+tokens in localStorage; `authFetch` and `authHeaders` now include
+`X-CSRF-Token` automatically. `doLogin()` re-prompts for the 6-digit
+code when the server returns `requires_totp: true`.
+
+**Smoke tests (with AUTH_DISABLED toggled off):**
+- Rate limit: 5×401 then 429 ✓
+- CSRF gate (with token): 200 ✓
+- CSRF gate (without): 403 ✓
+- Cookie flags: `HttpOnly; Path=/; SameSite=Strict; Max-Age=N` ✓
+- TOTP setup → confirm → login: ✓
+- TOTP recovery code first-use ✓ / reuse-rejected ✓
+- TOTP disable → plain password login works ✓
+
+Track 1 #6 (auth hardening) is **DONE**.
+
 ## 2026-05-01 · M10 · Migration runner + first-run middleware (Track 1 #8 DONE)
 
 The cloud build now self-provisions its schema on first deploy and

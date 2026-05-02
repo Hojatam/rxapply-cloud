@@ -2272,13 +2272,34 @@ function setAuthToken(t, expiresAt = 0) {
   else   { localStorage.removeItem('rxapply-auth-token'); localStorage.removeItem('rxapply-auth-exp'); }
 }
 
+// CSRF token returned by /auth/login + /auth/set-password. Stored in
+// localStorage so it survives reloads but not cross-origin (we never
+// echo it as a cookie). Sent as `X-CSRF-Token` on every state-changing
+// request — the cloud build's csrfMiddleware enforces this.
+let CSRF_TOKEN = localStorage.getItem('rxapply-csrf-token') || null;
+function setAuthFromLogin(loginResp) {
+  if (loginResp && loginResp.token) {
+    AUTH_TOKEN = loginResp.token;
+    localStorage.setItem('rxapply-auth-token', AUTH_TOKEN);
+  }
+  if (loginResp && loginResp.csrfToken) {
+    CSRF_TOKEN = loginResp.csrfToken;
+    localStorage.setItem('rxapply-csrf-token', CSRF_TOKEN);
+  }
+}
+
 function authHeaders(extra = {}) {
-  return AUTH_TOKEN ? { ...extra, Authorization: 'Bearer ' + AUTH_TOKEN } : extra;
+  const h = { ...extra };
+  if (AUTH_TOKEN) h.Authorization = 'Bearer ' + AUTH_TOKEN;
+  if (CSRF_TOKEN) h['X-CSRF-Token'] = CSRF_TOKEN;
+  return h;
 }
 
 async function authFetch(url, opts = {}) {
-  opts.headers = { ...(opts.headers || {}), ...(AUTH_TOKEN ? { Authorization: 'Bearer ' + AUTH_TOKEN } : {}) };
-  return fetch(url, opts);
+  const headers = { ...(opts.headers || {}) };
+  if (AUTH_TOKEN) headers.Authorization = 'Bearer ' + AUTH_TOKEN;
+  if (CSRF_TOKEN) headers['X-CSRF-Token'] = CSRF_TOKEN;
+  return fetch(url, { ...opts, headers });
 }
 
 // 23-agent registry (22 + Daneshyar K6)
@@ -6976,6 +6997,7 @@ async function bootstrapPassword() {
   const j = await r.json();
   if (!j.ok) return $('bp-err').textContent = j.error || 'failed';
   setAuthToken(j.token, j.expiresAt);
+  setAuthFromLogin(j);     // also store CSRF token from response
   setAuthState({ initialized: true, signedIn: true });
   renderSettings();
 }
@@ -7002,13 +7024,25 @@ function renderSettingsLogin() {
 async function doLogin() {
   const pw = $('li-pw').value;
   if (!pw) return $('li-err').textContent = 'Enter password.';
-  const r = await fetch(`${PROXY}/auth/login`, {
+  // First attempt: password only.
+  let r = await fetch(`${PROXY}/auth/login`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ password: pw })
   });
-  const j = await r.json();
+  let j = await r.json();
+  // If 2FA is required, prompt for the 6-digit code (or recovery code).
+  if (!j.ok && j.requires_totp) {
+    const code = prompt('2FA code from your authenticator (or a recovery code):');
+    if (!code) return;
+    r = await fetch(`${PROXY}/auth/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw, totp_code: String(code).trim() })
+    });
+    j = await r.json();
+  }
   if (!j.ok) return $('li-err').textContent = j.error || 'incorrect';
   setAuthToken(j.token, j.expiresAt);
+  setAuthFromLogin(j);     // also store CSRF token from response
   setAuthState({ initialized: true, signedIn: true });
   renderSettings();
 }
@@ -7016,6 +7050,8 @@ async function doLogin() {
 async function doLogout() {
   await authFetch(`${PROXY}/auth/logout`, { method: 'POST' });
   setAuthToken(null);
+  CSRF_TOKEN = null;
+  localStorage.removeItem('rxapply-csrf-token');
   setAuthState({ initialized: true, signedIn: false });
   renderSettings();
 }

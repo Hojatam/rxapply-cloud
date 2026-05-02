@@ -53,6 +53,12 @@ const toolsRegistry = require('./tools/registry');     // T1 · static tool cata
 const toolsRuntime  = require('./tools/runtime');      // T1 · executes per-call gating + cost
 
 const app = express();
+
+// Behind Railway's reverse proxy: req.ip should reflect the client, not
+// the proxy. One hop is enough — Railway terminates TLS in front of us.
+// Also enables rate-limit IP fingerprinting to work correctly.
+if (process.env.NODE_ENV === 'production') app.set('trust proxy', 1);
+
 app.use(express.json({ limit: '30mb' }));  // 30mb so base64-encoded uploads (≈22mb files) fit
 // Accept text/markdown and text/plain as raw bytes; we decode UTF-8 explicitly in the handler.
 // (express.text default charset can mis-decode multibyte UTF-8 like em-dashes / Farsi / Arabic.)
@@ -238,6 +244,12 @@ function firstRunGate(req, res, next) {
 // First-run gate. Redirects non-allowlisted requests to /setup until the
 // wizard finishes. Mount BEFORE any handler that should be gated.
 app.use(firstRunGate);
+
+// CSRF gate. Skips GET/HEAD/OPTIONS, dev-mode (AUTH_DISABLED), and the
+// bootstrap window before the founder password is set. State-changing
+// requests (POST/PATCH/DELETE) must include X-CSRF-Token matching the
+// session's CSRF token (returned at login time).
+app.use(auth.csrfMiddleware);
 
 // ── /setup · wizard surface ──────────────────────────────────────────
 // The full wizard UI ships in Track 2 as part of dashboard.html. For
@@ -664,6 +676,7 @@ app.get('/auth/status', (_, res) => {
   res.json({
     ok: true,
     initialized: auth.isInitialized(),
+    totp_enabled: auth.isTotpEnabled(),
     disabled: auth.isDisabled(),  // dev override flag — AUTH_DISABLED in .env
   });
 });
@@ -671,45 +684,73 @@ app.get('/auth/status', (_, res) => {
 app.post('/auth/set-password', async (req, res) => {
   // First-time bootstrap: anyone can set the password if none exists.
   // Once initialized, must be authenticated to change it.
-  const { password, current } = req.body || {};
+  const { password, current, totp_code } = req.body || {};
   if (!password) return res.status(400).json({ error: 'password required' });
   if (auth.isInitialized()) {
-    // Re-key requires current password.
     if (!current) return res.status(400).json({ error: 'current password required to change' });
-    const v = await auth.login(current);
-    if (!v.ok) return res.status(401).json({ error: 'current password incorrect' });
+    const v = await auth.login(current, totp_code);
+    if (!v.ok) return res.status(401).json({ error: 'current credentials incorrect', requires_totp: v.requires_totp });
   }
   const r = await auth.setPassword(password);
   if (!r.ok) return res.status(400).json(r);
   // Auto-login after set.
-  const lr = await auth.login(password);
+  const lr = await auth.login(password, totp_code);
   if (lr.ok) {
-    res.setHeader('Set-Cookie', `rxapply_session=${lr.token}; HttpOnly; Path=/; Max-Age=${(lr.expiresAt - Date.now()) / 1000 | 0}; SameSite=Lax`);
+    const maxAge = ((lr.expiresAt - Date.now()) / 1000) | 0;
+    res.setHeader('Set-Cookie', auth.buildSessionCookie('rxapply_session', lr.token, { maxAgeSec: maxAge }));
   }
   log(`auth.set-password ok=true`);
-  res.json({ ok: true, token: lr.token, expiresAt: lr.expiresAt });
+  res.json({ ok: true, token: lr.token, csrfToken: lr.csrfToken, expiresAt: lr.expiresAt });
 });
 
-app.post('/auth/login', async (req, res) => {
-  const { password } = req.body || {};
+// /auth/login — rate-limited (5 attempts / 15 min per IP).
+app.post('/auth/login', auth.loginRateLimiter, async (req, res) => {
+  const { password, totp_code } = req.body || {};
   if (!password) return res.status(400).json({ error: 'password required' });
-  const r = await auth.login(password);
+  const r = await auth.login(password, totp_code);
   if (!r.ok) {
-    log(`auth.login fail`);
+    log(`auth.login fail${r.requires_totp ? ' (totp_required)' : ''}`);
     return res.status(401).json(r);
   }
-  res.setHeader('Set-Cookie', `rxapply_session=${r.token}; HttpOnly; Path=/; Max-Age=${(r.expiresAt - Date.now()) / 1000 | 0}; SameSite=Lax`);
-  log(`auth.login ok`);
-  res.json({ ok: true, token: r.token, expiresAt: r.expiresAt });
+  const maxAge = ((r.expiresAt - Date.now()) / 1000) | 0;
+  res.setHeader('Set-Cookie', auth.buildSessionCookie('rxapply_session', r.token, { maxAgeSec: maxAge }));
+  log(`auth.login ok totp=${auth.isTotpEnabled() ? 'used' : 'off'}`);
+  res.json({ ok: true, token: r.token, csrfToken: r.csrfToken, expiresAt: r.expiresAt });
 });
 
 app.post('/auth/logout', (req, res) => {
-  // Token from cookie or Authorization
   const cookieHeader = req.headers.cookie || '';
   const m = /(?:^|;\s*)rxapply_session=([^;]+)/.exec(cookieHeader);
   const token = (m && decodeURIComponent(m[1])) || (req.headers.authorization || '').replace(/^Bearer\s+/, '') || null;
   auth.logout(token);
-  res.setHeader('Set-Cookie', 'rxapply_session=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax');
+  res.setHeader('Set-Cookie', auth.buildSessionCookie('rxapply_session', '', { clear: true }));
+  res.json({ ok: true });
+});
+
+// ── 2FA (TOTP) routes ────────────────────────────────────────────────
+// /auth/2fa/setup           generate fresh secret + QR + recovery codes
+//                           (auth-gated; secret is NOT yet persisted)
+// /auth/2fa/confirm         verify the first 6-digit code, then persist
+// /auth/2fa/disable         remove 2FA from the account
+
+app.post('/auth/2fa/setup', auth.middleware, async (_req, res) => {
+  try {
+    const r = await auth.setupTotp({ accountLabel: 'founder', issuer: 'RxApply' });
+    res.json({ ok: true, ...r });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.post('/auth/2fa/confirm', auth.middleware, async (req, res) => {
+  const { secret, code, recovery_codes } = req.body || {};
+  const r = await auth.confirmTotpSetup({ secret, code, recoveryCodes: recovery_codes || [] });
+  if (!r.ok) return res.status(400).json(r);
+  log('auth.2fa.enabled');
+  res.json(r);
+});
+
+app.post('/auth/2fa/disable', auth.middleware, async (_req, res) => {
+  await auth.disableTotp();
+  log('auth.2fa.disabled');
   res.json({ ok: true });
 });
 
