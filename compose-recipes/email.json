@@ -13,10 +13,11 @@
     { "name": "verify",   "capability": "verify",   "if_option": "kb_verify" },
     { "name": "adapt",    "capability": "adapt",    "params": { "produce": ["subject", "preview", "body", "design_brief"] } },
     { "name": "render",   "renderer": "email-html" },
+    { "name": "design",   "capability": "design", "if_option": "with_image" },
     { "name": "image",    "renderer": "image-cover", "if_option": "with_image" }
   ],
 
-  "gateable_stages": ["critique", "verify", "adapt"],
+  "gateable_stages": ["critique", "verify", "adapt", "design"],
 
   "translate": {
     "capability": "translate",

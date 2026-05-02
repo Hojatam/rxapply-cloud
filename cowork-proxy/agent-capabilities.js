@@ -42,11 +42,12 @@ const CAPABILITY_REGISTRY = {
   // Channel-native adaptation (subject lines, length, hashtags, CTA placement)
   avang:     ['adapt'],
 
-  // Visual / image generation. The image-cover renderer doesn't actually
-  // call an LLM agent (it calls OpenAI gpt-image-1 directly), but we
-  // register Afshin here so handoff_intent + future agent-mediated visual
-  // briefs route through Afshin properly.
-  afshin:    ['image'],
+  // Afshin owns visual direction. The 'design' capability is a real LLM
+  // stage where Afshin reads the brand profile + topic + Avang's brief,
+  // then returns an art-directed prompt with style/composition/palette/
+  // mood/brand-visual refs. The 'image' capability is bookkeeping for
+  // the renderer that hands his prompt to gpt-image-1.
+  afshin:    ['design', 'image'],
 
   // Channel-shaped final formatting (HTML email, Telegram-HTML, X tweet
   // split, Gmail payload, etc.). Render stages don't call an LLM but we

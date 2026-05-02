@@ -6442,6 +6442,40 @@ function coRenderStageOutput(stage, expandedByDefault) {
           ? keys.map(k => `<div class="mt-2"><div class="text-xs uppercase tracking-wider text-slate-500">${escapeHtml(k)}</div><div class="text-sm mt-1" style="white-space:pre-wrap;">${escapeHtml(typeof fields[k] === 'string' ? fields[k] : JSON.stringify(fields[k]))}</div></div>`).join('')
           : '<div class="mt-2 text-xs text-slate-400 italic">no fields produced</div>';
       }
+      case 'design': {
+        const palette = Array.isArray(out.color_palette) ? out.color_palette : [];
+        const refs = Array.isArray(out.brand_visual_refs) ? out.brand_visual_refs : [];
+        const avoid = Array.isArray(out.must_avoid) ? out.must_avoid : [];
+        return `
+          <div class="mt-2 grid grid-cols-2 gap-3">
+            ${out.style ? `<div><div class="text-xs uppercase tracking-wider text-slate-500">Style</div><div class="text-sm mt-0.5">${escapeHtml(out.style)}</div></div>` : ''}
+            ${out.mood ? `<div><div class="text-xs uppercase tracking-wider text-slate-500">Mood</div><div class="text-sm mt-0.5">${escapeHtml(out.mood)}</div></div>` : ''}
+          </div>
+          ${out.composition ? `<div class="mt-2"><div class="text-xs uppercase tracking-wider text-slate-500">Composition</div><div class="text-sm mt-0.5">${escapeHtml(out.composition)}</div></div>` : ''}
+          ${palette.length ? `
+            <div class="mt-2">
+              <div class="text-xs uppercase tracking-wider text-slate-500 mb-1">Palette</div>
+              <div class="flex flex-wrap gap-2">
+                ${palette.map(c => {
+                  const isHex = /^#?[0-9a-fA-F]{3,8}$/.test(String(c).trim());
+                  const swatch = isHex ? (String(c).startsWith('#') ? c : '#' + c) : 'transparent';
+                  return `<div class="flex items-center gap-1.5 text-xs"><span style="display:inline-block;width:18px;height:18px;border-radius:4px;background:${escapeHtml(swatch)};border:1px solid #e2e8f0;"></span>${escapeHtml(c)}</div>`;
+                }).join('')}
+              </div>
+            </div>` : ''}
+          ${refs.length ? `
+            <div class="mt-2"><div class="text-xs uppercase tracking-wider text-slate-500">Brand refs</div>
+              <ul class="text-xs list-disc pl-5 mt-1">${refs.map(r => `<li>${escapeHtml(r)}</li>`).join('')}</ul></div>` : ''}
+          ${avoid.length ? `
+            <div class="mt-2"><div class="text-xs uppercase tracking-wider text-rose-700">Must avoid</div>
+              <ul class="text-xs list-disc pl-5 mt-1" style="color:#9f1239;">${avoid.map(r => `<li>${escapeHtml(r)}</li>`).join('')}</ul></div>` : ''}
+          ${out.final_prompt ? `
+            <div class="mt-3">
+              <div class="text-xs uppercase tracking-wider text-slate-500 mb-1">Final prompt to gpt-image-1</div>
+              <div class="text-xs mono p-2 rounded" style="background:#f8fafc;line-height:1.5;white-space:pre-wrap;">${escapeHtml(out.final_prompt)}</div>
+            </div>` : ''}
+        `;
+      }
       case 'render': {
         // The render pane handles the full preview; here just tease the final shape.
         const summary = (out.subject || out.title || out.body_md || out.body_plain || out.caption || '').toString().slice(0, 160);
@@ -6582,15 +6616,33 @@ function _coRenderImageState(stage) {
   }
   if (stage.status === 'done' && stage.output && stage.output.url) {
     const o = stage.output;
-    return `<div class="card-tight mb-3" style="text-align:center;background:#f8fafc;">
-      <img src="${escapeHtml(o.url)}" alt="cover"
-            style="max-width:100%;max-height:360px;border-radius:6px;background:#e2e8f0;"
-            onerror="this.parentElement.innerHTML='<div style=&quot;padding:32px;color:#dc2626;font-size:12px;&quot;>Image generated but URL <span class=mono>'+this.src.replace(/[<>&\"]/g,'')+'</span> failed to load. Check R2_PUBLIC_URL or /storage route.</div>';" />
-      <div class="text-xs text-slate-400 mt-2">
+    const dir = o.afshin_direction || null;
+    const dirHtml = dir ? `
+      <div class="text-xs text-left mt-3 pt-3" style="border-top:1px solid #e2e8f0;color:var(--text-muted, #64748b);">
+        <div class="text-xs uppercase tracking-wider mb-1" style="font-weight:600;color:#7c3aed;">Afshin's direction</div>
+        ${dir.style ? `<div><strong>Style:</strong> ${escapeHtml(dir.style)}</div>` : ''}
+        ${dir.mood ? `<div><strong>Mood:</strong> ${escapeHtml(dir.mood)}</div>` : ''}
+        ${dir.composition ? `<div class="mt-1"><strong>Composition:</strong> ${escapeHtml(dir.composition)}</div>` : ''}
+        ${Array.isArray(dir.color_palette) && dir.color_palette.length ? `
+          <div class="mt-2 flex items-center gap-2 flex-wrap">
+            ${dir.color_palette.map(c => {
+              const isHex = /^#?[0-9a-fA-F]{3,8}$/.test(String(c).trim());
+              const sw = isHex ? (String(c).startsWith('#') ? c : '#' + c) : 'transparent';
+              return `<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;"><span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:${escapeHtml(sw)};border:1px solid #e2e8f0;"></span>${escapeHtml(c)}</span>`;
+            }).join('')}
+          </div>` : ''}
+      </div>` : '';
+    return `<div class="card-tight mb-3" style="background:#f8fafc;">
+      <div style="text-align:center;">
+        <img src="${escapeHtml(o.url)}" alt="cover"
+              style="max-width:100%;max-height:360px;border-radius:6px;background:#e2e8f0;"
+              onerror="this.parentElement.parentElement.innerHTML='<div style=&quot;padding:32px;color:#dc2626;font-size:12px;&quot;>Image generated but URL <span class=mono>'+this.src.replace(/[<>&\"]/g,'')+'</span> failed to load. Check R2_PUBLIC_URL or /storage route.</div>';" />
+      </div>
+      <div class="text-xs text-slate-400 mt-2 text-center">
         cover · ${escapeHtml(o.model || '')} · ${escapeHtml(o.size || '')} · $${Number(o.cost_usd || 0).toFixed(4)}
         ${o.media_id ? ` · <a href="#" onclick="navigate('designs');return false;" class="text-indigo-600 underline">Designs ↗</a>` : ''}
       </div>
-      <div class="text-xs mono text-slate-400 mt-1" style="word-break:break-all;">${escapeHtml(o.url)}</div>
+      ${dirHtml}
     </div>`;
   }
   return `<div class="card-tight mb-3" style="background:#f8fafc;color:var(--text-muted);font-size:12px;">

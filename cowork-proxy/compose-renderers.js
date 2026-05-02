@@ -437,9 +437,15 @@ function instagram({ source, run, lang }) {
 //   • final fallback: synthesise a minimal brief from topic + caption
 async function imageCover({ source, run, recipe, lang }) {
   const f = _fields(source);
-  // Pull a brief from any of the field names recipes use.
+
+  // Source-priority for the final image prompt:
+  //   1. Afshin's design stage final_prompt (M37 — full art direction)
+  //   2. Avang's adapt fields design_brief / image_brief / design_prompt
+  //   3. Synthesised fallback from the topic
   let brief =
-        f.design_brief
+        (source && source.final_prompt)        // Afshin's design stage output (top-level)
+     || f.final_prompt                          // … if wrapped under fields
+     || f.design_brief
      || f.image_brief
      || f.design_prompt
      || (source && source.design_brief)
@@ -447,7 +453,7 @@ async function imageCover({ source, run, recipe, lang }) {
      || (source && source.design_prompt)
      || '';
 
-  // If the adapt stage didn't produce a brief, build one from the topic
+  // If neither Afshin nor Avang produced a brief, build one from the topic
   // + the format hint so we always render *something*.
   if (!brief && run && run.topic) {
     const formatHint = recipe && recipe.label ? recipe.label : 'social post';
@@ -466,6 +472,18 @@ illustration style, clean composition, minimal text overlay, no logo.`;
   });
   if (!r.ok) throw new Error(r.error || 'image generation failed');
 
+  // Surface what Afshin contributed (when present) so the preview pane
+  // can show his style/palette/composition picks alongside the rendered image.
+  const designContext = (source && (source.style || source.composition || source.color_palette))
+    ? {
+        style: source.style || null,
+        composition: source.composition || null,
+        color_palette: source.color_palette || null,
+        mood: source.mood || null,
+        brand_visual_refs: source.brand_visual_refs || null,
+      }
+    : null;
+
   return {
     _renderer: 'image-cover',
     lang: lang || run.master_lang,
@@ -478,6 +496,7 @@ illustration style, clean composition, minimal text overlay, no logo.`;
     agent: 'afshin',                  // attribution for the UI cost annotation
     agent_run_id: r.agent_run_id,
     prompt: brief,
+    afshin_direction: designContext,  // shown in the preview when present
   };
 }
 

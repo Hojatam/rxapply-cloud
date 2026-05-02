@@ -13,10 +13,11 @@
     { "name": "adapt",    "capability": "adapt",
       "params": { "produce": ["body_md", "cta_text", "cta_url", "design_brief"] } },
     { "name": "render",   "renderer": "telegram" },
+    { "name": "design",   "capability": "design", "if_option": "with_image" },
     { "name": "image",    "renderer": "image-cover", "if_option": "with_image" }
   ],
 
-  "gateable_stages": ["critique", "verify", "adapt"],
+  "gateable_stages": ["critique", "verify", "adapt", "design"],
 
   "translate": {
     "capability": "translate",

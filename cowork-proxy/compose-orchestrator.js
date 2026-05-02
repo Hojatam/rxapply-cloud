@@ -276,6 +276,33 @@ the named entities (regulators, institutions). Do NOT add new claims. Return ONL
   },
   "handoff_intent": null
 }`,
+
+  design:
+`You are Afshin, the visual director for the RxApply brand. Avang has
+written a one-line design_brief for this post (in the ADAPTED block
+below). Your job: turn that brief into a fully art-directed prompt
+that gpt-image-1 will use to render the cover.
+
+Read the brand profile (in your system prompt) for visual rules:
+brand colours, typography hints, photography style, things the brand
+NEVER shows. Reference real brand visuals when they fit.
+
+Return ONLY this JSON:
+
+{
+  "style": "<editorial illustration | minimal vector | photo-real | infographic | mixed-media | …>",
+  "composition": "<one sentence — focal point, framing, perspective>",
+  "color_palette": ["<hex or named colour>", "<...3 to 6 entries>"],
+  "mood": "<one or two adjectives — calm / urgent / hopeful / authoritative / …>",
+  "brand_visual_refs": [
+    "<a brand element to reference, e.g. 'RxApply teal accent', 'flat-illustration of a dental hygienist'>"
+  ],
+  "must_avoid": ["<anything the image should NOT contain — text overlays / logos / specific imagery>"],
+  "final_prompt": "<the COMPLETE prompt to send to the image model. Synthesise everything above into a clear, vivid paragraph. No model-specific syntax — just plain art-direction language.>",
+  "handoff_intent": null
+}
+
+The final_prompt should be 60-160 words, vivid and specific.`,
 };
 
 // Tiny mustache-style template renderer (no external dep).
@@ -738,11 +765,22 @@ async function _executeRenderer({ runId, run, recipe, stage, stageIndex, lang })
     const baseIndex = (recipe.stages || []).length;
     sourceForRender = (stages.find(s => s.stage_index === baseIndex && s.lang === lang) || {}).output;
   } else {
-    // master: use the last LLM stage output (adapt > draft)
+    // master: pick the right upstream output for this renderer.
     const masterDone = stages.filter(s => s.lang == null && s.status === 'done');
-    const adaptRow = masterDone.find(s => s.stage_name === 'adapt');
-    const draftRow = masterDone.find(s => s.stage_name === 'draft');
-    sourceForRender = (adaptRow || draftRow || {}).output;
+    if (rendererName === 'image-cover') {
+      // Image renderer prefers Afshin's design output (final_prompt) over
+      // Avang's raw brief. Fallback to adapt → draft so old runs (without
+      // a design stage) still work.
+      const designRow = masterDone.find(s => s.stage_name === 'design');
+      const adaptRow  = masterDone.find(s => s.stage_name === 'adapt');
+      const draftRow  = masterDone.find(s => s.stage_name === 'draft');
+      sourceForRender = (designRow || adaptRow || draftRow || {}).output;
+    } else {
+      // Non-image renderers (telegram/email/etc) use adapt > draft.
+      const adaptRow = masterDone.find(s => s.stage_name === 'adapt');
+      const draftRow = masterDone.find(s => s.stage_name === 'draft');
+      sourceForRender = (adaptRow || draftRow || {}).output;
+    }
   }
 
   const startedAt = Date.now();
