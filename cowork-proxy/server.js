@@ -40,7 +40,8 @@ const afshin   = require('./afshin-router');            // F8 · design pipeline
 const pipelineRunner = require('./pipeline-runner');  // F6 · visual pipeline editor
 const agentModels = require('./agent-models');         // per-agent LLM overrides
 const brandProfile = require('./brand-profile');       // central brand spec
-const composeStages = require('./compose-stages');     // Pooya brief + Kherad score
+const composeStages = require('./compose-stages');     // Pooya brief + Kherad score (legacy IG, deprecated by M24)
+const composeOrchestrator = require('./compose-orchestrator');  // M24 · recipe-driven multi-format orchestrator
 const permissions = require('./permissions');          // K1 · approval matrix + Inbox queue
 const renderers = require('./output-renderers');       // K1 · narrative output formatters
 const agentMemory = require('./agent-memory');         // K2 · per-agent persistent memory
@@ -1573,6 +1574,90 @@ app.post('/compose/approve-for-posting', auth.middleware, async (req, res) => {
   }
   log(`compose.approve-posting media=${media_id.slice(0,8)} langs=${requested.join(',')}`);
   res.json({ ok: true, media_id, posts: insertedIds });
+});
+
+// ── M24 · Compose orchestrator routes ───────────────────────────────────
+// New recipe-driven, multi-format Compose. The legacy /compose/instagram
+// (and friends) routes remain for now — M28 ports IG onto the orchestrator.
+//
+//   GET    /compose/recipes                    — list available recipes
+//   GET    /compose/runs                       — list runs (?limit, ?recipe, ?status)
+//   GET    /compose/runs/:id                   — run + ordered stages
+//   POST   /compose/runs                       — create + start a run (auth)
+//   POST   /compose/runs/:id/tick              — advance one stage (auth)
+//   POST   /compose/runs/:id/run               — run-to-block (auth)
+//   POST   /compose/runs/:id/approve           — approve a gated stage (auth)
+//   POST   /compose/runs/:id/cancel            — cancel a run (auth)
+app.get('/compose/recipes', (_req, res) => {
+  try { res.json({ ok: true, recipes: composeOrchestrator.listRecipes() }); }
+  catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.get('/compose/runs', async (req, res) => {
+  try {
+    const items = await composeOrchestrator.listRuns({
+      limit: parseInt(req.query.limit, 10) || 30,
+      recipe: req.query.recipe || null,
+      status: req.query.status || null,
+    });
+    res.json({ ok: true, items });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.get('/compose/runs/:id', async (req, res) => {
+  try {
+    const run = await composeOrchestrator.getRun(req.params.id);
+    if (!run) return res.status(404).json({ ok: false, error: 'not found' });
+    res.json({ ok: true, run });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.post('/compose/runs', auth.middleware, async (req, res) => {
+  try {
+    const {
+      recipeId, topic, audience, masterLang = 'en', targetLangs = [],
+      options = {}, gateStrategy = 'critique', agentOverrides = {},
+    } = req.body || {};
+    if (!recipeId || !topic) return res.status(400).json({ ok: false, error: 'recipeId + topic required' });
+    const r = await composeOrchestrator.start({
+      recipeId, topic, audience, masterLang, targetLangs,
+      options, gateStrategy, agentOverrides,
+    });
+    log(`compose.start id=${r.id} recipe=${recipeId}`);
+    res.json(r);
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+app.post('/compose/runs/:id/tick', auth.middleware, async (req, res) => {
+  try {
+    const run = await composeOrchestrator.tick(req.params.id);
+    res.json({ ok: true, run });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.post('/compose/runs/:id/run', auth.middleware, async (req, res) => {
+  try {
+    const run = await composeOrchestrator.runToBlock(req.params.id);
+    res.json({ ok: true, run });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.post('/compose/runs/:id/approve', auth.middleware, async (req, res) => {
+  try {
+    const run = await composeOrchestrator.approve(
+      req.params.id, (req.body || {}).note || null,
+      (req.user && req.user.username) || 'founder',
+    );
+    log(`compose.approve id=${req.params.id}`);
+    res.json({ ok: true, run });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+app.post('/compose/runs/:id/cancel', auth.middleware, async (req, res) => {
+  try {
+    const run = await composeOrchestrator.cancel(req.params.id, (req.body || {}).note || null);
+    res.json({ ok: true, run });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 // GET /compose/recent — last 10 compose runs (for the "Recent posts" strip)
