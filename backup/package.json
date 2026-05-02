@@ -1,0 +1,16 @@
+{
+  "name": "rxapply-backup",
+  "version": "1.0.0",
+  "description": "Daily Postgres backup → R2",
+  "private": true,
+  "main": "backup.js",
+  "scripts": {
+    "start": "node backup.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.654.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
