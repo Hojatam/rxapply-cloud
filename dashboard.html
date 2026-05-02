@@ -525,6 +525,256 @@
     gap: 5px;
   }
   .btn-lg { height: 38px; padding: 0 18px; font-size: 13.5px; border-radius: 8px; }
+  /* ──────────────────────────────────────────────────────────────────────
+     M36 · Compose tab visual redesign
+     ────────────────────────────────────────────────────────────────────── */
+
+  /* Format picker · accent-coloured cards with hover + selected states */
+  .co-format-grid { display:grid; gap:10px; }
+  .co-format-card {
+    position: relative; cursor: pointer;
+    background: var(--bg-card, #ffffff);
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 12px;
+    padding: 16px 14px 14px;
+    text-align: left;
+    transition: transform .15s, box-shadow .15s, border-color .15s;
+    overflow: hidden;
+  }
+  .co-format-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0,0,0,.08);
+    border-color: var(--text-muted, #94a3b8);
+  }
+  .co-format-card .co-fc-stripe {
+    position:absolute; left:0; top:0; bottom:0; width:4px;
+    background: var(--co-accent, #4f46e5);
+    transition: width .2s;
+  }
+  .co-format-card.selected {
+    border-color: var(--co-accent, #4f46e5);
+    box-shadow: 0 0 0 3px rgba(79,70,229,.12);
+  }
+  .co-format-card.selected .co-fc-stripe { width: 6px; }
+  .co-format-card .co-fc-icon {
+    width: 36px; height: 36px; border-radius: 8px;
+    display:grid; place-items:center;
+    color: var(--co-accent, #4f46e5);
+    background: color-mix(in srgb, var(--co-accent, #4f46e5) 12%, transparent);
+    margin-bottom: 10px;
+  }
+  .co-format-card .co-fc-icon svg { width: 20px; height: 20px; }
+  .co-format-card .co-fc-label { font-size: 14px; font-weight: 600; color: var(--text, #0f172a); margin-bottom: 4px; }
+  .co-format-card .co-fc-desc  { font-size: 11.5px; color: var(--text-muted, #64748b); line-height: 1.45; }
+
+  /* Per-format accent colours (CSS custom property scoping) */
+  .co-fc-email     { --co-accent: #7c3aed; }
+  .co-fc-seo       { --co-accent: #059669; }
+  .co-fc-telegram  { --co-accent: #0284c7; }
+  .co-fc-facebook  { --co-accent: #1877f2; }
+  .co-fc-x         { --co-accent: #0f172a; }
+  .co-fc-ig        { --co-accent: #e11d48; }
+
+  /* Run form · sectioned panels with clean rhythm */
+  .co-form-section { margin-bottom: 18px; }
+  .co-form-section-title {
+    font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .08em;
+    color: var(--text-muted, #64748b);
+    margin-bottom: 8px;
+  }
+  .co-input, .co-textarea, .co-select {
+    width: 100%;
+    background: var(--bg-card, #fff);
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 7px;
+    padding: 9px 12px;
+    font-size: 13.5px;
+    color: var(--text, #0f172a);
+    transition: border-color .15s, box-shadow .15s;
+  }
+  .co-input:focus, .co-textarea:focus, .co-select:focus {
+    outline: none;
+    border-color: var(--accent, #4f46e5);
+    box-shadow: 0 0 0 3px rgba(79,70,229,.12);
+  }
+  .co-textarea { min-height: 76px; resize: vertical; line-height: 1.5; }
+
+  /* Language picker · interactive pills */
+  .co-lang-row { display:flex; flex-wrap:wrap; gap: 6px; }
+  .co-lang-pill {
+    cursor: pointer; user-select: none;
+    display:inline-flex; align-items:center; gap: 6px;
+    padding: 6px 12px; border-radius: 999px;
+    background: var(--bg-card, #fff);
+    border: 1.5px solid var(--border, #e2e8f0);
+    font-size: 12px; font-weight: 500;
+    color: var(--text-muted, #64748b);
+    transition: all .15s;
+  }
+  .co-lang-pill:hover { border-color: var(--accent, #4f46e5); color: var(--text, #0f172a); }
+  .co-lang-pill.selected {
+    background: var(--accent, #4f46e5); color: #fff;
+    border-color: var(--accent, #4f46e5);
+  }
+  .co-lang-pill.selected::before { content: "✓"; font-weight: 700; margin-right: 2px; }
+  .co-lang-pill input { display: none; }
+
+  /* Gate strategy · segmented control */
+  .co-segmented {
+    display:inline-flex; gap: 0; padding: 3px;
+    border-radius: 8px; background: var(--bg-muted, #f1f5f9);
+    border: 1px solid var(--border, #e2e8f0);
+  }
+  .co-segmented label { cursor: pointer; }
+  .co-segmented label input { display: none; }
+  .co-segmented label span {
+    display:inline-block; padding: 6px 12px; border-radius: 5px;
+    font-size: 12px; font-weight: 500;
+    color: var(--text-muted, #64748b);
+    transition: all .15s;
+  }
+  .co-segmented label:hover span { color: var(--text, #0f172a); }
+  .co-segmented label input:checked + span {
+    background: var(--bg-card, #fff);
+    color: var(--accent, #4f46e5);
+    box-shadow: 0 1px 2px rgba(0,0,0,.06);
+    font-weight: 600;
+  }
+
+  /* Run hud (top of an active compose run) */
+  .co-hud {
+    display: flex; align-items: center; gap: 16px;
+    padding: 12px 16px; margin-bottom: 12px;
+    background: linear-gradient(135deg, rgba(79,70,229,.04), rgba(124,58,237,.04));
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 10px;
+  }
+  .co-hud-id {
+    font-family: ui-monospace, monospace;
+    font-size: 11px; color: var(--text-muted, #64748b);
+    background: var(--bg-card, #fff);
+    padding: 3px 8px; border-radius: 4px;
+    border: 1px solid var(--border, #e2e8f0);
+  }
+  .co-hud-progress {
+    flex: 1; height: 6px;
+    background: rgba(15,23,42,.06); border-radius: 3px; overflow: hidden;
+  }
+  .co-hud-progress-bar {
+    height: 100%; background: linear-gradient(90deg, #4f46e5, #7c3aed);
+    border-radius: 3px;
+    transition: width .35s ease-out;
+  }
+  .co-hud-stat {
+    display:flex; flex-direction: column; align-items: flex-end;
+    font-size: 11px; color: var(--text-muted, #64748b);
+  }
+  .co-hud-stat strong { font-size: 13.5px; font-weight: 600; color: var(--text, #0f172a); }
+
+  /* Pipeline · stage rows with agent avatar + clearer state */
+  .co-stage {
+    display:flex; align-items: center; gap: 12px;
+    padding: 12px 14px; margin-bottom: 8px;
+    background: var(--bg-card, #fff);
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 10px;
+    transition: border-color .15s, box-shadow .2s, transform .15s;
+  }
+  .co-stage.running {
+    border-color: #f59e0b;
+    background: linear-gradient(135deg, rgba(245,158,11,.04), rgba(245,158,11,.01));
+    animation: coRunPulse 1.6s ease-in-out infinite;
+  }
+  @keyframes coRunPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(245,158,11,.4); }
+    50%      { box-shadow: 0 0 0 6px rgba(245,158,11,0); }
+  }
+  .co-stage.gated {
+    border-color: #f59e0b;
+    background: #fffbeb;
+    box-shadow: 0 4px 12px rgba(245,158,11,.12);
+  }
+  .co-stage.done    { background: var(--bg-card, #fff); }
+  .co-stage.failed  { border-color: #dc2626; background: #fef2f2; }
+  .co-stage.skipped { opacity: .55; }
+
+  .co-stage-icon {
+    width: 32px; height: 32px; border-radius: 50%;
+    flex-shrink: 0;
+    display:grid; place-items:center;
+    background: var(--bg-muted, #f1f5f9);
+    color: var(--text-muted, #64748b);
+    font-size: 14px; font-weight: 600;
+    overflow: hidden;
+  }
+  .co-stage-icon img { width: 100%; height: 100%; object-fit: cover; }
+
+  .co-stage-body { flex: 1; min-width: 0; }
+  .co-stage-name { font-size: 13.5px; font-weight: 600; color: var(--text, #0f172a); }
+  .co-stage-name .co-stage-lang {
+    font-size: 11px; color: var(--text-muted, #94a3b8);
+    background: var(--bg-muted, #f1f5f9); padding: 1px 6px; border-radius: 4px;
+    margin-left: 6px; font-weight: 500; text-transform: uppercase;
+  }
+  .co-stage-meta {
+    font-size: 11px; color: var(--text-muted, #94a3b8);
+    margin-top: 2px;
+  }
+  .co-stage-status { flex-shrink: 0; display:flex; align-items:center; gap: 8px; }
+  .co-stage-cost {
+    font-family: ui-monospace, monospace;
+    font-size: 11px; color: var(--text-muted, #94a3b8);
+  }
+  .co-stage-pill {
+    display:inline-flex; align-items:center; gap: 4px;
+    padding: 3px 9px; border-radius: 999px;
+    font-size: 11px; font-weight: 600;
+  }
+  .co-stage-pill .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: currentColor;
+  }
+  .co-stage-pill.pending { background: #f1f5f9; color: #64748b; }
+  .co-stage-pill.running { background: #fef3c7; color: #b45309; }
+  .co-stage-pill.running .dot { animation: coDotPulse .9s ease-in-out infinite; }
+  @keyframes coDotPulse { 0%,100%{opacity:.3;} 50%{opacity:1;} }
+  .co-stage-pill.done    { background: #dcfce7; color: #15803d; }
+  .co-stage-pill.failed  { background: #fee2e2; color: #b91c1c; }
+  .co-stage-pill.gated   { background: #fef3c7; color: #92400e; }
+  .co-stage-pill.skipped { background: #f1f5f9; color: #94a3b8; }
+
+  /* Stage detail (output preview when expanded / gated) */
+  .co-stage-detail {
+    margin-top: 12px; padding-top: 12px;
+    border-top: 1px solid var(--border, #e2e8f0);
+  }
+
+  /* Recent runs grid */
+  .co-recent-grid { display:grid; gap: 8px; }
+  .co-recent-card {
+    display:flex; align-items: center; gap: 12px;
+    padding: 10px 14px;
+    background: var(--bg-card, #fff);
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: border-color .15s, transform .15s, box-shadow .15s;
+  }
+  .co-recent-card:hover {
+    transform: translateY(-1px);
+    border-color: var(--accent, #4f46e5);
+    box-shadow: 0 4px 10px rgba(0,0,0,.06);
+  }
+  .co-recent-icon {
+    width: 30px; height: 30px; border-radius: 6px;
+    display:grid; place-items:center;
+    background: color-mix(in srgb, var(--co-accent, #4f46e5) 12%, transparent);
+    color: var(--co-accent, #4f46e5);
+    flex-shrink: 0;
+  }
+  .co-recent-icon svg { width: 16px; height: 16px; }
+
   /* M34 · Compose platform mockups -------------------------------------- */
   .co-mockup-wrap { display:flex; justify-content:center; padding:8px 0 16px; }
 
@@ -5707,20 +5957,39 @@ const _CO_LANGS = [
   { code: 'tr', label: 'Turkish' },
 ];
 
+// M36 · Per-format visual identity. Used by the format picker, the
+// recent-runs list, and the platform mockup pickers.
+const _CO_FORMAT_META = {
+  email:        { cls: 'co-fc-email',    label: 'Email',          desc: 'HTML email · subject + preview + body',
+                  icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16v12H4z"/><path d="M4 6l8 7 8-7"/></svg>' },
+  'seo-article':{ cls: 'co-fc-seo',      label: 'SEO article',    desc: 'Long-form · 1200–2000w · slug + meta + body',
+                  icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4h11l3 3v13H5z"/><path d="M9 11h7M9 15h7M9 7h4"/></svg>' },
+  telegram:     { cls: 'co-fc-telegram', label: 'Telegram',       desc: 'Channel post · markdown + emoji + cover',
+                  icon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21.5 4.5L3 12l5.5 1.7L18 7l-7 7.5v4l3-3 4 3z"/></svg>' },
+  facebook:     { cls: 'co-fc-facebook', label: 'Facebook',       desc: 'Page post · hook + body + CTA + cover',
+                  icon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 22V12h3l1-4h-4V5.5c0-1 .5-2 2-2h2V0h-3c-3 0-5 1.8-5 5v3H6v4h3v10z"/></svg>' },
+  'x-thread':   { cls: 'co-fc-x',        label: 'X thread',       desc: 'Tweet stack · auto-split per 280 chars',
+                  icon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 3h3l-7.5 8.5L22 21h-6l-5-6.5L5 21H2l8-9-8-9h6l4.5 6z"/></svg>' },
+  ig:           { cls: 'co-fc-ig',       label: 'Instagram',      desc: 'Feed post · caption + hashtags + cover',
+                  icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor"/></svg>' },
+};
+
+function _coFormatMeta(id) { return _CO_FORMAT_META[id] || _CO_FORMAT_META.email; }
+
 function renderCompose() {
   $('main').innerHTML = `
     <div class="section-h">
       <div><h1>Compose</h1><div class="breadcrumb">Pick a format · agents collaborate to draft, critique, adapt, translate, render</div></div>
     </div>
 
-    <div class="card mb-4">
-      <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Output type</div>
-      <div id="co-recipes" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+    <div class="card mb-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">Output type</div>
+      <div id="co-recipes" class="co-format-grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
         <div class="empty col-span-full"><div class="empty-text text-xs">Loading recipes…</div></div>
       </div>
     </div>
 
-    <div id="co-form-card" class="card mb-4" style="display:none;"></div>
+    <div id="co-form-card" class="card mb-5" style="display:none;"></div>
     <div id="co-run" style="display:none;"></div>
 
     <div class="card mt-6">
@@ -5746,13 +6015,18 @@ async function coLoadRecipes() {
       grid.innerHTML = `<div class="empty col-span-full"><div class="empty-text text-xs">No recipes installed.</div></div>`;
       return;
     }
-    grid.innerHTML = _coState.recipes.map(r => `
-      <button class="card-tight text-left hover:shadow-sm transition" style="cursor:pointer;"
-              onclick="coPickRecipe('${escapeHtml(r.id)}')" data-recipe="${escapeHtml(r.id)}">
-        <div class="text-base font-semibold mb-1">${escapeHtml(r.label)}</div>
-        <div class="text-xs text-slate-500" style="line-height:1.4;">${escapeHtml((r.description || '').slice(0, 120))}</div>
-      </button>
-    `).join('');
+    grid.innerHTML = _coState.recipes.map(r => {
+      const meta = _coFormatMeta(r.id);
+      return `
+        <button class="co-format-card ${meta.cls}" data-recipe="${escapeHtml(r.id)}"
+                onclick="coPickRecipe('${escapeHtml(r.id)}')">
+          <div class="co-fc-stripe"></div>
+          <div class="co-fc-icon">${meta.icon}</div>
+          <div class="co-fc-label">${escapeHtml(meta.label)}</div>
+          <div class="co-fc-desc">${escapeHtml(meta.desc || (r.description || '').slice(0, 80))}</div>
+        </button>
+      `;
+    }).join('');
   } catch (e) {
     $('co-recipes').innerHTML = `<div class="empty col-span-full"><div class="empty-text text-xs">Failed: ${escapeHtml(e.message)}</div></div>`;
   }
@@ -5762,12 +6036,16 @@ function coPickRecipe(id) {
   const r = _coState.recipes.find(x => x.id === id);
   if (!r) return;
   _coState.selected = r;
-  // Highlight selected
-  document.querySelectorAll('[data-recipe]').forEach(el => {
-    el.style.borderColor = el.getAttribute('data-recipe') === id ? 'var(--accent, #4f46e5)' : '';
-    el.style.background = el.getAttribute('data-recipe') === id ? 'rgba(79,70,229,.04)' : '';
+  // Toggle the .selected class (CSS handles the visual)
+  document.querySelectorAll('.co-format-card').forEach(el => {
+    el.classList.toggle('selected', el.getAttribute('data-recipe') === id);
   });
   coRenderForm();
+  // Scroll the form into view smoothly
+  setTimeout(() => {
+    const f = $('co-form-card');
+    if (f) f.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 80);
 }
 
 function coRenderOptionInput(opt) {
@@ -5776,73 +6054,87 @@ function coRenderOptionInput(opt) {
   const def = opt.default != null ? opt.default : '';
   switch (opt.type) {
     case 'textarea':
-      return `<textarea id="${id}" data-key="${opt.key}"${ph}
-                class="w-full border border-slate-200 rounded p-2 text-sm"
-                style="min-height:60px;resize:vertical;">${escapeHtml(String(def))}</textarea>`;
+      return `<textarea id="${id}" data-key="${opt.key}"${ph} class="co-textarea" style="min-height:56px;">${escapeHtml(String(def))}</textarea>`;
     case 'checkbox':
-      return `<label class="flex items-center gap-2 text-sm">
-                <input type="checkbox" id="${id}" data-key="${opt.key}" ${def ? 'checked' : ''}>
-                <span class="text-slate-500 text-xs">${escapeHtml(opt.label)}</span>
+      // Render as a polished switch-style row with the label inline.
+      return `<label class="flex items-center gap-2 text-sm" style="cursor:pointer;padding:8px 12px;background:var(--bg-card,#fff);border:1px solid var(--border,#e2e8f0);border-radius:7px;">
+                <input type="checkbox" id="${id}" data-key="${opt.key}" ${def ? 'checked' : ''} style="accent-color:var(--accent,#4f46e5);">
+                <span class="text-xs" style="color:var(--text,#0f172a);font-weight:500;">${escapeHtml(opt.label)}</span>
               </label>`;
     case 'number':
       return `<input type="number" id="${id}" data-key="${opt.key}" value="${escapeHtml(String(def))}"${ph}
                 ${opt.min != null ? `min="${opt.min}"` : ''} ${opt.max != null ? `max="${opt.max}"` : ''}
-                class="border border-slate-200 rounded px-2 py-1 text-sm" style="width:120px;">`;
+                class="co-input" style="max-width:140px;">`;
     default:
-      return `<input type="text" id="${id}" data-key="${opt.key}" value="${escapeHtml(String(def))}"${ph}
-                class="w-full border border-slate-200 rounded px-2 py-1 text-sm">`;
+      return `<input type="text" id="${id}" data-key="${opt.key}" value="${escapeHtml(String(def))}"${ph} class="co-input">`;
   }
 }
 
 function coRenderForm() {
   const r = _coState.selected;
   if (!r) return;
+  const meta = _coFormatMeta(r.id);
   const masterLang = localStorage.getItem('rxapply-co-master') || 'en';
   $('co-form-card').style.display = '';
   $('co-form-card').innerHTML = `
-    <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">${escapeHtml(r.label)} · run setup</div>
-
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+    <div class="flex items-center gap-3 mb-4 pb-3" style="border-bottom:1px solid var(--border, #e2e8f0);">
+      <div class="${meta.cls} co-fc-icon" style="margin:0;">${meta.icon}</div>
       <div>
-        <label class="text-xs text-slate-500 mb-1 block">Topic</label>
-        <textarea id="co-topic" placeholder="One or two sentences. e.g. NDEB Part 1 fee increase 2026"
-          class="w-full border border-slate-200 rounded p-2 text-sm" style="min-height:80px;resize:vertical;"></textarea>
-      </div>
-      <div>
-        <label class="text-xs text-slate-500 mb-1 block">Audience (optional)</label>
-        <textarea id="co-audience" placeholder="Who's this for? e.g. Iranian dentists pursuing Canadian licensing"
-          class="w-full border border-slate-200 rounded p-2 text-sm" style="min-height:80px;resize:vertical;"></textarea>
+        <div class="text-xs uppercase tracking-wider text-slate-500" style="font-weight:600;letter-spacing:.06em;">Run setup</div>
+        <div class="text-base font-semibold mt-0.5">${escapeHtml(meta.label)}</div>
       </div>
     </div>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-      <div>
-        <label class="text-xs text-slate-500 mb-1 block">Master language</label>
-        <select id="co-master" class="border border-slate-200 rounded px-2 py-1 text-sm bg-white" onchange="localStorage.setItem('rxapply-co-master', this.value); coRebuildLangChecks();">
-          ${_CO_LANGS.map(l => `<option value="${l.code}" ${l.code === masterLang ? 'selected' : ''}>${escapeHtml(l.label)} (${l.code})</option>`).join('')}
-        </select>
-      </div>
-      <div>
-        <label class="text-xs text-slate-500 mb-1 block">Translate to (optional)</label>
-        <div id="co-target-langs" class="flex flex-wrap gap-2"></div>
+    <div class="co-form-section">
+      <div class="co-form-section-title">What's this about?</div>
+      <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
+        <div class="md:col-span-3">
+          <label class="text-xs text-slate-500 mb-1 block">Topic</label>
+          <textarea id="co-topic" class="co-textarea"
+            placeholder="One or two sentences. e.g. NDEB Part 1 fee increase 2026"></textarea>
+        </div>
+        <div class="md:col-span-2">
+          <label class="text-xs text-slate-500 mb-1 block">Audience (optional)</label>
+          <textarea id="co-audience" class="co-textarea"
+            placeholder="Who's this for? e.g. Iranian dentists pursuing Canadian licensing"></textarea>
+        </div>
       </div>
     </div>
 
-    <div class="mb-4">
-      <label class="text-xs text-slate-500 mb-1 block">Approval gates</label>
-      <div class="flex flex-wrap gap-3 text-sm">
-        <label class="flex items-center gap-1"><input type="radio" name="co-gate" value="none"> None</label>
-        <label class="flex items-center gap-1"><input type="radio" name="co-gate" value="critique" checked> After critique only</label>
-        <label class="flex items-center gap-1"><input type="radio" name="co-gate" value="critique+adapt"> After critique + adapt</label>
-        <label class="flex items-center gap-1"><input type="radio" name="co-gate" value="every"> After every gateable stage</label>
+    <div class="co-form-section">
+      <div class="co-form-section-title">Languages</div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="text-xs text-slate-500 mb-1 block">Master language</label>
+          <select id="co-master" class="co-select" style="max-width:240px;"
+                  onchange="localStorage.setItem('rxapply-co-master', this.value); coRebuildLangChecks();">
+            ${_CO_LANGS.map(l => `<option value="${l.code}" ${l.code === masterLang ? 'selected' : ''}>${escapeHtml(l.label)} (${l.code})</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-slate-500 mb-1 block">Translate to (optional)</label>
+          <div id="co-target-langs" class="co-lang-row"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="co-form-section">
+      <div class="co-form-section-title">Approval gates</div>
+      <div class="co-segmented">
+        <label><input type="radio" name="co-gate" value="none"><span>None</span></label>
+        <label><input type="radio" name="co-gate" value="critique" checked><span>After critique</span></label>
+        <label><input type="radio" name="co-gate" value="critique+adapt"><span>Critique + adapt</span></label>
+        <label><input type="radio" name="co-gate" value="every"><span>Every gateable stage</span></label>
       </div>
     </div>
 
     ${(r.options_schema && r.options_schema.length) ? `
-      <div class="mb-4">
-        <div class="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-2">${escapeHtml(r.label)} options</div>
+      <div class="co-form-section">
+        <div class="co-form-section-title">${escapeHtml(meta.label)} options</div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-          ${r.options_schema.map(opt => `
+          ${r.options_schema.map(opt => opt.type === 'checkbox' ? `
+            <div>${coRenderOptionInput(opt)}</div>
+          ` : `
             <div>
               <label class="text-xs text-slate-500 mb-1 block">${escapeHtml(opt.label)}</label>
               ${coRenderOptionInput(opt)}
@@ -5852,7 +6144,7 @@ function coRenderForm() {
       </div>
     ` : ''}
 
-    <div class="flex items-center gap-2">
+    <div class="flex items-center gap-2 mt-4 pt-3" style="border-top:1px solid var(--border, #e2e8f0);">
       <button class="btn btn-primary" onclick="coStart()">▶ Compose</button>
       <button class="btn btn-ghost btn-xs" onclick="coCancelForm()">Cancel</button>
     </div>
@@ -5865,7 +6157,7 @@ function coRebuildLangChecks() {
   const wrap = $('co-target-langs');
   if (!wrap) return;
   wrap.innerHTML = _CO_LANGS.filter(l => l.code !== master).map(l => `
-    <label class="flex items-center gap-1 text-xs px-2 py-1 border border-slate-200 rounded cursor-pointer">
+    <label class="co-lang-pill" data-lang-pill="${l.code}" onclick="this.classList.toggle('selected'); this.querySelector('input').checked = this.classList.contains('selected'); event.preventDefault();">
       <input type="checkbox" data-lang="${l.code}"> ${escapeHtml(l.label)}
     </label>
   `).join('');
@@ -5926,10 +6218,19 @@ async function coOpenRun(runId) {
   $('co-run').style.display = '';
   $('co-run').innerHTML = `
     <div class="card">
-      <div class="flex items-center justify-between mb-3">
-        <div class="text-xs uppercase tracking-wider text-slate-500 font-semibold">Run ${escapeHtml(runId.slice(0, 8))}</div>
-        <div class="flex gap-2">
-          <button class="btn btn-ghost btn-xs" onclick="coRefreshRun()">↻ Refresh</button>
+      <div class="co-hud">
+        <span class="co-hud-id">${escapeHtml(runId.slice(0, 8))}</span>
+        <div class="co-hud-progress"><div class="co-hud-progress-bar" id="co-hud-bar" style="width:0%;"></div></div>
+        <div class="co-hud-stat">
+          <span><strong id="co-hud-progress-text">0/—</strong> stages</span>
+          <span id="co-hud-cost-text">$0.0000</span>
+        </div>
+        <div class="co-hud-stat">
+          <span><strong id="co-hud-status-text">starting</strong></span>
+          <span id="co-hud-time-text">0s</span>
+        </div>
+        <div class="flex gap-2 ml-auto">
+          <button class="btn btn-ghost btn-xs" onclick="coRefreshRun()">↻</button>
           <button class="btn btn-ghost btn-xs" onclick="coCloseRun()">Close</button>
         </div>
       </div>
@@ -5939,7 +6240,7 @@ async function coOpenRun(runId) {
       </div>
     </div>
   `;
-  _coState.currentRun = { id: runId };
+  _coState.currentRun = { id: runId, _openedAt: Date.now() };
   coStartPoll(runId);
 }
 
@@ -6156,8 +6457,34 @@ function coRenderStageOutput(stage, expandedByDefault) {
   return `<details class="mt-2"><summary class="text-xs text-slate-400 cursor-pointer">view output</summary>${inner}</details>`;
 }
 
+function _coStagePillNew(status) {
+  const labels = { pending: 'queued', running: 'running', done: '✓', failed: 'failed', gated: 'awaits approval', skipped: 'skipped' };
+  const cls = ['co-stage-pill', status].join(' ');
+  return `<span class="${cls}"><span class="dot"></span>${escapeHtml(labels[status] || status)}</span>`;
+}
+
 function coRenderRun(run) {
-  // Pipeline: master-language stages first, then per-target-language fan-out.
+  // Update the HUD progress bar / cost / time / status text.
+  const recipeStageCount = (function () {
+    // Best-effort: count distinct master rows expected in the recipe.
+    // We use the stages we've actually written so far and round up to a
+    // reasonable estimate. Recipes typically have 6-8 stages.
+    const distinct = new Set();
+    (run.stages || []).forEach(s => distinct.add(`${s.stage_index}|${s.lang || 'm'}`));
+    return Math.max(distinct.size, 6);
+  })();
+  const doneCount = (run.stages || []).filter(s => s.status === 'done' || s.status === 'skipped').length;
+  const pct = Math.round((doneCount / Math.max(recipeStageCount, 1)) * 100);
+  const bar = $('co-hud-bar');         if (bar) bar.style.width = Math.min(100, pct) + '%';
+  const pTxt = $('co-hud-progress-text'); if (pTxt) pTxt.textContent = `${doneCount}/${recipeStageCount}`;
+  const cTxt = $('co-hud-cost-text');     if (cTxt) cTxt.textContent = `$${Number(run.total_cost_usd || 0).toFixed(4)}`;
+  const sTxt = $('co-hud-status-text');   if (sTxt) sTxt.textContent = run.status;
+  const tTxt = $('co-hud-time-text');     if (tTxt && _coState.currentRun && _coState.currentRun._openedAt) {
+    const sec = Math.round((Date.now() - _coState.currentRun._openedAt) / 1000);
+    tTxt.textContent = sec < 60 ? `${sec}s` : `${Math.floor(sec / 60)}m ${sec % 60}s`;
+  }
+
+  // Pipeline rows
   const stages = (run.stages || []).slice().sort((a, b) => {
     if (a.stage_index !== b.stage_index) return a.stage_index - b.stage_index;
     return String(a.lang || '').localeCompare(String(b.lang || ''));
@@ -6167,45 +6494,45 @@ function coRenderRun(run) {
 
   const renderRow = (s) => {
     const cost = (typeof s.cost_usd === 'number' && s.cost_usd > 0) ? `$${s.cost_usd.toFixed(4)}` : '';
-    const agent = s.agent ? `${s.agent}` : (s.model ? s.model : 'renderer');
+    const agent = s.agent || (s.model ? s.model : 'renderer');
     const isGated = s.status === 'gated';
     const isDone  = s.status === 'done';
     const showOutput = isGated || isDone;
+    // Use the agent avatar (sprite or custom) for LLM stages.
+    // Renderer stages without an agent get the first letter as a glyph.
+    const iconHtml = (s.agent && typeof agentAvatar === 'function')
+      ? agentAvatar(s.agent, '')
+      : `<span>${escapeHtml((s.agent || s.stage_name || '?').slice(0, 1).toUpperCase())}</span>`;
     return `
-      <div class="card-tight" style="margin-bottom:8px;${isGated ? 'border-left:3px solid #f59e0b;background:#fffbeb;' : ''}">
-        <div class="flex items-center justify-between gap-2 flex-wrap">
-          <div class="flex items-center gap-2">
-            <span class="text-sm font-semibold">${escapeHtml(s.stage_name)}${s.lang ? ' · ' + escapeHtml(s.lang) : ''}</span>
-            <span class="text-xs text-slate-400 mono">${escapeHtml(agent)}</span>
+      <div class="co-stage ${escapeHtml(s.status)}">
+        <div class="co-stage-icon">${iconHtml}</div>
+        <div class="co-stage-body">
+          <div class="co-stage-name">
+            ${escapeHtml(s.stage_name)}${s.lang ? `<span class="co-stage-lang">${escapeHtml(s.lang)}</span>` : ''}
           </div>
-          <div class="flex items-center gap-2">
-            ${cost ? `<span class="text-xs text-slate-400 mono">${cost}</span>` : ''}
-            ${_coStageStatusPill(s.status)}
-          </div>
+          <div class="co-stage-meta">${escapeHtml(agent)}${s.model && s.agent && s.model !== s.agent ? ` · ${escapeHtml(s.model)}` : ''}</div>
+          ${s.status === 'failed' && s.error ? `<div class="text-xs mt-1" style="color:var(--err);">${escapeHtml(s.error.slice(0, 300))}</div>` : ''}
+          ${showOutput && s.output ? `<div class="co-stage-detail">${coRenderStageOutput(s, isGated)}</div>` : ''}
+          ${isGated ? `
+            <div class="mt-3 flex items-center gap-2">
+              <button class="btn btn-primary btn-xs" onclick="coApprove('${run.id}')">✓ Approve & continue</button>
+              <button class="btn btn-ghost btn-xs" onclick="coCancel('${run.id}')">Cancel run</button>
+            </div>
+          ` : ''}
         </div>
-        ${s.status === 'failed' && s.error ? `<div class="text-xs mt-2" style="color:var(--err);">${escapeHtml(s.error.slice(0, 300))}</div>` : ''}
-        ${showOutput && s.output ? coRenderStageOutput(s, isGated) : ''}
-        ${isGated ? `
-          <div class="mt-3 flex items-center gap-2">
-            <button class="btn btn-primary btn-xs" onclick="coApprove('${run.id}')">✓ Approve & continue</button>
-            <button class="btn btn-ghost btn-xs" onclick="coCancel('${run.id}')">Cancel run</button>
-          </div>
-        ` : ''}
+        <div class="co-stage-status">
+          ${cost ? `<span class="co-stage-cost">${cost}</span>` : ''}
+          ${_coStagePillNew(s.status)}
+        </div>
       </div>
     `;
   };
 
-  const totalCost = (typeof run.total_cost_usd === 'number') ? `$${Number(run.total_cost_usd).toFixed(4)}` : '$0';
   $('co-pipeline').innerHTML = `
-    <div class="text-xs text-slate-500 mb-3">
-      <span class="font-semibold">${escapeHtml(run.recipe_id)}</span>
-      · status: ${_coStageStatusPill(run.status)}
-      · total: <span class="mono">${totalCost}</span>
-    </div>
-    <div class="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-2">Master · ${escapeHtml(run.master_lang)}</div>
+    <div class="co-form-section-title" style="margin-bottom:10px;">Master · ${escapeHtml(run.master_lang)}</div>
     ${masterRows.map(renderRow).join('') || '<div class="text-xs text-slate-400 italic">no stages yet</div>'}
     ${targetRows.length ? `
-      <div class="text-xs uppercase tracking-wider text-slate-500 font-semibold mt-4 mb-2">Translations</div>
+      <div class="co-form-section-title" style="margin-top:18px;margin-bottom:10px;">Translations</div>
       ${targetRows.map(renderRow).join('')}
     ` : ''}
   `;
@@ -6652,18 +6979,24 @@ async function coLoadRecent() {
       el.innerHTML = `<div class="empty"><div class="empty-text text-xs">No runs yet. Pick a format above to start.</div></div>`;
       return;
     }
-    el.innerHTML = items.map(i => `
-      <div class="flex items-center gap-3 py-2 border-t border-slate-100 first:border-t-0 cursor-pointer hover:bg-slate-50"
-           onclick="coOpenRun('${i.id}')">
-        <div class="text-xs mono text-slate-400 shrink-0">${escapeHtml(i.id.slice(0, 8))}</div>
-        <div class="flex-1 min-w-0">
-          <div class="text-sm truncate">${escapeHtml(i.recipe_id)} · ${escapeHtml((i.topic || '').slice(0, 80))}</div>
-          <div class="text-xs text-slate-400">${escapeHtml(fmtTime(i.created_at))}${i.target_langs && i.target_langs.length ? ' · langs: ' + i.target_langs.join('+') : ''}</div>
+    el.innerHTML = `<div class="co-recent-grid">${items.map(i => {
+      const meta = _coFormatMeta(i.recipe_id);
+      return `
+        <div class="co-recent-card ${meta.cls}" onclick="coOpenRun('${i.id}')">
+          <div class="co-recent-icon">${meta.icon}</div>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-medium truncate" style="color:var(--text,#0f172a);">${escapeHtml(meta.label)} · ${escapeHtml((i.topic || '').slice(0, 80))}</div>
+            <div class="text-xs text-slate-400 mt-0.5">
+              <span class="mono">${escapeHtml(i.id.slice(0, 8))}</span>
+              · ${escapeHtml(fmtTime(i.created_at))}
+              · ${escapeHtml(i.master_lang)}${i.target_langs && i.target_langs.length ? '+' + i.target_langs.join('+') : ''}
+            </div>
+          </div>
+          <div class="text-xs mono shrink-0" style="color:var(--text-muted,#94a3b8);">$${Number(i.total_cost_usd || 0).toFixed(4)}</div>
+          ${_coStagePillNew(i.status)}
         </div>
-        <div class="text-xs mono text-slate-400 shrink-0">$${Number(i.total_cost_usd || 0).toFixed(4)}</div>
-        ${_coStageStatusPill(i.status)}
-      </div>
-    `).join('');
+      `;
+    }).join('')}</div>`;
   } catch (e) {
     el.innerHTML = `<div class="empty"><div class="empty-text text-xs">Failed: ${escapeHtml(e.message)}</div></div>`;
   }
