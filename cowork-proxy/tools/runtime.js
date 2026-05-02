@@ -46,7 +46,7 @@ function getPermission(agent, toolSlug) {
 }
 
 // ── Cap check ──────────────────────────────────────────────────────
-function checkCaps(toolSlug, projectedCostUsd = 0) {
+async function checkCaps(toolSlug, projectedCostUsd = 0) {
   // Per-tool cap
   const out = psql(`
     SELECT row_to_json(c) FROM (
@@ -65,7 +65,7 @@ function checkCaps(toolSlug, projectedCostUsd = 0) {
     return { ok: false, reason: 'tool_cap_exceeded', detail: toolCap };
   }
   // Global cap (existing $/mo guard from cost.js)
-  if (!cost.canSpend(projectedCostUsd)) {
+  if (!(await cost.canSpend(projectedCostUsd))) {
     return { ok: false, reason: 'global_cap_exceeded' };
   }
   return { ok: true };
@@ -200,7 +200,7 @@ async function execute({ agent, tool: toolSlug, op, args, taskContext, requestId
   }
 
   // perm.mode === 'auto' (or resolved to it via policy)
-  const cap = checkCaps(toolSlug, projectedCostUsd);
+  const cap = await checkCaps(toolSlug, projectedCostUsd);
   if (!cap.ok) return { ok: false, error: cap.reason, detail: cap.detail };
 
   const callId = logStart({ agent, toolSlug, op, args, taskContext, requestId, decision, status: 'pending' });

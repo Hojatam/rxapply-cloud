@@ -1571,8 +1571,8 @@ app.post('/compose/instagram', auth.middleware, async (req, res) => {
   if (!topic || typeof topic !== 'string' || topic.trim().length < 4) {
     return res.status(400).json({ ok: false, error: 'topic required (≥ 4 chars)' });
   }
-  if (!cost.canSpend(0.10)) {
-    return res.status(402).json({ ok: false, error: 'monthly cost cap reached', cost: cost.snapshot() });
+  if (!(await cost.canSpend(0.10))) {
+    return res.status(402).json({ ok: false, error: 'monthly cost cap reached', cost: await cost.snapshot() });
   }
 
   res.setHeader('Content-Type', 'text/event-stream');
@@ -1764,9 +1764,9 @@ app.get('/dashboard', (_, res) => {
 });
 
 // ── F9 · Cost telemetry ─────────────────────────────────────────────────
-app.get('/cost', (_, res) => {
+app.get('/cost', async (_, res) => {
   try {
-    res.json({ ok: true, ...cost.snapshot() });
+    res.json({ ok: true, ...(await cost.snapshot()) });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
@@ -1791,8 +1791,8 @@ app.post('/agent/:name/chat', async (req, res) => {
   if (!message) return res.status(400).json({ error: 'send {message}' });
 
   // F9 cap check (estimate ~$0.05 max for a typical 4k-token response)
-  if (!cost.canSpend(0.05)) {
-    const snap = cost.snapshot();
+  if (!(await cost.canSpend(0.05))) {
+    const snap = await cost.snapshot();
     return res.status(402).json({ error: 'monthly cost cap reached', cost: snap });
   }
 

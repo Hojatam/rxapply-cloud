@@ -264,7 +264,7 @@ async function generateDraft({ kind, topic, language, notes }) {
   if (!key) return { ok: false, error: 'ANTHROPIC_API_KEY not set' };
   if (!KIND_SPECS[kind]) return { ok: false, error: `unknown kind: ${kind}` };
   if (!topic) return { ok: false, error: 'topic required' };
-  if (!cost.canSpend(0.01)) return { ok: false, error: 'monthly cap reached', cost: cost.snapshot() };
+  if (!(await cost.canSpend(0.01))) return { ok: false, error: 'monthly cap reached', cost: await cost.snapshot() };
 
   _ensureDirs();
   const prompt = buildDraftPrompt({ kind, topic, language, notes });
@@ -496,7 +496,7 @@ async function generateRender({ mediaId, prompt, modelKey }) {
   const apiKey = process.env[model.envKey];
   if (!apiKey) return { ok: false, error: `${model.envKey} not set — add to .env and restart proxy`, model_needed: model.envKey };
 
-  if (!cost.canSpend(model.costEst)) return { ok: false, error: 'monthly cap reached', cost: cost.snapshot() };
+  if (!(await cost.canSpend(model.costEst))) return { ok: false, error: 'monthly cap reached', cost: await cost.snapshot() };
 
   const renderPrompt = prompt || buildRenderPrompt(row);
 
