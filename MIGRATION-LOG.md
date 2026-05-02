@@ -13,6 +13,28 @@ Format:
 
 ---
 
+## 2026-05-01 · M3 · agent-models, agent-memory, agent-evals, agent-handoffs ported
+
+- `agent-models.js` ported. `setOverride` now async; `resolveModel` and
+  `getOverrides` stay sync (hot-path resolution per LLM call). Added
+  `refresh()` for the boot-time async load.
+- `agent-memory.js` fully ported. K2 memory CRUD + recall + renderAsBlock
+  all async. `summarizeForEpisodic` stays sync (no DB I/O).
+- `agent-evals.js` fully ported. K3 ratings + corrections + examples
+  + KPIs all async. `getKPIsAll` runs the per-agent KPI fetches
+  concurrently via `Promise.all`.
+- `agent-handoffs.js` fully ported. K4 handoff CRUD + approve/reject/
+  redirect all async. `parseFromOutput` and `KNOWN_AGENTS` unchanged.
+
+Updated callers in server.js: 21 routes touched (memory CRUD ×6, evals
+CRUD + KPIs ×6, handoffs CRUD ×7, agent-models PATCH, compose memory
+auto-write, KB renderAsBlock in compose).
+
+7 of ~13 modules ported (cost, permissions, knowledge-base, agent-models,
+agent-memory, agent-evals, agent-handoffs). Remaining: anthropic-chat,
+compose-stages, daneshyar-router, afshin-router, brand-profile,
+log-writer, prompt-versions, services, tools/db.
+
 ## 2026-05-01 · M2 · permissions.js + knowledge-base.js ported
 
 - `permissions.js` ported to `pg`. All write operations are now async

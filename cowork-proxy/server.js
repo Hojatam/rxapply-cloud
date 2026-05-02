@@ -662,10 +662,10 @@ app.get('/agent-models', (_, res) => {
     overrides: agentModels.getOverrides(),
   });
 });
-app.patch('/agent-models/defaults', auth.middleware, (req, res) => {
+app.patch('/agent-models/defaults', auth.middleware, async (req, res) => {
   const { agent, model_key } = req.body || {};
   if (!agent) return res.status(400).json({ error: 'send {agent, model_key}' });
-  const r = agentModels.setOverride(agent, model_key || null);
+  const r = await agentModels.setOverride(agent, model_key || null);
   if (!r.ok) return res.status(400).json(r);
   log(`agent-models.set agent=${agent} model=${model_key || 'cleared'}`);
   res.json(r);
@@ -828,10 +828,10 @@ app.post('/renderers/render', (req, res) => {
 // DELETE /memory/:id                   remove one (auth)
 // POST   /agents/:name/memory/forget   bulk delete by content match (auth)
 // GET    /agents/:name/memory/recall   preview what would be injected
-app.get('/agents/:name/memory', (req, res) => {
+app.get('/agents/:name/memory', async (req, res) => {
   const { name } = req.params;
   if (!AGENT_NAME_RE.test(name)) return res.status(400).json({ error: 'invalid agent name' });
-  const items = agentMemory.list(name, {
+  const items = await agentMemory.list(name, {
     type: req.query.type || null,
     limit: req.query.limit || 50,
     query: req.query.query || null,
@@ -839,11 +839,11 @@ app.get('/agents/:name/memory', (req, res) => {
   res.json({ ok: true, agent: name, count: items.length, items });
 });
 
-app.post('/agents/:name/memory', auth.middleware, (req, res) => {
+app.post('/agents/:name/memory', auth.middleware, async (req, res) => {
   const { name } = req.params;
   if (!AGENT_NAME_RE.test(name)) return res.status(400).json({ error: 'invalid agent name' });
   const { type, content, tags, importance, related_to } = req.body || {};
-  const r = agentMemory.write({
+  const r = await agentMemory.write({
     agent: name, type, content, tags, importance,
     source: 'founder', relatedTo: related_to,
   });
@@ -852,32 +852,32 @@ app.post('/agents/:name/memory', auth.middleware, (req, res) => {
   res.json(r);
 });
 
-app.patch('/memory/:id', auth.middleware, (req, res) => {
-  const r = agentMemory.update(req.params.id, req.body || {});
+app.patch('/memory/:id', auth.middleware, async (req, res) => {
+  const r = await agentMemory.update(req.params.id, req.body || {});
   if (!r.ok) return res.status(400).json(r);
   res.json(r);
 });
 
-app.delete('/memory/:id', auth.middleware, (req, res) => {
-  const r = agentMemory.remove(req.params.id);
+app.delete('/memory/:id', auth.middleware, async (req, res) => {
+  const r = await agentMemory.remove(req.params.id);
   if (!r.ok) return res.status(404).json(r);
   res.json(r);
 });
 
-app.post('/agents/:name/memory/forget', auth.middleware, (req, res) => {
+app.post('/agents/:name/memory/forget', auth.middleware, async (req, res) => {
   const { name } = req.params;
   if (!AGENT_NAME_RE.test(name)) return res.status(400).json({ error: 'invalid agent name' });
   const { query } = req.body || {};
-  const r = agentMemory.forget(name, query);
+  const r = await agentMemory.forget(name, query);
   if (!r.ok) return res.status(400).json(r);
   log(`memory.forget agent=${name} query="${(query||'').slice(0,40)}" removed=${r.removed}`);
   res.json(r);
 });
 
-app.get('/agents/:name/memory/recall', (req, res) => {
+app.get('/agents/:name/memory/recall', async (req, res) => {
   const { name } = req.params;
   if (!AGENT_NAME_RE.test(name)) return res.status(400).json({ error: 'invalid agent name' });
-  const text = agentMemory.renderAsBlock(name, {
+  const text = await agentMemory.renderAsBlock(name, {
     limit: parseInt(req.query.limit, 10) || 8,
     tags: req.query.tags ? String(req.query.tags).split(',').map(s => s.trim()).filter(Boolean) : [],
     queryKeywords: req.query.query ? String(req.query.query).split(/\s+/).filter(Boolean) : [],
@@ -892,19 +892,19 @@ app.get('/agents/:name/memory/recall', (req, res) => {
 // GET  /evals/recent                   ?agent=&kind=&limit=
 // GET  /evals/agent/:name/kpis         ?days=7
 // GET  /evals/kpis                     ?days=7
-app.post('/evals/run/:runId/rate', auth.middleware, (req, res) => {
+app.post('/evals/run/:runId/rate', auth.middleware, async (req, res) => {
   const { runId } = req.params;
   const { agent, score, dimension, note } = req.body || {};
-  const r = agentEvals.rateRun({ runId, agent, score: parseInt(score, 10), dimension, note });
+  const r = await agentEvals.rateRun({ runId, agent, score: parseInt(score, 10), dimension, note });
   if (!r.ok) return res.status(400).json(r);
   log(`evals.rate run=${runId.slice(0,8)} agent=${agent} score=${score}`);
   res.json(r);
 });
 
-app.post('/evals/run/:runId/correct', auth.middleware, (req, res) => {
+app.post('/evals/run/:runId/correct', auth.middleware, async (req, res) => {
   const { runId } = req.params;
   const { agent, originalOutput, correctedOutput, note, tags } = req.body || {};
-  const r = agentEvals.submitCorrection({
+  const r = await agentEvals.submitCorrection({
     runId, agent, originalOutput, correctedOutput, note, tags,
   });
   if (!r.ok) return res.status(400).json(r);
@@ -912,18 +912,18 @@ app.post('/evals/run/:runId/correct', auth.middleware, (req, res) => {
   res.json(r);
 });
 
-app.post('/agents/:name/example', auth.middleware, (req, res) => {
+app.post('/agents/:name/example', auth.middleware, async (req, res) => {
   const { name } = req.params;
   if (!AGENT_NAME_RE.test(name)) return res.status(400).json({ error: 'invalid agent name' });
   const { content, tags, importance, note } = req.body || {};
-  const r = agentEvals.submitExample({ agent: name, content, tags, importance: parseInt(importance, 10), note });
+  const r = await agentEvals.submitExample({ agent: name, content, tags, importance: parseInt(importance, 10), note });
   if (!r.ok) return res.status(400).json(r);
   log(`evals.example agent=${name} importance=${importance || 4} → mem ${(r.memory_ids||[]).map(id=>id.slice(0,8)).join(',')}`);
   res.json(r);
 });
 
-app.get('/evals/recent', (req, res) => {
-  const items = agentEvals.listRecent({
+app.get('/evals/recent', async (req, res) => {
+  const items = await agentEvals.listRecent({
     agent: req.query.agent || null,
     kind: req.query.kind || null,
     limit: req.query.limit,
@@ -931,15 +931,15 @@ app.get('/evals/recent', (req, res) => {
   res.json({ ok: true, count: items.length, items });
 });
 
-app.get('/evals/agent/:name/kpis', (req, res) => {
+app.get('/evals/agent/:name/kpis', async (req, res) => {
   const { name } = req.params;
   if (!AGENT_NAME_RE.test(name)) return res.status(400).json({ error: 'invalid agent name' });
-  res.json({ ok: true, ...agentEvals.getKPIsForAgent(name, parseInt(req.query.days, 10) || 7) });
+  res.json({ ok: true, ...(await agentEvals.getKPIsForAgent(name, parseInt(req.query.days, 10) || 7)) });
 });
 
-app.get('/evals/kpis', (req, res) => {
+app.get('/evals/kpis', async (req, res) => {
   const days = parseInt(req.query.days, 10) || 7;
-  res.json({ ok: true, days, agents: agentEvals.getKPIsAll(days) });
+  res.json({ ok: true, days, agents: await agentEvals.getKPIsAll(days) });
 });
 
 // ── K4 · Agent handoffs ─────────────────────────────────────────────
@@ -949,19 +949,19 @@ app.get('/evals/kpis', (req, res) => {
 // POST   /handoffs/:id/approve           run the to_agent with payload (auth)
 // POST   /handoffs/:id/reject            mark rejected (auth)
 // POST   /handoffs/:id/redirect          redirect to a different agent (auth)
-app.get('/handoffs', (req, res) => {
-  res.json({
-    ok: true,
-    pending: handoffs.listPending({ limit: 50 }),
-    recent: handoffs.listRecent({ limit: 30, agent: req.query.agent || null }),
-  });
+app.get('/handoffs', async (req, res) => {
+  const [pending, recent] = await Promise.all([
+    handoffs.listPending({ limit: 50 }),
+    handoffs.listRecent({ limit: 30, agent: req.query.agent || null }),
+  ]);
+  res.json({ ok: true, pending, recent });
 });
-app.get('/handoffs/count', (_, res) => {
-  res.json({ ok: true, count: handoffs.countPending() });
+app.get('/handoffs/count', async (_, res) => {
+  res.json({ ok: true, count: await handoffs.countPending() });
 });
-app.post('/handoffs', auth.middleware, (req, res) => {
+app.post('/handoffs', auth.middleware, async (req, res) => {
   const { from_agent, to_agent, reason, suggested_action, payload, source_run_id } = req.body || {};
-  const r = handoffs.record({
+  const r = await handoffs.record({
     fromAgent: from_agent, toAgent: to_agent, reason,
     suggestedAction: suggested_action, payload, sourceRunId: source_run_id,
   });
@@ -971,7 +971,7 @@ app.post('/handoffs', auth.middleware, (req, res) => {
 });
 app.post('/handoffs/:id/approve', auth.middleware, async (req, res) => {
   const note = (req.body && req.body.note) || null;
-  const row = handoffs.approve(req.params.id, note, 'founder');
+  const row = await handoffs.approve(req.params.id, note, 'founder');
   if (!row) return res.status(404).json({ ok: false, error: 'not pending or not found' });
   log(`handoff.approve ${req.params.id.slice(0,8)} ${row.from_agent} → ${row.to_agent}`);
   // Execute by spawning the to_agent's helper (suggested_action is the cmd).
@@ -996,24 +996,24 @@ app.post('/handoffs/:id/approve', auth.middleware, async (req, res) => {
         else reject(new Error(`helper ${row.to_agent} exit ${code}: ${stderr.slice(0, 300)}`));
       });
     });
-    handoffs.recordResult(req.params.id, out);
+    await handoffs.recordResult(req.params.id, out);
     res.json({ ok: true, decided: row, executed: out });
   } catch (e) {
-    handoffs.recordFailure(req.params.id, e.message);
+    await handoffs.recordFailure(req.params.id, e.message);
     res.status(500).json({ ok: false, error: e.message, decided: row });
   }
 });
-app.post('/handoffs/:id/reject', auth.middleware, (req, res) => {
+app.post('/handoffs/:id/reject', auth.middleware, async (req, res) => {
   const note = (req.body && req.body.note) || null;
-  const row = handoffs.reject(req.params.id, note, 'founder');
+  const row = await handoffs.reject(req.params.id, note, 'founder');
   if (!row) return res.status(404).json({ ok: false, error: 'not pending or not found' });
   log(`handoff.reject ${req.params.id.slice(0,8)}`);
   res.json({ ok: true, decided: row });
 });
-app.post('/handoffs/:id/redirect', auth.middleware, (req, res) => {
+app.post('/handoffs/:id/redirect', auth.middleware, async (req, res) => {
   const { to_agent, note } = req.body || {};
   if (!to_agent) return res.status(400).json({ error: 'to_agent required' });
-  const r = handoffs.redirect(req.params.id, to_agent, note || null, 'founder');
+  const r = await handoffs.redirect(req.params.id, to_agent, note || null, 'founder');
   if (!r) return res.status(400).json({ ok: false, error: 'redirect failed' });
   log(`handoff.redirect ${req.params.id.slice(0,8)} → ${to_agent}`);
   res.json({ ok: true, ...r });
@@ -1594,13 +1594,13 @@ app.post('/compose/instagram', auth.middleware, async (req, res) => {
   const brandBlock = brandProfile.renderAsPromptBlock();
   // K2 · Pull compose-ig's memory (semantic + procedural for voice consistency,
   // episodic for "what topics have we covered before").
-  const memoryBlock = agentMemory.renderAsBlock('compose-ig', {
+  const memoryBlock = await agentMemory.renderAsBlock('compose-ig', {
     limit: 8,
     queryKeywords: String(topic || '').split(/\s+/).filter(w => w.length >= 4).slice(0, 5),
   });
   // K6 · Knowledge base block — verified facts grounded by detected country.
   const detectedCountry = KB.detectCountry(topic);
-  const knowledgeBlock = KB.renderAsBlock({ country: detectedCountry, query: topic, limit: 6 });
+  const knowledgeBlock = await KB.renderAsBlock({ country: detectedCountry, query: topic, limit: 6 });
 
   log(`compose.ig topic="${topic.slice(0, 80)}" tone=${tone || 'hype-free'} model=${composeModel}`);
   emit('start', { topic, tone: tone || 'hype-free', model: composeModel });
@@ -1710,7 +1710,7 @@ app.post('/compose/instagram', auth.middleware, async (req, res) => {
     cost.invalidate();
     // K2 · Auto-write compose-ig episodic memory of this run.
     try {
-      agentMemory.write({
+      await agentMemory.write({
         agent: 'compose-ig', type: 'episodic',
         content: agentMemory.summarizeForEpisodic({
           agent: 'compose-ig', action: 'compose-trio',
