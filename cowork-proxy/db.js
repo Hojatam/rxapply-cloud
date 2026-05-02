@@ -44,12 +44,26 @@ function _getPool() {
   if (!url) {
     throw new Error('DATABASE_URL env var is required (Postgres connection string).');
   }
-  // Supabase Cloud requires SSL. Local dev (postgres on localhost) doesn't.
-  // We auto-detect by hostname rather than forcing the founder to set a flag.
-  const isLocal = /(?:localhost|127\.0\.0\.1)/i.test(url);
+  // SSL detection — three signals, in priority order:
+  //   1. ?sslmode=disable in the URL → SSL OFF (explicit opt-out)
+  //   2. ?sslmode=require / ?sslmode=verify-* → SSL ON
+  //   3. Hostname is localhost/127.0.0.1/host.docker.internal → SSL OFF
+  //   4. Anything else → SSL ON (Supabase Cloud, RDS, neon, etc.)
+  // Result: works out of the box with Supabase Cloud, and local Docker
+  // dev with `?sslmode=disable` keeps the legacy postgres-without-TLS
+  // path working too.
+  const sslModeMatch = /[?&]sslmode=([a-z-]+)/i.exec(url);
+  const sslMode = sslModeMatch ? sslModeMatch[1].toLowerCase() : null;
+  const isLocalHost = /^postgres(?:ql)?:\/\/[^/@]*@?(?:localhost|127\.0\.0\.1|host\.docker\.internal|\[::1\])/i.test(url);
+  let ssl;
+  if (sslMode === 'disable')                                          ssl = false;
+  else if (sslMode && /^(require|verify-ca|verify-full|prefer)$/.test(sslMode)) ssl = { rejectUnauthorized: false };
+  else if (isLocalHost)                                               ssl = false;
+  else                                                                 ssl = { rejectUnauthorized: false };
+
   _pool = new Pool({
     connectionString: url,
-    ssl: isLocal ? false : { rejectUnauthorized: false },
+    ssl,
     max: Number(process.env.DB_POOL_MAX) || 10,
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 5_000,

@@ -1,0 +1,62 @@
+# =====================================================================
+# Trim the Docker build context. Drops things that are huge, secret,
+# or inconsistent across machines (node_modules from a different OS,
+# logs, OneDrive turds, etc.).
+# =====================================================================
+
+# Git
+.git
+.gitignore
+.github
+
+# Node
+node_modules
+**/node_modules
+npm-debug.log*
+yarn-debug.log*
+.npm
+.eslintcache
+
+# Logs (in repo + per-run logs the proxy emits at runtime)
+*.log
+*.log.gz
+**/proxy.log
+**/proxy.err
+**/proxy.out
+**/proxy*.log
+cowork-proxy/runs/
+logs/
+
+# Environment / secrets — must NEVER end up in the image
+.env
+.env.*
+!.env.example
+
+# Backups + scratch
+**/team-original.jpg
+**/*.tmp
+**/*.bak
+
+# Docs / dev artefacts that aren't needed at runtime
+*.md
+!cowork-proxy/README.md
+!agents/**/SKILL.md
+# Keep root-level dashboard + architecture HTML — server.js serves them.
+*.html
+!dashboard.html
+!architecture.html
+!cowork-proxy/public/**/*.html
+fixtures/
+prompts/
+n8n-workflows/
+n8n/
+pipelines/
+admin-dashboard-v1.html
+dashboard-v1.html
+next-steps.html
+phase-f-v2-plan.html
+
+# Windows / OneDrive cruft
+Thumbs.db
+desktop.ini
+.DS_Store

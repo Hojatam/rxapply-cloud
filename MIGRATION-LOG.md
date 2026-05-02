@@ -13,6 +13,44 @@ Format:
 
 ---
 
+## 2026-05-01 · M8 · Dockerfile + railway.json + Procfile (Track 1 #4+#5 DONE)
+
+Containerised the cloud build. First deployable artefact.
+
+- **`Dockerfile`** (repo root) and **`cowork-proxy/Dockerfile`** (kept in
+  sync) — two-stage build. Stage 1: node:20-bookworm-slim + Python 3 +
+  build-essential, runs `npm ci --omit=dev` + `pip install -r` for any
+  agent's `requirements.txt`. Stage 2: stripped-down runtime with just
+  Python 3 (for KB extract.py and helper scripts).
+- Image runs as non-root `rxapply` user. `HEALTHCHECK` hits `/health`
+  every 30s with 5s timeout.
+- **`railway.json`** — pins the Dockerfile builder, sets healthcheck
+  path/timeout, `restartPolicy: ON_FAILURE` (5 retries).
+- **`Procfile`** — fallback for hosts that prefer Procfile over Dockerfile.
+- **`.dockerignore`** — excludes `node_modules`, logs, `.env*`,
+  legacy V1 HTML files, and OneDrive cruft. Whitelists `dashboard.html`,
+  `architecture.html`, agent SKILL.md.
+- **`db.js` SSL detection improved.** Three signals now:
+    1. `?sslmode=disable` URL param → SSL OFF
+    2. `?sslmode=require/verify-*/prefer` → SSL ON
+    3. Hostname `localhost`/`127.0.0.1`/`host.docker.internal`/`[::1]`
+       → SSL OFF
+    4. Anything else → SSL ON (Supabase Cloud, RDS, Neon, …)
+
+**Local build + run test:**
+- `docker build -t rxapply-cloud:test .` succeeded; image 482 MB.
+- Ran the container with DATABASE_URL pointing at host's local Supabase
+  via `host.docker.internal:54322`. Results:
+    - `/health` 200 with `llmTransport: anthropic-api-direct` ✓
+    - `/tools` returned the 13-entry catalog ✓
+    - `/dashboard` 200 (HTML served) ✓
+    - tools registry synced 13 rows to Postgres ✓
+    - Zero startup errors ✓
+
+Track 1 #4 (secrets out of `.bat` into env vars) was already done in
+the initial commit (start-proxy.bat scrubbed; `.env.example` rewritten
+for the cloud stack). Track 1 #5 (Dockerfile + railway.json) is done now.
+
 ## 2026-05-01 · M7 · `claude` CLI subprocess removed (Track 1 #3 DONE)
 
 - `runClaude()` in server.js was the only use of `spawn('claude' …)`.
