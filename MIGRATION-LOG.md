@@ -13,6 +13,36 @@ Format:
 
 ---
 
+## 2026-05-01 · M4 · brand-profile + prompt-versions + tools/* tree ported
+
+- `brand-profile.js` ported. `set` async; `get` and `renderAsPromptBlock`
+  stay sync (called every LLM call). New `refresh()` for boot-time load.
+- `prompt-versions.js` fully ported. SKILL.md history + rollback all
+  async. Added comment about cloud volatility — agents/* SKILL.md will
+  need re-materialising from DB on boot.
+- `tools/db.js` rewritten as a thin pass-through to `../db.js`. `psql()`
+  is now async and returns a Promise<string> matching the legacy shape.
+- `tools/crypto.js` ported. `encrypt`/`decrypt` async; `encryptSqlExpr`/
+  `decryptSqlExpr` stay sync (no DB I/O — pure SQL fragments).
+- `tools/policy.js` ported. `_cacheGet` and `_cachePut` async.
+- `tools/registry.js` `sync()` async. server.js boot path now does
+  `toolsRegistry.sync().then(...)` instead of synchronous try/catch.
+- `tools/runtime.js` fully ported. `getPermission`, `logStart`, `logEnd`,
+  `bumpSpent`, `executeApproved`, `rejectCall` all async. The cloud build
+  doesn't need the `INSERT 0 1` tag-strip workaround — pg returns just
+  the value for RETURNING, so we removed `split(/[\r\n]+/)[0]`.
+- `tools/router.js` 9 routes async-ified.
+- `tools/adapters/rest.js` `_loadSecrets` async.
+- `tools/adapters/mcp-http.js` `_loadSecrets` and `discoverOps` async.
+- `tools/adapters/mcp-stdio.js` `_loadSecrets`, `_spawn`, and the persist
+  step in `discoverOps` async.
+
+12 of ~13 modules ported. Remaining: anthropic-chat, daneshyar-router,
+compose-stages, afshin-router, log-writer, services. (`afshin-router`
+has cost.js callers already done; the inline `_psql` is what's left.
+`services.js` is the docker-control layer — also not strictly DB-bound.
+`log-writer.js` is the largest remaining.)
+
 ## 2026-05-01 · M3 · agent-models, agent-memory, agent-evals, agent-handoffs ported
 
 - `agent-models.js` ported. `setOverride` now async; `resolveModel` and

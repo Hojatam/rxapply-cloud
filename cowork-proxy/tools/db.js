@@ -1,40 +1,27 @@
 // cowork-proxy/tools/db.js
 // =====================================================================
-// Tiny psql wrapper shared by the tools/* modules. Mirrors the pattern
-// used in permissions.js / cost.js: docker exec into the supabase_db
-// container, run psql with -tA, return trimmed stdout. Buffer-based
-// stdin avoids the Windows cp1252 corruption documented elsewhere.
+// Thin pass-through to ../db.js so existing `require('./db')` imports
+// inside tools/* keep working. All tools/* modules now share the single
+// pg pool defined in the parent db.js.
+//
+// `psql(sql)` is now async (returns a Promise<string>) and mirrors the
+// shape of legacy psql -tA stdout. Tools-framework callers must await.
 // =====================================================================
 
-const { spawnSync } = require('child_process');
-const PG_CONTAINER = process.env.SUPABASE_DB_CONTAINER || 'supabase_db_rxapply-test';
+const parent = require('../db');
 
-function psql(sql) {
-  const r = spawnSync('docker',
-    ['exec', '-i', PG_CONTAINER, 'psql', '-U', 'postgres', '-d', 'postgres', '-tA', '-v', 'ON_ERROR_STOP=1'],
-    { input: Buffer.from(sql, 'utf-8') });
-  if (r.status !== 0) {
-    throw new Error(`psql (${r.status}): ${(r.stderr || Buffer.alloc(0)).toString('utf-8').slice(0, 400)}`);
-  }
-  return (r.stdout || Buffer.alloc(0)).toString('utf-8').trim();
+async function psql(sql) {
+  return await parent.queryValue(sql);
 }
 
-// ── SQL literal escapers ─────────────────────────────────────────────
-function q(v) {
-  if (v == null) return 'NULL';
-  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : 'NULL';
-  if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';
-  return `'${String(v).replace(/'/g, "''")}'`;
-}
-function qJson(v) {
-  if (v == null) return 'NULL';
-  return `'${JSON.stringify(v).replace(/'/g, "''")}'::jsonb`;
-}
-// Bytea as a hex literal (used when reading pgp_sym_encrypt output back)
-function qBytea(buf) {
-  if (!buf) return 'NULL';
-  const hex = Buffer.isBuffer(buf) ? buf.toString('hex') : Buffer.from(buf).toString('hex');
-  return `'\\x${hex}'::bytea`;
-}
-
-module.exports = { psql, q, qJson, qBytea };
+module.exports = {
+  psql,                      // async — mirrors legacy psql -tA shape
+  query:           parent.query,
+  queryValue:      parent.queryValue,
+  queryRows:       parent.queryRows,
+  queryReturning:  parent.queryReturning,
+  q:               parent.q,
+  qJson:           parent.qJson,
+  qArr:            parent.qArr,
+  qBytea:          parent.qBytea,
+};

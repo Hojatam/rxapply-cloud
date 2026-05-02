@@ -382,7 +382,7 @@ app.get('/prompts/:agent', (req, res) => {
 
 // PUT /prompts/:agent — body either {markdown:"...", reason?:"..."} JSON or raw text/markdown body
 // F7: gated by auth.middleware once password is initialized; auto-records to prompt_versions.
-app.put('/prompts/:agent', auth.middleware, (req, res) => {
+app.put('/prompts/:agent', auth.middleware, async (req, res) => {
   const { agent } = req.params;
   if (!AGENT_NAME_RE.test(agent)) {
     return res.status(400).json({ error: 'invalid agent name' });
@@ -405,7 +405,7 @@ app.put('/prompts/:agent', auth.middleware, (req, res) => {
     });
   }
   try {
-    const r = promptVersions.saveAndVersion(agent, markdown, {
+    const r = await promptVersions.saveAndVersion(agent, markdown, {
       editedBy: 'founder',
       reason,
     });
@@ -419,29 +419,29 @@ app.put('/prompts/:agent', auth.middleware, (req, res) => {
 });
 
 // GET /prompts/:agent/versions — list version history (header rows only, no bodies)
-app.get('/prompts/:agent/versions', (req, res) => {
+app.get('/prompts/:agent/versions', async (req, res) => {
   const { agent } = req.params;
   if (!AGENT_NAME_RE.test(agent)) return res.status(400).json({ error: 'invalid agent name' });
-  const versions = promptVersions.list(agent, { limit: req.query.limit });
+  const versions = await promptVersions.list(agent, { limit: req.query.limit });
   res.json({ ok: true, agent, count: versions.length, versions });
 });
 
 // GET /prompts/:agent/versions/:n — full body of one version
-app.get('/prompts/:agent/versions/:n', (req, res) => {
+app.get('/prompts/:agent/versions/:n', async (req, res) => {
   const { agent, n } = req.params;
   if (!AGENT_NAME_RE.test(agent)) return res.status(400).json({ error: 'invalid agent name' });
-  const body = promptVersions.getBody(agent, n);
+  const body = await promptVersions.getBody(agent, n);
   if (body == null) return res.status(404).json({ error: 'version not found' });
   res.json({ ok: true, agent, version: parseInt(n, 10), body, chars: body.length });
 });
 
 // POST /prompts/:agent/rollback {to:<n>} — restore version :n as the active SKILL.md
-app.post('/prompts/:agent/rollback', auth.middleware, (req, res) => {
+app.post('/prompts/:agent/rollback', auth.middleware, async (req, res) => {
   const { agent } = req.params;
   if (!AGENT_NAME_RE.test(agent)) return res.status(400).json({ error: 'invalid agent name' });
   const to = req.body && req.body.to;
   if (to == null) return res.status(400).json({ error: 'send {to: <version>}' });
-  const r = promptVersions.rollback(agent, to);
+  const r = await promptVersions.rollback(agent, to);
   if (!r.ok) return res.status(404).json(r);
   log(`prompts.rollback agent=${agent} to=${to} new_version=${r.version}`);
   res.json({ ok: true, agent, restored_from: parseInt(to, 10), new_version: r.version });
@@ -677,8 +677,8 @@ app.patch('/agent-models/defaults', auth.middleware, async (req, res) => {
 app.get('/brand-profile', (_, res) => {
   res.json({ ok: true, profile: brandProfile.get(), default: brandProfile.DEFAULT_PROFILE });
 });
-app.patch('/brand-profile', auth.middleware, (req, res) => {
-  const r = brandProfile.set(req.body || {});
+app.patch('/brand-profile', auth.middleware, async (req, res) => {
+  const r = await brandProfile.set(req.body || {});
   if (!r.ok) return res.status(400).json(r);
   log(`brand-profile.set keys=${Object.keys(req.body || {}).join(',')}`);
   res.json(r);
@@ -1990,12 +1990,9 @@ const PORT = Number(process.env.PORT) || 7777;
 // T1 · Tools framework — mount the router and seed the catalog into Postgres
 // on boot so the UI's catalog list never lags behind the registry.
 app.use('/tools', toolsRouter);
-try {
-  const n = toolsRegistry.sync();
-  console.log(`  tools registry: synced ${n} tools to Postgres`);
-} catch (e) {
-  console.error(`  tools registry sync failed: ${e.message}`);
-}
+toolsRegistry.sync()
+  .then(n => console.log(`  tools registry: synced ${n} tools to Postgres`))
+  .catch(e => console.error(`  tools registry sync failed: ${e.message}`));
 
 app.listen(PORT, () => {
   console.log(`cowork-proxy listening on :${PORT}`);

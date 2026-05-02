@@ -11,8 +11,8 @@ const fs = require('fs');
 const { psql, q } = require('../db');
 const { decryptSqlExpr } = require('../crypto');
 
-function _loadSecrets(toolSlug) {
-  const out = psql(`
+async function _loadSecrets(toolSlug) {
+  const out = await psql(`
     SELECT ${decryptSqlExpr('secrets_enc')}
     FROM tool_credentials
     WHERE tool_slug = ${q(toolSlug)};
@@ -36,7 +36,7 @@ async function execute({ tool, op, args, agent }) {
   if (!mod || typeof mod.execute !== 'function') {
     throw new Error(`No REST adapter file for tool '${slug}' (expected adapters/rest/${slug}.js)`);
   }
-  const secrets = _loadSecrets(slug) || {};
+  const secrets = (await _loadSecrets(slug)) || {};
   return await mod.execute({ op, args: args || {}, secrets, agent });
 }
 

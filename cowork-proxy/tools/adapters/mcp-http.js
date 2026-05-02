@@ -41,8 +41,8 @@ async function _rpc(url, key, method, params, extraHeaders) {
   return j.result;
 }
 
-function _loadSecrets(slug) {
-  const out = psql(`
+async function _loadSecrets(slug) {
+  const out = await psql(`
     SELECT ${decryptSqlExpr('secrets_enc')}
     FROM tool_credentials WHERE tool_slug = ${q(slug)};
   `);
@@ -51,7 +51,7 @@ function _loadSecrets(slug) {
 }
 
 async function discoverOps(toolSlug) {
-  const secrets = _loadSecrets(toolSlug);
+  const secrets = await _loadSecrets(toolSlug);
   if (!secrets || !secrets.mcp_url) {
     throw new Error('mcp_url + api_key required — connect the tool first.');
   }
@@ -63,12 +63,12 @@ async function discoverOps(toolSlug) {
     schema: t.inputSchema || null,
   }));
   // Persist into the tools row so the Agents matrix can render meaningful labels
-  psql(`UPDATE tools SET ops = ${qJson(ops)}, updated_at = now() WHERE slug = ${q(toolSlug)};`);
+  await psql(`UPDATE tools SET ops = ${qJson(ops)}, updated_at = now() WHERE slug = ${q(toolSlug)};`);
   return ops;
 }
 
 async function execute({ tool, op, args }) {
-  const secrets = _loadSecrets(tool.slug);
+  const secrets = await _loadSecrets(tool.slug);
   if (!secrets || !secrets.mcp_url) throw new Error('mcp_url missing — connect the tool first.');
   if (op === 'test' || op === '_test') {
     // tools/list ping

@@ -25,9 +25,9 @@ function getKey() {
   return k;
 }
 
-// SQL fragments — preferred path. Lets us write
+// SQL fragments — preferred path (sync, no DB I/O). Lets us write
 //   INSERT … secrets_enc = ${encryptSqlExpr(jsonText)}
-// in a single psql round trip.
+// in a single round trip from the calling site.
 function encryptSqlExpr(plainText) {
   const key = getKey();
   return `pgp_sym_encrypt(${q(String(plainText))}, ${q(key)})`;
@@ -37,14 +37,14 @@ function decryptSqlExpr(byteaCol) {
   return `pgp_sym_decrypt(${byteaCol}, ${q(key)})`;
 }
 
-// Round-trip helpers (used rarely — when you only have a buffer in JS)
-function encrypt(obj) {
-  const out = psql(`SELECT encode(${encryptSqlExpr(JSON.stringify(obj))}, 'hex');`);
-  return out;
+// Round-trip helpers (rarely used). Now async because the underlying
+// pg client is async.
+async function encrypt(obj) {
+  return await psql(`SELECT encode(${encryptSqlExpr(JSON.stringify(obj))}, 'hex');`);
 }
-function decrypt(hexEnc) {
+async function decrypt(hexEnc) {
   if (!hexEnc) return null;
-  const out = psql(`SELECT ${decryptSqlExpr(`decode(${q(hexEnc)}, 'hex')`)};`);
+  const out = await psql(`SELECT ${decryptSqlExpr(`decode(${q(hexEnc)}, 'hex')`)};`);
   try { return JSON.parse(out); } catch (_) { return null; }
 }
 

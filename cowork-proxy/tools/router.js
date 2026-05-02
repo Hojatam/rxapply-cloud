@@ -24,18 +24,18 @@ const runtime = require('./runtime');
 const router = express.Router();
 
 // ── Pending-count (drives the dashboard's tool-approval banner) ────
-router.get('/pending-count', (_req, res) => {
+router.get('/pending-count', async (_req, res) => {
   try {
-    const out = psql(`SELECT COUNT(*)::int FROM tool_calls
-                        WHERE status IN ('pending','policy_ask');`);
+    const out = await psql(`SELECT COUNT(*)::int FROM tool_calls
+                              WHERE status IN ('pending','policy_ask');`);
     res.json({ ok: true, count: parseInt(out, 10) || 0 });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 // ── Catalog list ────────────────────────────────────────────────────
-router.get('/', (_req, res) => {
+router.get('/', async (_req, res) => {
   try {
-    const out = psql(`
+    const out = await psql(`
       SELECT COALESCE(json_agg(row_to_json(r) ORDER BY r.kind, r.name), '[]'::json) FROM (
         SELECT t.slug, t.name, t.vendor, t.kind, t.conn_method, t.icon,
                t.cost_model, t.description, t.default_policy, t.ops, t.status,
@@ -59,12 +59,12 @@ router.get('/', (_req, res) => {
 });
 
 // ── One tool, full detail ──────────────────────────────────────────
-router.get('/:slug', (req, res) => {
+router.get('/:slug', async (req, res) => {
   const slug = req.params.slug;
   const spec = registry.get(slug);
   if (!spec) return res.status(404).json({ ok: false, error: 'unknown_tool' });
   try {
-    const out = psql(`
+    const out = await psql(`
       SELECT row_to_json(r) FROM (
         SELECT t.slug, t.name, t.vendor, t.kind, t.conn_method, t.icon,
                t.cost_model, t.description, t.default_policy, t.ops, t.status,
@@ -106,7 +106,7 @@ router.post('/:slug/connect', async (req, res) => {
   }
   try {
     const cap = Number.isFinite(monthlyCap) && monthlyCap > 0 ? monthlyCap : 5.00;
-    psql(`
+    await psql(`
       INSERT INTO tool_credentials (tool_slug, secrets_enc, monthly_cap_usd, connected_by, connected_at, last_status)
       VALUES (${q(slug)}, ${encryptSqlExpr(JSON.stringify(secrets))}, ${q(cap)}, 'founder', now(), 'ok')
       ON CONFLICT (tool_slug) DO UPDATE SET
@@ -124,9 +124,9 @@ router.post('/:slug/connect', async (req, res) => {
         const ops = await mod.discoverOps(slug);
         return res.json({ ok: true, discovered_ops: ops.length });
       } catch (e) {
-        psql(`UPDATE tool_credentials SET last_status = 'auth_error',
-                last_status_msg = ${q('discovery: ' + String(e.message).slice(0, 200))}
-              WHERE tool_slug = ${q(slug)};`);
+        await psql(`UPDATE tool_credentials SET last_status = 'auth_error',
+                      last_status_msg = ${q('discovery: ' + String(e.message).slice(0, 200))}
+                    WHERE tool_slug = ${q(slug)};`);
         return res.json({ ok: true, discovered_ops: 0, warning: e.message });
       }
     }
@@ -137,9 +137,9 @@ router.post('/:slug/connect', async (req, res) => {
 });
 
 // ── Disconnect ─────────────────────────────────────────────────────
-router.post('/:slug/disconnect', (req, res) => {
+router.post('/:slug/disconnect', async (req, res) => {
   try {
-    psql(`DELETE FROM tool_credentials WHERE tool_slug = ${q(req.params.slug)};`);
+    await psql(`DELETE FROM tool_credentials WHERE tool_slug = ${q(req.params.slug)};`);
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -161,7 +161,7 @@ router.post('/:slug/test', async (req, res) => {
     const restAdapter = require('./adapters/rest');
     if (spec.conn_method === 'rest') {
       const r = await restAdapter.execute({ tool: spec, op, args: { _test: true }, agent: '_test' });
-      psql(`UPDATE tool_credentials SET last_status = 'ok', last_status_msg = NULL WHERE tool_slug = ${q(slug)};`);
+      await psql(`UPDATE tool_credentials SET last_status = 'ok', last_status_msg = NULL WHERE tool_slug = ${q(slug)};`);
       return res.json({ ok: true, output: r.output });
     }
     if (spec.conn_method === 'mcp_http' || spec.conn_method === 'mcp_stdio') {
@@ -169,13 +169,13 @@ router.post('/:slug/test', async (req, res) => {
         ? require('./adapters/mcp-http')
         : require('./adapters/mcp-stdio');
       const r = await mod.execute({ tool: spec, op: 'test', args: {} });
-      psql(`UPDATE tool_credentials SET last_status = 'ok', last_status_msg = NULL WHERE tool_slug = ${q(slug)};`);
+      await psql(`UPDATE tool_credentials SET last_status = 'ok', last_status_msg = NULL WHERE tool_slug = ${q(slug)};`);
       return res.json({ ok: true, output: r.output });
     }
     return res.json({ ok: true, note: 'unknown conn_method' });
   } catch (e) {
-    psql(`UPDATE tool_credentials SET last_status = 'error', last_status_msg = ${q(String(e.message).slice(0, 300))}
-            WHERE tool_slug = ${q(slug)};`);
+    await psql(`UPDATE tool_credentials SET last_status = 'error', last_status_msg = ${q(String(e.message).slice(0, 300))}
+                  WHERE tool_slug = ${q(slug)};`);
     res.status(500).json({ ok: false, error: e.message });
   }
 });
@@ -196,10 +196,10 @@ router.post('/:slug/exec', async (req, res) => {
 });
 
 // ── Call log ───────────────────────────────────────────────────────
-router.get('/:slug/calls', (req, res) => {
+router.get('/:slug/calls', async (req, res) => {
   const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
   try {
-    const out = psql(`
+    const out = await psql(`
       SELECT COALESCE(json_agg(row_to_json(c) ORDER BY c.started_at DESC), '[]'::json) FROM (
         SELECT id, agent, op, args_redacted, output_summary, cost_usd, status,
                decision, error_msg, started_at::text, ended_at::text
@@ -214,7 +214,7 @@ router.get('/:slug/calls', (req, res) => {
 });
 
 // ── Per-agent permission CRUD ──────────────────────────────────────
-router.post('/:slug/perms/:agent', (req, res) => {
+router.post('/:slug/perms/:agent', async (req, res) => {
   const slug = req.params.slug;
   const agent = req.params.agent;
   const { mode, policy_text, per_call_cap_usd } = req.body || {};
@@ -222,7 +222,7 @@ router.post('/:slug/perms/:agent', (req, res) => {
     return res.status(400).json({ ok: false, error: 'invalid_mode' });
   }
   try {
-    psql(`
+    await psql(`
       INSERT INTO agent_tool_permissions (agent_name, tool_slug, mode, policy_text, per_call_cap_usd, updated_at)
       VALUES (${q(agent)}, ${q(slug)}, ${q(mode)}, ${q(policy_text || null)},
               ${q(Number(per_call_cap_usd) || null)}, now())
@@ -238,19 +238,19 @@ router.post('/:slug/perms/:agent', (req, res) => {
   }
 });
 
-router.delete('/:slug/perms/:agent', (req, res) => {
+router.delete('/:slug/perms/:agent', async (req, res) => {
   try {
-    psql(`DELETE FROM agent_tool_permissions
-            WHERE tool_slug = ${q(req.params.slug)} AND agent_name = ${q(req.params.agent)};`);
+    await psql(`DELETE FROM agent_tool_permissions
+                  WHERE tool_slug = ${q(req.params.slug)} AND agent_name = ${q(req.params.agent)};`);
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
 
-router.get('/agents/:agent', (req, res) => {
+router.get('/agents/:agent', async (req, res) => {
   try {
-    const out = psql(`
+    const out = await psql(`
       SELECT COALESCE(json_agg(row_to_json(r) ORDER BY r.tool_slug), '[]'::json) FROM (
         SELECT t.slug AS tool_slug, t.name AS tool_name, t.icon, t.kind,
                COALESCE(p.mode, 'off') AS mode, p.policy_text, p.per_call_cap_usd

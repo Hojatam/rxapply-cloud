@@ -34,9 +34,9 @@ function _argShape(args) {
   return `{${keys.map(k => `${k}:${typeof args[k]}`).join(',')}}`;
 }
 
-function _cacheGet(key) {
+async function _cacheGet(key) {
   try {
-    const out = psql(`SELECT row_to_json(c) FROM (
+    const out = await psql(`SELECT row_to_json(c) FROM (
       SELECT decision, reason FROM tool_policy_cache
       WHERE cache_key = ${q(key)} AND expires_at > now()
     ) c;`);
@@ -44,9 +44,9 @@ function _cacheGet(key) {
     return JSON.parse(out);
   } catch (_) { return null; }
 }
-function _cachePut(key, decision, reason) {
+async function _cachePut(key, decision, reason) {
   try {
-    psql(`
+    await psql(`
       INSERT INTO tool_policy_cache (cache_key, decision, reason, expires_at)
       VALUES (${q(key)}, ${q(decision)}, ${q(reason || null)}, now() + interval '${CACHE_TTL_MIN} minutes')
       ON CONFLICT (cache_key) DO UPDATE SET
@@ -120,7 +120,7 @@ async function evaluate({ agent, tool, op, args, policyText, taskContext }) {
 
   // Cache lookup
   const key = _cacheKey(agent, tool.slug, op, args);
-  const cached = _cacheGet(key);
+  const cached = await _cacheGet(key);
   if (cached) {
     return { decision: cached.decision, reason: cached.reason, confidence: 0.95, cached: true };
   }
@@ -128,7 +128,7 @@ async function evaluate({ agent, tool, op, args, policyText, taskContext }) {
   // Haiku call
   try {
     const r = await _ask({ policyText, agent, tool, op, args, taskContext });
-    _cachePut(key, r.decision, r.reason);
+    await _cachePut(key, r.decision, r.reason);
     return r;
   } catch (e) {
     // Fail-safe: ask.

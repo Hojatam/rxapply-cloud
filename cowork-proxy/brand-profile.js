@@ -1,22 +1,20 @@
 // cowork-proxy/brand-profile.js
 // =====================================================================
 // Single source of truth for the RxApply brand. Stored in
-// dashboard_settings.brand_profile jsonb. Every agent that talks to an
-// LLM injects renderAsPromptBlock() into its system prompt — change the
-// profile once, propagation is automatic on next agent run.
+// dashboard_settings.brand_profile jsonb.  [cloud build]
 //
 // Public API:
-//   get()                   → Profile object (always returns valid shape)
-//   set(profile)            → write
-//   renderAsPromptBlock()   → "BRAND CONTEXT\n---\n..." string for prompt injection
+//   get()                 → Profile object (sync; cached)
+//   set(profile)          → write (async)
+//   renderAsPromptBlock() → "BRAND CONTEXT\n---\n..." (sync; uses cache)
+//   refresh()             → force reload cache (await on boot)
+//
+// Sync surface preserved because every LLM call hits this on its
+// hot path. Cache is loaded once on boot and refreshed after each set().
 // =====================================================================
 
-const { spawnSync } = require('child_process');
+const { query, queryValue, q } = require('./db');
 
-const PG_CONTAINER = process.env.SUPABASE_DB_CONTAINER || 'supabase_db_rxapply-test';
-
-// Default profile — used when the DB row is empty AND as the fallback
-// shape in renderAsPromptBlock. Should match the seed in the migration.
 const DEFAULT_PROFILE = {
   name: 'RxApply',
   tagline: 'We help internationally-trained dentists migrate, calmly.',
@@ -37,44 +35,34 @@ const DEFAULT_PROFILE = {
   example_captions: [],
 };
 
-// Pass a Buffer as input — defends against the Windows cp1252 stdin
-// corruption documented in compose-ig + agent-models.
-function _psql(sql) {
-  const r = spawnSync('docker',
-    ['exec', '-i', PG_CONTAINER, 'psql', '-U', 'postgres', '-d', 'postgres', '-tA', '-v', 'ON_ERROR_STOP=1'],
-    { input: Buffer.from(sql, 'utf-8') });
-  if (r.status !== 0) {
-    const err = (r.stderr || Buffer.alloc(0)).toString('utf-8');
-    throw new Error(`psql (${r.status}): ${err.slice(0, 300)}`);
-  }
-  return (r.stdout || Buffer.alloc(0)).toString('utf-8').trim();
-}
-
-// In-memory cache. Refresh after every set().
 let _cache = null;
 let _cacheStamp = 0;
-const CACHE_TTL_MS = 60_000;  // 1 min — long enough to skip DB on every call
+const CACHE_TTL_MS = 60_000;
 
-function get() {
-  const now = Date.now();
-  if (_cache && (now - _cacheStamp) < CACHE_TTL_MS) return _cache;
+async function refresh() {
   try {
-    const raw = _psql(`SELECT brand_profile FROM dashboard_settings WHERE id = 1;`);
+    const raw = await queryValue(`SELECT brand_profile FROM dashboard_settings WHERE id = 1;`);
     const parsed = raw ? JSON.parse(raw) : {};
-    // Merge over defaults so missing fields don't break callers.
     _cache = { ...DEFAULT_PROFILE, ...parsed };
-    _cacheStamp = now;
-    return _cache;
+    _cacheStamp = Date.now();
   } catch (_) {
-    return DEFAULT_PROFILE;
+    _cache = DEFAULT_PROFILE;
   }
+  return _cache;
 }
 
-function set(profile) {
+function get() {
+  if (_cache && (Date.now() - _cacheStamp) < CACHE_TTL_MS) return _cache;
+  // Background-refresh; return whatever we have. On the very first call
+  // before refresh() resolves, returns DEFAULT_PROFILE which is safe.
+  refresh().catch(() => {});
+  return _cache || DEFAULT_PROFILE;
+}
+
+async function set(profile) {
   if (!profile || typeof profile !== 'object') {
     return { ok: false, error: 'profile must be an object' };
   }
-  // Normalise: strip unknown keys, ensure arrays are arrays.
   const KEYS = Object.keys(DEFAULT_PROFILE);
   const ARRAY_KEYS = new Set(['secondary_colors','voice_rules','always_include','never_include','visual_rules','example_captions']);
   const clean = {};
@@ -84,25 +72,20 @@ function set(profile) {
       clean[k] = Array.isArray(profile[k]) ? profile[k].filter(s => typeof s === 'string') : [];
     } else if (typeof profile[k] === 'string') {
       clean[k] = profile[k];
-    } else {
-      // skip silently — wrong type
     }
   }
   try {
-    const sql = `UPDATE dashboard_settings
-                    SET brand_profile = '${JSON.stringify(clean).replace(/'/g, "''")}'::jsonb,
+    await query(`UPDATE dashboard_settings
+                    SET brand_profile = ${q(JSON.stringify(clean))}::jsonb,
                         updated_at = NOW()
-                  WHERE id = 1;`;
-    _psql(sql);
-    _cache = null;  // invalidate
-    return { ok: true, profile: get() };
+                  WHERE id = 1;`);
+    await refresh();
+    return { ok: true, profile: _cache };
   } catch (e) {
     return { ok: false, error: e.message.slice(0, 300) };
   }
 }
 
-// Render the brand profile as a prompt block. Caller embeds this inside their
-// own system prompt (compose-ig, afshin, etc.). Plain text, no markdown fences.
 function renderAsPromptBlock() {
   const p = get();
   const lines = [];
@@ -149,4 +132,4 @@ function renderAsPromptBlock() {
   return lines.join('\n');
 }
 
-module.exports = { get, set, renderAsPromptBlock, DEFAULT_PROFILE };
+module.exports = { get, set, refresh, renderAsPromptBlock, DEFAULT_PROFILE };

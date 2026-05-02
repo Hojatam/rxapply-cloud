@@ -275,13 +275,13 @@ function get(slug) { return CATALOG.find(t => t.slug === slug) || null; }
 // Sync the catalog into Postgres `tools` table. Idempotent — UPSERTs on
 // slug. Only metadata is synced; ops list for MCP tools stays in DB
 // (because it's discovered at runtime via tools/list).
-function sync() {
+async function sync() {
   const values = CATALOG.map(t => `(${[
     q(t.slug), q(t.name), q(t.vendor), q(t.kind), q(t.conn_method),
     q(t.icon), q(t.cost_model), q(t.description), q(t.default_policy),
     qJson(t.conn_method === 'rest' ? t.ops : []),  // REST ops are static; MCP ops discovered later
   ].join(',')})`).join(',');
-  psql(`
+  await psql(`
     INSERT INTO tools (slug, name, vendor, kind, conn_method, icon,
                        cost_model, description, default_policy, ops)
     VALUES ${values}

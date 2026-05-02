@@ -33,8 +33,8 @@ const adapters = {
 };
 
 // ── Per-(agent,tool) permission lookup ─────────────────────────────
-function getPermission(agent, toolSlug) {
-  const out = psql(`
+async function getPermission(agent, toolSlug) {
+  const out = await psql(`
     SELECT row_to_json(p) FROM (
       SELECT mode, policy_text, per_call_cap_usd
       FROM agent_tool_permissions
@@ -48,7 +48,7 @@ function getPermission(agent, toolSlug) {
 // ── Cap check ──────────────────────────────────────────────────────
 async function checkCaps(toolSlug, projectedCostUsd = 0) {
   // Per-tool cap
-  const out = psql(`
+  const out = await psql(`
     SELECT row_to_json(c) FROM (
       SELECT monthly_cap_usd, monthly_spent_usd FROM tool_credentials
       WHERE tool_slug = ${q(toolSlug)}
@@ -85,22 +85,22 @@ function redactArgs(args) {
 }
 
 // ── Call log helpers ───────────────────────────────────────────────
-function logStart({ agent, toolSlug, op, args, taskContext, requestId, decision, status }) {
-  // psql -tA appends an "INSERT 0 1" status tag to RETURNING output, so we
-  // take only the first line. Same trick knowledge-base.js uses.
-  const out = psql(`
+async function logStart({ agent, toolSlug, op, args, taskContext, requestId, decision, status }) {
+  // pg returns just the value for RETURNING — no -tA tag to strip
+  // (the legacy split-on-newline workaround is gone in the cloud build).
+  const id = await psql(`
     INSERT INTO tool_calls (agent, tool_slug, op, args_redacted, status, decision, task_context, request_id)
     VALUES (${q(agent)}, ${q(toolSlug)}, ${q(op)}, ${qJson(redactArgs(args))},
             ${q(status)}, ${q(decision)}, ${q(taskContext || null)}, ${q(requestId || null)})
     RETURNING id::text;
   `);
-  return out.split(/[\r\n]+/)[0].trim();
+  return id;
 }
-function logEnd(id, { status, output, costUsd, errorMsg }) {
+async function logEnd(id, { status, output, costUsd, errorMsg }) {
   const summary = output == null ? null
     : typeof output === 'string' ? output.slice(0, 800)
     : JSON.stringify(output).slice(0, 800);
-  psql(`
+  await psql(`
     UPDATE tool_calls SET
       status = ${q(status)},
       output_summary = ${q(summary)},
@@ -113,12 +113,12 @@ function logEnd(id, { status, output, costUsd, errorMsg }) {
 
 // Bump the monthly_spent_usd column. The view tool_cost_30d is the
 // source of truth; this column is just a fast-path counter.
-function bumpSpent(toolSlug, costUsd) {
+async function bumpSpent(toolSlug, costUsd) {
   if (!costUsd) return;
-  psql(`UPDATE tool_credentials
-           SET monthly_spent_usd = COALESCE(monthly_spent_usd, 0) + ${q(Number(costUsd) || 0)},
-               last_used_at = now()
-         WHERE tool_slug = ${q(toolSlug)};`);
+  await psql(`UPDATE tool_credentials
+                SET monthly_spent_usd = COALESCE(monthly_spent_usd, 0) + ${q(Number(costUsd) || 0)},
+                    last_used_at = now()
+              WHERE tool_slug = ${q(toolSlug)};`);
 }
 
 // ── Adapter dispatch ───────────────────────────────────────────────
@@ -152,7 +152,7 @@ async function execute({ agent, tool: toolSlug, op, args, taskContext, requestId
   }
 
   // Permission gate
-  let perm = getPermission(agent, toolSlug);
+  let perm = await getPermission(agent, toolSlug);
   let decision = 'auto';
 
   if (perm.mode === 'off') {
@@ -177,7 +177,7 @@ async function execute({ agent, tool: toolSlug, op, args, taskContext, requestId
   if (perm.mode === 'ask') {
     // Queue an Inbox card. The existing permissions.queue() already
     // talks to agent_actions_pending and counts toward inbox-count.
-    const callId = logStart({
+    const callId = await logStart({
       agent, toolSlug, op, args, taskContext, requestId,
       decision: decision === 'auto' ? 'pending_user' : decision,
       status: decision === 'policy_ask' ? 'policy_ask' : 'pending',
@@ -193,7 +193,7 @@ async function execute({ agent, tool: toolSlug, op, args, taskContext, requestId
       });
     } catch (e) {
       // Queue failure shouldn't lose the call log — note the error and continue.
-      logEnd(callId, { status: 'error', errorMsg: `queue_failed: ${e.message}` });
+      await logEnd(callId, { status: 'error', errorMsg: `queue_failed: ${e.message}` });
       return { ok: false, error: 'queue_failed', detail: e.message };
     }
     return { ok: false, queued: true, callId, requiresApproval: true };
@@ -203,23 +203,23 @@ async function execute({ agent, tool: toolSlug, op, args, taskContext, requestId
   const cap = await checkCaps(toolSlug, projectedCostUsd);
   if (!cap.ok) return { ok: false, error: cap.reason, detail: cap.detail };
 
-  const callId = logStart({ agent, toolSlug, op, args, taskContext, requestId, decision, status: 'pending' });
+  const callId = await logStart({ agent, toolSlug, op, args, taskContext, requestId, decision, status: 'pending' });
   try {
     const result = await executeNow({ tool, op, args, agent });
     const costUsd = Number(result && result.costUsd) || 0;
-    logEnd(callId, { status: 'done', output: result.output, costUsd });
-    bumpSpent(toolSlug, costUsd);
+    await logEnd(callId, { status: 'done', output: result.output, costUsd });
+    await bumpSpent(toolSlug, costUsd);
     cost.invalidate();
     return { ok: true, output: result.output, cost: costUsd, decision, callId };
   } catch (e) {
-    logEnd(callId, { status: 'error', errorMsg: (e && e.message || String(e)).slice(0, 500) });
+    await logEnd(callId, { status: 'error', errorMsg: (e && e.message || String(e)).slice(0, 500) });
     return { ok: false, error: 'adapter_error', detail: e && e.message };
   }
 }
 
 // ── Approve a queued tool call (called by the Inbox approve route) ─
 async function executeApproved(callId) {
-  const out = psql(`
+  const out = await psql(`
     SELECT row_to_json(c) FROM (
       SELECT id, agent, tool_slug, op, args_redacted, task_context
       FROM tool_calls WHERE id = ${q(callId)}
@@ -231,25 +231,25 @@ async function executeApproved(callId) {
   const tool = registry.get(row.tool_slug);
   if (!tool) return { ok: false, error: 'unknown_tool' };
 
-  psql(`UPDATE tool_calls SET decision = 'user_approved', status = 'pending' WHERE id = ${q(callId)};`);
+  await psql(`UPDATE tool_calls SET decision = 'user_approved', status = 'pending' WHERE id = ${q(callId)};`);
   try {
     const result = await executeNow({ tool, op: row.op, args: row.args_redacted, agent: row.agent });
     const costUsd = Number(result && result.costUsd) || 0;
-    logEnd(callId, { status: 'done', output: result.output, costUsd });
-    bumpSpent(row.tool_slug, costUsd);
+    await logEnd(callId, { status: 'done', output: result.output, costUsd });
+    await bumpSpent(row.tool_slug, costUsd);
     cost.invalidate();
     return { ok: true, output: result.output, cost: costUsd, callId };
   } catch (e) {
-    logEnd(callId, { status: 'error', errorMsg: e && e.message });
+    await logEnd(callId, { status: 'error', errorMsg: e && e.message });
     return { ok: false, error: 'adapter_error', detail: e && e.message };
   }
 }
 
-function rejectCall(callId, byUser = 'founder') {
-  psql(`UPDATE tool_calls
-           SET status = 'rejected', decision = 'user_rejected',
-               decided_by = ${q(byUser)}, ended_at = now()
-         WHERE id = ${q(callId)};`);
+async function rejectCall(callId, byUser = 'founder') {
+  await psql(`UPDATE tool_calls
+                SET status = 'rejected', decision = 'user_rejected',
+                    decided_by = ${q(byUser)}, ended_at = now()
+              WHERE id = ${q(callId)};`);
   return { ok: true };
 }
 

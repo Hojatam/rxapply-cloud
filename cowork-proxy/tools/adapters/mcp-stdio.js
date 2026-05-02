@@ -22,8 +22,8 @@ const { decryptSqlExpr } = require('../crypto');
 const _children = {};      // slug → { proc, stdoutBuf, pending: Map<id, {resolve, reject}>, ready }
 let _rpcId = 1;
 
-function _loadSecrets(slug) {
-  const out = psql(`
+async function _loadSecrets(slug) {
+  const out = await psql(`
     SELECT ${decryptSqlExpr('secrets_enc')}
     FROM tool_credentials WHERE tool_slug = ${q(slug)};
   `);
@@ -31,8 +31,8 @@ function _loadSecrets(slug) {
   try { return JSON.parse(out); } catch (_) { return null; }
 }
 
-function _spawn(slug) {
-  const secrets = _loadSecrets(slug);
+async function _spawn(slug) {
+  const secrets = await _loadSecrets(slug);
   if (!secrets || !secrets.package) {
     throw new Error(`mcp-stdio: package name missing for '${slug}' — connect the tool first.`);
   }
@@ -105,7 +105,7 @@ function _send(state, method, params) {
 
 async function _ensure(slug) {
   let state = _children[slug];
-  if (!state || state.proc.killed) state = _spawn(slug);
+  if (!state || state.proc.killed) state = await _spawn(slug);
   if (!state.ready) {
     if (!state.initPromise) {
       state.initPromise = _send(state, 'initialize', {
@@ -128,7 +128,7 @@ async function discoverOps(slug) {
     write: /post|create|publish|send|update|delete|reply|schedule/i.test(t.name),
     schema: t.inputSchema || null,
   }));
-  psql(`UPDATE tools SET ops = ${qJson(ops)}, updated_at = now() WHERE slug = ${q(slug)};`);
+  await psql(`UPDATE tools SET ops = ${qJson(ops)}, updated_at = now() WHERE slug = ${q(slug)};`);
   return ops;
 }
 
