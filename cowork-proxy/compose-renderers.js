@@ -373,13 +373,51 @@ function xThread({ source, run, lang }) {
   };
 }
 
-// IG renderer — full impl ships in M28 when we port the existing IG flow.
-function _stub(name, source, run, recipe, lang) {
+// ── Instagram ─────────────────────────────────────────────────────────
+// IG captions cap at 2200 chars (incl. hashtags + line breaks). We enforce
+// a softer cap (1500 chars) before warning. Hashtags are normalised
+// (lowercase, deduped, '#' prefix) and capped at run.options.max_hashtags.
+const IG_HARD_CAP = 2200;
+const IG_SOFT_CAP = 1500;
+
+function _normalizeHashtags(raw, max = 12) {
+  const arr = Array.isArray(raw) ? raw : (raw ? String(raw).split(/[\s,]+/) : []);
+  const seen = new Set();
+  const out = [];
+  for (const h of arr) {
+    const tag = String(h || '').trim().replace(/^#+/, '').toLowerCase().replace(/[^a-z0-9_؀-ۿݐ-ݿ]/g, '');
+    if (!tag || seen.has(tag)) continue;
+    seen.add(tag);
+    out.push(`#${tag}`);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+function instagram({ source, run, lang }) {
+  const f = _fields(source);
+  const caption = String(f.caption || '').trim();
+  const maxTags = Math.max(3, Math.min(30, Number((run.options && run.options.max_hashtags) || 12)));
+  const hashtags = _normalizeHashtags(f.hashtags, maxTags);
+  const designPlan  = f.design_plan  || null;   // structured (slides, layout, color, etc.)
+  const designBrief = String(f.design_brief || '').trim() || null;
+
+  // Compose the final caption-ready string: caption + blank line + hashtags
+  const captionWithTags = [caption, hashtags.join(' ')].filter(Boolean).join('\n\n');
+  const charCount = captionWithTags.length;
+
   return {
-    _renderer: name,
-    _format_warning: `Renderer "${name}" is a stub; full implementation lands in M28.`,
+    _renderer: 'ig',
     lang: lang || run.master_lang,
-    fields: _fields(source),
+    caption,
+    hashtags,
+    caption_with_tags: captionWithTags,
+    char_count: charCount,
+    over_soft_cap: charCount > IG_SOFT_CAP,
+    over_hard_cap: charCount > IG_HARD_CAP,
+    design_plan: designPlan,        // for Afshin to consume
+    design_brief: designBrief,      // human-readable description
+    cta_url: (run.options && run.options.primary_cta) || null,
   };
 }
 
@@ -392,6 +430,6 @@ module.exports = {
   // M27
   'facebook':    facebook,
   'x-thread':    xThread,
-  // M28 (IG port pending)
-  'ig':          ({ source, run, recipe, lang }) => _stub('ig', source, run, recipe, lang),
+  // M28
+  'ig':          instagram,
 };

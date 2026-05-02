@@ -1,0 +1,30 @@
+{
+  "id": "ig",
+  "label": "Instagram",
+  "icon": "instagram",
+  "description": "Instagram feed post: caption + hashtags + a design brief (Afshin can render the visual after approval).",
+  "version": "2",
+
+  "stages": [
+    { "name": "plan",     "capability": "plan" },
+    { "name": "research", "capability": "research" },
+    { "name": "draft",    "capability": "draft", "params": { "length_words": [80, 220] } },
+    { "name": "critique", "capability": "critique" },
+    { "name": "adapt",    "capability": "adapt",
+      "params": { "produce": ["caption", "hashtags", "design_plan", "design_brief"] } },
+    { "name": "render",   "renderer": "ig" }
+  ],
+
+  "gateable_stages": ["critique", "adapt"],
+
+  "translate": {
+    "capability": "translate",
+    "stages_to_retranslate": ["caption", "hashtags"]
+  },
+
+  "options_schema": [
+    { "key": "primary_cta",     "label": "CTA URL (link in bio)", "type": "text", "placeholder": "https://rxapply.com" },
+    { "key": "include_design",  "label": "Generate design brief for Afshin", "type": "checkbox", "default": true },
+    { "key": "max_hashtags",    "label": "Max hashtags",          "type": "number", "default": 12, "min": 3, "max": 30 }
+  ]
+}

@@ -1,5 +1,11 @@
 // cowork-proxy/compose-stages.js
 // =====================================================================
+// DEPRECATED (M28). Kept alive only because the legacy /compose/instagram
+// SSE route in server.js still wires through here. The new general-purpose
+// orchestrator is in compose-orchestrator.js + compose-recipes/*.json
+// (run via /compose/runs). Once M29 lands the new Compose UI and we point
+// the IG card at the orchestrator, delete this file.
+//
 // Per-step Compose orchestration. Replaces the old single compose-ig call
 // with a chain of trained agents:
 //
