@@ -14,9 +14,11 @@
 
 FROM node:20-alpine
 
-# postgresql-client provides pg_dump. Pin to a major that matches
-# (or exceeds) the Supabase Postgres major.
-RUN apk add --no-cache postgresql15-client
+# postgresql-client provides pg_dump. The major MUST be >= the
+# server's major (Supabase Cloud is currently Postgres 15). Newer
+# is fine; pg_dump from a newer client can dump an older server.
+# Alpine 3.21 (in node:20-alpine) ships postgresql17 as default.
+RUN apk add --no-cache postgresql17-client
 
 WORKDIR /app
 

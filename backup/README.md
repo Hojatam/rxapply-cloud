@@ -87,7 +87,8 @@ pg_restore --no-owner --no-acl --clean --if-exists \
 
 ## Bumping postgresql-client version
 
-When Supabase upgrades the Postgres major version, edit the
-`apk add postgresql15-client` line in `Dockerfile` to match (e.g.
-`postgresql16-client`). The Alpine package list is at
-https://pkgs.alpinelinux.org/packages.
+The Dockerfile pins `postgresql17-client` (default in Alpine 3.21).
+That's fine against Supabase's Postgres 15 — pg_dump can always
+dump older servers. If you ever need a different major (e.g. when
+Alpine bumps to a version that drops 17), update the apk line.
+The Alpine package list is at https://pkgs.alpinelinux.org/packages.
