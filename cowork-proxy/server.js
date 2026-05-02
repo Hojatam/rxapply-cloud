@@ -1678,6 +1678,24 @@ app.post('/compose/runs/:id/publish', auth.middleware, async (req, res) => {
     const stage = (run.stages || []).find(s => s.stage_name === 'render' && (s.lang || run.master_lang) === lang);
     if (!stage || !stage.output) return res.status(400).json({ ok: false, error: `no rendered output for lang=${lang}` });
 
+    // M32 · Optional cover image (master phase, shared across all langs).
+    const imageStage = (run.stages || []).find(s => s.stage_name === 'image' && s.status === 'done' && s.output && s.output.url);
+    const coverUrl = imageStage ? imageStage.output.url : null;
+
+    // For Telegram, when an image is present, switch the bot payload from
+    // sendMessage → sendPhoto. n8n's Telegram node accepts either shape.
+    let outputForN8n = stage.output;
+    if (run.recipe_id === 'telegram' && coverUrl && stage.output && stage.output.sendMessage_payload) {
+      const sm = stage.output.sendMessage_payload;
+      const sp = {
+        chat_id: sm.chat_id,
+        photo: coverUrl,
+        caption: sm.text,
+        parse_mode: sm.parse_mode,
+      };
+      outputForN8n = { ...stage.output, sendPhoto_payload: sp, _telegram_method: 'sendPhoto' };
+    }
+
     const payload = {
       run_id: run.id,
       recipe: run.recipe_id,
@@ -1685,7 +1703,8 @@ app.post('/compose/runs/:id/publish', auth.middleware, async (req, res) => {
       topic: run.topic,
       audience: run.audience,
       options: run.options,
-      output: stage.output,
+      output: outputForN8n,
+      cover_url: coverUrl,
       published_at: new Date().toISOString(),
     };
     const r = await fetch(url, {

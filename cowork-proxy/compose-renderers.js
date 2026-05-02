@@ -21,6 +21,8 @@
 
 'use strict';
 
+const composeImage = require('./compose-image');
+
 // ── Helpers ───────────────────────────────────────────────────────────
 
 function _fields(source) {
@@ -421,6 +423,60 @@ function instagram({ source, run, lang }) {
   };
 }
 
+// ── M32 · Cover image renderer ───────────────────────────────────────
+// Async: calls OpenAI Images API and uploads the PNG to R2. Output
+// shape:
+//   { _renderer: 'image-cover', url, key, prompt, model, cost_usd, size, lang }
+// or, on failure (no API key, billing block, etc.):
+//   throws an Error — orchestrator marks the stage failed.
+//
+// `source` for this renderer is whatever upstream stage produced the
+// brief. We accept either:
+//   • adapt.fields.design_brief / image_brief / design_prompt   (preferred)
+//   • render.image_brief (some recipes embed it in the post itself)
+//   • final fallback: synthesise a minimal brief from topic + caption
+async function imageCover({ source, run, recipe, lang }) {
+  const f = _fields(source);
+  // Pull a brief from any of the field names recipes use.
+  let brief =
+        f.design_brief
+     || f.image_brief
+     || f.design_prompt
+     || (source && source.design_brief)
+     || (source && source.image_brief)
+     || (source && source.design_prompt)
+     || '';
+
+  // If the adapt stage didn't produce a brief, build one from the topic
+  // + the format hint so we always render *something*.
+  if (!brief && run && run.topic) {
+    const formatHint = recipe && recipe.label ? recipe.label : 'social post';
+    brief = `Square cover image for a ${formatHint} about: ${run.topic}.
+Brand: RxApply (helping internationally trained dentists migrate). Editorial
+illustration style, clean composition, minimal text overlay, no logo.`;
+  }
+  if (!brief.trim()) throw new Error('no design brief available for image stage');
+
+  const r = await composeImage.generateCover({
+    prompt: brief,
+    runId: run.id,
+    lang: lang || run.master_lang,
+    size: '1024x1024',
+  });
+  if (!r.ok) throw new Error(r.error || 'image generation failed');
+
+  return {
+    _renderer: 'image-cover',
+    lang: lang || run.master_lang,
+    url: r.url,
+    key: r.key,
+    model: r.model,
+    size: r.size,
+    cost_usd: r.cost_usd,
+    prompt: brief,
+  };
+}
+
 module.exports = {
   _default,
   // M26
@@ -432,4 +488,6 @@ module.exports = {
   'x-thread':    xThread,
   // M28
   'ig':          instagram,
+  // M32
+  'image-cover': imageCover,
 };

@@ -2,16 +2,17 @@
   "id": "facebook",
   "label": "Facebook post",
   "icon": "facebook",
-  "description": "Facebook page or group post: short hook, body, CTA, optional image-brief for the design team.",
-  "version": "1",
+  "description": "Facebook page or group post: short hook, body, CTA, optional cover image.",
+  "version": "2",
 
   "stages": [
     { "name": "plan",     "capability": "plan" },
     { "name": "draft",    "capability": "draft", "params": { "length_words": [80, 220] } },
     { "name": "critique", "capability": "critique" },
     { "name": "adapt",    "capability": "adapt",
-      "params": { "produce": ["hook", "body", "cta_text", "image_brief"] } },
-    { "name": "render",   "renderer": "facebook" }
+      "params": { "produce": ["hook", "body", "cta_text", "design_brief"] } },
+    { "name": "render",   "renderer": "facebook" },
+    { "name": "image",    "renderer": "image-cover", "if_option": "with_image" }
   ],
 
   "gateable_stages": ["critique", "adapt"],
@@ -24,6 +25,6 @@
   "options_schema": [
     { "key": "primary_cta", "label": "CTA URL",       "type": "text", "placeholder": "https://rxapply.com" },
     { "key": "page_handle", "label": "Page / Group",  "type": "text", "placeholder": "e.g. @RxApply" },
-    { "key": "with_image",  "label": "Generate image brief", "type": "checkbox", "default": true }
+    { "key": "with_image",  "label": "Generate cover image (~$0.04)", "type": "checkbox", "default": true }
   ]
 }

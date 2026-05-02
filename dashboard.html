@@ -6073,10 +6073,19 @@ function coShowPreviewLang(lang, btn) {
   }
   const out = stage.output;
   const recipeId = run.recipe_id;
-  let html = '';
+
+  // M32 · Cover image stage runs once (master phase), used for all langs.
+  const imageStage = (run.stages || []).find(s => s.stage_name === 'image' && s.status === 'done' && s.output);
+  const coverHtml = (imageStage && imageStage.output && imageStage.output.url)
+    ? `<div class="card-tight mb-3" style="text-align:center;background:#f8fafc;">
+         <img src="${escapeHtml(imageStage.output.url)}" alt="cover" style="max-width:100%;max-height:360px;border-radius:6px;" />
+         <div class="text-xs text-slate-400 mt-2">cover · ${escapeHtml(imageStage.output.model || '')} · ${imageStage.output.size || ''} · $${Number(imageStage.output.cost_usd || 0).toFixed(4)}</div>
+       </div>`
+    : '';
+  let html = coverHtml;
 
   if (recipeId === 'email' && out.full_html) {
-    html = `
+    html += `
       <div class="card-tight mb-2">
         <div class="text-xs text-slate-500 mb-1">Subject</div>
         <div class="text-sm font-semibold">${escapeHtml(out.subject || '')}</div>
@@ -6086,7 +6095,7 @@ function coShowPreviewLang(lang, btn) {
               style="width:100%;height:480px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;"></iframe>
     `;
   } else if (recipeId === 'seo-article' && out.body_html) {
-    html = `
+    html += `
       <div class="card-tight mb-2">
         <div class="text-xs text-slate-500">Title</div>
         <div class="text-base font-semibold">${escapeHtml(out.title || '')}</div>
@@ -6097,14 +6106,14 @@ function coShowPreviewLang(lang, btn) {
       <div class="card-tight" style="max-height:560px;overflow:auto;">${out.body_html}</div>
     `;
   } else if (recipeId === 'telegram') {
-    html = `
+    html += `
       <div class="card-tight" style="max-width:420px;background:#f8fafc;">
         <div class="text-xs text-slate-400 mb-2">Telegram preview · ${out.char_count} chars${out.over_soft_cap ? ' · <span style="color:var(--err);">over soft cap</span>' : ''}</div>
         <div class="text-sm" style="white-space:pre-wrap;">${out.body_html || escapeHtml(out.body_plain || '')}</div>
       </div>
     `;
   } else if (recipeId === 'facebook') {
-    html = `
+    html += `
       <div class="card-tight" style="max-width:520px;">
         <div class="text-xs text-slate-400 mb-2">Facebook · ${out.word_count} words${out.over_soft_cap ? ' · <span style="color:var(--err);">long</span>' : ''}</div>
         <div class="text-base font-semibold">${escapeHtml(out.hook || '')}</div>
@@ -6114,7 +6123,7 @@ function coShowPreviewLang(lang, btn) {
       </div>
     `;
   } else if (recipeId === 'x-thread') {
-    html = `
+    html += `
       <div class="card-tight">
         <div class="text-xs text-slate-400 mb-2">${out.tweet_count} tweets${out.truncated ? ' · truncated' : ''}</div>
         ${(out.tweets || []).map((t, i) => `
@@ -6126,7 +6135,7 @@ function coShowPreviewLang(lang, btn) {
       </div>
     `;
   } else if (recipeId === 'ig') {
-    html = `
+    html += `
       <div class="card-tight" style="max-width:420px;">
         <div class="text-xs text-slate-400 mb-2">IG · ${out.char_count} chars${out.over_soft_cap ? ' · <span style="color:var(--err);">long</span>' : ''}</div>
         <div class="text-sm" style="white-space:pre-wrap;">${escapeHtml(out.caption || '')}</div>
@@ -6135,7 +6144,7 @@ function coShowPreviewLang(lang, btn) {
       </div>
     `;
   } else {
-    html = `<pre class="text-xs mono p-2 rounded" style="background:#f8fafc;max-height:540px;overflow:auto;white-space:pre-wrap;">${escapeHtml(JSON.stringify(out, null, 2))}</pre>`;
+    html += `<pre class="text-xs mono p-2 rounded" style="background:#f8fafc;max-height:540px;overflow:auto;white-space:pre-wrap;">${escapeHtml(JSON.stringify(out, null, 2))}</pre>`;
   }
   $('co-preview-body').innerHTML = html;
 

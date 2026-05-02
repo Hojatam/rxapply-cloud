@@ -40,6 +40,12 @@ const CAPABILITY_REGISTRY = {
 
   // Channel-native adaptation (subject lines, length, hashtags, CTA placement)
   avang:     ['adapt'],
+
+  // Visual / image generation. The image-cover renderer doesn't actually
+  // call an LLM agent (it calls OpenAI gpt-image-1 directly), but we
+  // register Afshin here so handoff_intent + future agent-mediated visual
+  // briefs route through Afshin properly.
+  afshin:    ['image'],
 };
 
 // Inverse index: capability → ordered agent list.

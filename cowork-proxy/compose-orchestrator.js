@@ -425,6 +425,17 @@ async function _markAwaitingApproval(runId, stageName) {
                 WHERE id = ${q(runId)};`);
 }
 
+// Should this stage run for this run? Honors `if_option` (skip when the
+// run.options[key] is falsy). Used to gate optional stages like cover-image.
+function _stageShouldRun(stage, run) {
+  if (!stage) return false;
+  if (stage.if_option) {
+    const val = (run.options || {})[stage.if_option];
+    if (!val) return false;
+  }
+  return true;
+}
+
 // Find the next stage that should execute, given current stages already
 // in the DB. Returns { stageIndex, stage, lang } or null when done.
 function _nextPendingStage({ recipe, run, existingStages }) {
@@ -489,6 +500,17 @@ async function tick(runId) {
 
   const { stageIndex, stage, lang, phase } = next;
   const stageName = stage.name;
+
+  // Skip optional stages whose if_option is falsy. Write a 'skipped' row so
+  // the UI can show what was bypassed and the orchestrator advances next tick.
+  if (!_stageShouldRun(stage, run)) {
+    await _writeStage({
+      runId, stageIndex, stageName, capability: stage.capability || null, lang: lang || null,
+      agent: null, model: null, input: { skipped_because: stage.if_option || 'optional' },
+      output: null, status: 'skipped',
+    });
+    return await tick(runId);
+  }
 
   await _markRunRunning(runId, stageName);
 
@@ -673,11 +695,16 @@ async function _executeRenderer({ runId, run, recipe, stage, stageIndex, lang })
     return await getRun(runId);
   }
 
+  // Some renderers (image-cover) actually cost money. If the renderer
+  // returned a numeric cost_usd, attribute it to the stage row.
+  const renderCost = (rendered && typeof rendered.cost_usd === 'number') ? rendered.cost_usd : 0;
+
   await _writeStage({
     runId, stageIndex, stageName, capability: null, lang: lang || null,
-    agent: null, model: rendererName,
+    agent: null, model: (rendered && rendered.model) || rendererName,
     input: { renderer: rendererName },
     output: rendered, status: 'done',
+    costUsd: renderCost,
   });
   await _rollupCost(runId);
   return await getRun(runId);

@@ -2,8 +2,8 @@
   "id": "ig",
   "label": "Instagram",
   "icon": "instagram",
-  "description": "Instagram feed post: caption + hashtags + a design brief (Afshin can render the visual after approval).",
-  "version": "2",
+  "description": "Instagram feed post: caption + hashtags + cover image (the 'Afshin' visual brief is also stored for human designers).",
+  "version": "3",
 
   "stages": [
     { "name": "plan",     "capability": "plan" },
@@ -12,7 +12,8 @@
     { "name": "critique", "capability": "critique" },
     { "name": "adapt",    "capability": "adapt",
       "params": { "produce": ["caption", "hashtags", "design_plan", "design_brief"] } },
-    { "name": "render",   "renderer": "ig" }
+    { "name": "render",   "renderer": "ig" },
+    { "name": "image",    "renderer": "image-cover", "if_option": "with_image" }
   ],
 
   "gateable_stages": ["critique", "adapt"],
@@ -24,7 +25,7 @@
 
   "options_schema": [
     { "key": "primary_cta",     "label": "CTA URL (link in bio)", "type": "text", "placeholder": "https://rxapply.com" },
-    { "key": "include_design",  "label": "Generate design brief for Afshin", "type": "checkbox", "default": true },
-    { "key": "max_hashtags",    "label": "Max hashtags",          "type": "number", "default": 12, "min": 3, "max": 30 }
+    { "key": "max_hashtags",    "label": "Max hashtags",          "type": "number", "default": 12, "min": 3, "max": 30 },
+    { "key": "with_image",      "label": "Generate cover image (~$0.04)", "type": "checkbox", "default": true }
   ]
 }

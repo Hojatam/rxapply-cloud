@@ -2,8 +2,8 @@
   "id": "seo-article",
   "label": "SEO article",
   "icon": "newspaper",
-  "description": "Long-form article optimised for organic search: headline, slug, meta description, H1/H2 outline, full body in MDX/HTML.",
-  "version": "1",
+  "description": "Long-form article optimised for organic search: headline, slug, meta description, H1/H2 outline, full body in MDX/HTML, optional hero image.",
+  "version": "2",
 
   "stages": [
     { "name": "plan",     "capability": "plan" },
@@ -11,8 +11,9 @@
     { "name": "draft",    "capability": "draft",    "params": { "length_words": [1200, 2000] } },
     { "name": "critique", "capability": "critique" },
     { "name": "adapt",    "capability": "adapt",
-      "params": { "produce": ["title", "slug", "meta_description", "outline", "body_md"] } },
-    { "name": "render",   "renderer": "seo-article" }
+      "params": { "produce": ["title", "slug", "meta_description", "outline", "body_md", "design_brief"] } },
+    { "name": "render",   "renderer": "seo-article" },
+    { "name": "image",    "renderer": "image-cover", "if_option": "with_image" }
   ],
 
   "gateable_stages": ["critique", "adapt"],
@@ -27,6 +28,7 @@
     { "key": "secondary_keywords", "label": "Secondary keywords (comma-separated)", "type": "text",
       "placeholder": "e.g. Canadian dental licensing, internationally trained dentists" },
     { "key": "internal_links",   "label": "Internal links (URL per line)", "type": "textarea",
-      "placeholder": "https://rxapply.com/uk-licensing\nhttps://rxapply.com/about" }
+      "placeholder": "https://rxapply.com/uk-licensing\nhttps://rxapply.com/about" },
+    { "key": "with_image",       "label": "Generate hero image (~$0.04)", "type": "checkbox", "default": false }
   ]
 }
