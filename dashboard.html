@@ -525,6 +525,21 @@
     gap: 5px;
   }
   .btn-lg { height: 38px; padding: 0 18px; font-size: 13.5px; border-radius: 8px; }
+  /* Train-tab kind switcher (segmented control). Used in the Teach card. */
+  .btn-teach-kind {
+    height: 26px; padding: 0 12px;
+    font-size: 11.5px; font-weight: 500;
+    border-radius: 5px; border: 1px solid transparent;
+    background: transparent; color: var(--text-muted);
+    cursor: pointer; transition: all .15s;
+  }
+  .btn-teach-kind:hover { color: var(--text); }
+  .btn-teach-kind.active {
+    background: var(--bg-card, #fff);
+    color: var(--accent, #4f46e5);
+    border-color: var(--border, #e2e8f0);
+    box-shadow: 0 1px 2px rgba(0,0,0,.04);
+  }
   /* Icon-only square button (used in topbar) */
   .top-icon-btn {
     width: 32px; height: 32px; padding: 0;
@@ -4183,7 +4198,7 @@ async function loadAgentDetail(name) {
   const hasCustom = !!(window.AGENT_CUSTOM_AVATARS || {})[name];
   $('agent-detail').innerHTML = `
     <div class="card">
-      <div class="flex items-center justify-between mb-3">
+      <div class="flex items-center justify-between mb-3 gap-4 flex-wrap">
         <div class="flex items-center gap-3">
           <div class="agent-avatar-edit" title="Click 📷 to change avatar">
             ${agentAvatar(name, 'size-xl')}
@@ -4194,6 +4209,16 @@ async function loadAgentDetail(name) {
             <h2 class="text-xl font-semibold">${name}</h2>
             <div class="text-xs text-slate-500">${meta.role} · ${meta.group}</div>
           </div>
+        </div>
+        <!-- Per-agent model picker. Loads on detail render; PATCH on change. -->
+        <div class="flex items-center gap-2 shrink-0" title="LLM that powers ${escapeHtml(name)}">
+          <span class="text-xs text-slate-500 uppercase tracking-wider">Model</span>
+          <select id="ad-model-picker" onchange="setAgentModel('${name}', this.value)"
+                  class="border border-slate-200 rounded px-2 py-1 text-xs bg-white"
+                  style="min-width:180px;">
+            <option value="" disabled selected>Loading…</option>
+          </select>
+          <span id="ad-model-cost" class="text-xs text-slate-400 mono"></span>
         </div>
       </div>
       <div class="border-b border-slate-200 -mx-5 mb-4">
@@ -4218,6 +4243,63 @@ async function loadAgentDetail(name) {
   if (tab === 'train')   loadAdTrain(name);
   if (tab === 'history') loadAdHistory(name);
   if (tab === 'forward') loadAdForward(name);
+  loadAdModelPicker(name);
+}
+
+// Per-agent model picker (top-right of the detail card).
+// Fetches the registry + current overrides, populates the <select>,
+// and shows a per-1M-token cost hint next to it.
+async function loadAdModelPicker(agent) {
+  const sel = $('ad-model-picker');
+  const costEl = $('ad-model-cost');
+  if (!sel) return;
+  try {
+    const j = await fetch(`${PROXY}/agent-models`).then(r => r.json());
+    if (!j.ok) throw new Error(j.error || 'failed');
+    const ag = String(agent || '').toLowerCase();
+    const overrideKey = (j.overrides || {})[ag] || '';
+    // Default first option = "use system default" so the founder can clear an override.
+    const opts = [
+      `<option value="">— default (${escapeHtml(j.default || '')}) —</option>`,
+      ...j.models.map(m => {
+        const tier = m.tier ? ` · ${m.tier}` : '';
+        return `<option value="${m.id}">${escapeHtml(m.label || m.id)}${tier}</option>`;
+      }),
+    ];
+    sel.innerHTML = opts.join('');
+    sel.value = overrideKey;
+    // Cost hint reflects whichever model would actually run (override or default).
+    const effectiveId = overrideKey || j.default;
+    const eff = j.models.find(m => m.id === effectiveId);
+    if (eff && costEl) {
+      const inK  = (eff.inputPerToken  || 0) * 1_000_000;
+      const outK = (eff.outputPerToken || 0) * 1_000_000;
+      costEl.textContent = `$${inK.toFixed(2)}/M in · $${outK.toFixed(2)}/M out`;
+    } else if (costEl) {
+      costEl.textContent = '';
+    }
+  } catch (e) {
+    sel.innerHTML = `<option value="" disabled selected>Failed to load</option>`;
+    if (costEl) costEl.textContent = '';
+  }
+}
+
+async function setAgentModel(agent, modelKey) {
+  // Empty string from the "default" option means "clear override".
+  try {
+    const r = await authFetch(`${PROXY}/agent-models/defaults`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent, model_key: modelKey || null }),
+    });
+    if (r.status === 401) return alert('Sign in required.');
+    const j = await r.json();
+    if (!j.ok) return alert('Failed: ' + (j.error || '?'));
+    // Refresh the picker (updates the cost hint to the new model).
+    // Visual feedback is the new selected option + updated cost hint;
+    // no popup needed.
+    loadAdModelPicker(agent);
+  } catch (e) { alert('Error: ' + e.message); }
 }
 
 async function loadAdSkill(name) {
@@ -4596,72 +4678,136 @@ async function memoryRecallPreview(name) {
 }
 
 // ── K3 · Train tab ────────────────────────────────────────────────────
-// Founder-in-the-loop training surface. 4 actions:
-//   1. Show example   → semantic memory tagged 'exemplar'
-//   2. Add rule       → procedural memory (importance 4-5)
-//   3. Rate runs      → agent_evals.rating (drives KPI dashboard)
-//   4. Correct a run  → procedural memory tagged 'correction'
+// Founder-in-the-loop training surface. 4 capabilities, unified into:
+//   • One "Teach" card with kind switcher (example / rule / correction)
+//   • One "Rate recent runs" card (stars + ✎ correct shortcut)
+//   • One "Training history" footer (audit of past feedback)
+//
+// Kinds map to:
+//   example     → POST /agents/:name/example     (semantic memory · exemplar)
+//   rule        → POST /agents/:name/memory      (procedural · rule)
+//   correction  → POST /agents/:name/memory      (procedural · correction)
 async function loadAdTrain(name) {
   $('ad-tab-content').innerHTML = `
-    <div class="text-xs text-slate-500 mb-4">${escapeHtml(name)}'s training surface · everything you do here flows back into ${escapeHtml(name)}'s memory + KPI tracking</div>
-
     <div id="ad-train-kpis"></div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
-      <!-- Show example -->
-      <div class="card-tight">
-        <div class="text-sm font-semibold mb-2">📌 Show an example</div>
-        <p class="text-xs text-slate-500 mb-2">Paste a piece of output that nails how ${escapeHtml(name)} should sound. The agent reads this on every future run as a SEMANTIC memory tagged "exemplar".</p>
-        <textarea id="train-ex-content" placeholder="Paste your best version of what this agent should produce…"
-          class="w-full border border-slate-200 rounded p-2 text-sm" style="min-height:100px;resize:vertical;"></textarea>
-        <div class="flex gap-2 items-center mt-2">
-          <input id="train-ex-tags" placeholder="tags (e.g. fa, ndeb)" class="flex-1 border border-slate-200 rounded px-2 py-1 text-xs">
-          <select id="train-ex-imp" class="border border-slate-200 rounded px-2 py-1 text-xs bg-white">
-            <option value="3">★★★ normal</option>
-            <option value="4" selected>★★★★ high</option>
-            <option value="5">★★★★★ always show</option>
-          </select>
-          <button class="btn btn-primary btn-xs" onclick="trainAddExample('${name}')">Save example</button>
+    <!-- Teach card · unified kind switcher (replaces the two cramped cards) -->
+    <div class="card-tight mb-4">
+      <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
+        <div>
+          <div class="text-sm font-semibold">Teach ${escapeHtml(name)}</div>
+          <div class="text-xs text-slate-500 mt-0.5" id="ad-teach-hint"></div>
+        </div>
+        <div class="flex gap-1 p-1 rounded-md" style="background:var(--bg-muted, #f1f5f9);">
+          <button id="ad-teach-kind-example"    onclick="adSetTeachKind('${name}','example')"    class="btn-teach-kind active">Example</button>
+          <button id="ad-teach-kind-rule"       onclick="adSetTeachKind('${name}','rule')"       class="btn-teach-kind">Rule</button>
+          <button id="ad-teach-kind-correction" onclick="adSetTeachKind('${name}','correction')" class="btn-teach-kind">Correction</button>
         </div>
       </div>
-
-      <!-- Add rule -->
-      <div class="card-tight">
-        <div class="text-sm font-semibold mb-2">⚙️ Add a rule / correction</div>
-        <p class="text-xs text-slate-500 mb-2">Plain-language rules. Stored as PROCEDURAL memory and obeyed strictly on every run. Examples: "Never start a Persian caption with a verb", "Always cite NDEB/ADC by name when relevant".</p>
-        <textarea id="train-rule-content" placeholder="The rule, in plain language…"
-          class="w-full border border-slate-200 rounded p-2 text-sm" style="min-height:100px;resize:vertical;"></textarea>
-        <div class="flex gap-2 items-center mt-2">
-          <input id="train-rule-tags" placeholder="tags (e.g. voice, fa)" class="flex-1 border border-slate-200 rounded px-2 py-1 text-xs">
-          <select id="train-rule-imp" class="border border-slate-200 rounded px-2 py-1 text-xs bg-white">
-            <option value="3">★★★ normal</option>
-            <option value="4" selected>★★★★ high</option>
-            <option value="5">★★★★★ always</option>
-          </select>
-          <button class="btn btn-primary btn-xs" onclick="trainAddRule('${name}')">Save rule</button>
-        </div>
+      <textarea id="ad-teach-content" placeholder=""
+        class="w-full border border-slate-200 rounded p-2.5 text-sm" style="min-height:120px;resize:vertical;"></textarea>
+      <div class="flex gap-2 items-center mt-2.5 flex-wrap">
+        <input id="ad-teach-tags" placeholder="tags · comma-separated (optional)"
+               class="flex-1 border border-slate-200 rounded px-2.5 py-1.5 text-xs" style="min-width:200px;">
+        <label class="text-xs text-slate-500">Importance</label>
+        <select id="ad-teach-imp" class="border border-slate-200 rounded px-2 py-1.5 text-xs bg-white">
+          <option value="3">★★★ normal</option>
+          <option value="4" selected>★★★★ high</option>
+          <option value="5">★★★★★ always apply</option>
+        </select>
+        <button class="btn btn-primary btn-xs" onclick="adTeachSubmit('${name}')">Save</button>
       </div>
     </div>
 
     <!-- Rate / correct recent runs -->
     <div class="card-tight">
       <div class="flex items-center justify-between mb-3">
-        <div class="text-sm font-semibold">⭐ Rate recent runs · last 20</div>
+        <div class="text-sm font-semibold">Rate recent runs <span class="text-xs text-slate-400 font-normal">· last 20</span></div>
         <button class="btn btn-ghost btn-xs" onclick="loadAdTrain('${name}')">↻ Refresh</button>
       </div>
       <div id="ad-train-runs"><div class="empty"><div class="empty-text text-xs">Loading runs…</div></div></div>
     </div>
 
     <!-- Recent founder feedback (audit trail) -->
-    <div class="card-tight mt-5">
-      <div class="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-2">Recent training events for ${escapeHtml(name)}</div>
+    <div class="card-tight mt-4">
+      <div class="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-2">Training history</div>
       <div id="ad-train-evals"><div class="empty"><div class="empty-text text-xs">…</div></div></div>
     </div>
   `;
 
+  // Initial kind = example
+  adSetTeachKind(name, 'example');
   loadAdTrainKPIs(name);
   loadAdTrainRuns(name);
   loadAdTrainEvals(name);
+}
+
+// Switch the Teach card's kind (example / rule / correction). Updates
+// the placeholder + helper text + active-button styling. State is
+// stored on the textarea's data-attribute so adTeachSubmit() can read it.
+function adSetTeachKind(name, kind) {
+  const ta = $('ad-teach-content');
+  const hint = $('ad-teach-hint');
+  if (!ta) return;
+  ta.dataset.kind = kind;
+
+  const COPY = {
+    example: {
+      hint: 'Paste a piece of output that nails how ' + name + ' should sound. Stored as a semantic "exemplar" memory.',
+      placeholder: 'Paste a great example of what ' + name + ' should produce…',
+    },
+    rule: {
+      hint: 'Plain-language rule. Stored as procedural memory and obeyed on every run. e.g. "Never start a Persian caption with a verb."',
+      placeholder: 'The rule, in plain language…',
+    },
+    correction: {
+      hint: 'Describe what ' + name + ' should do differently next time. Stored as procedural memory tagged "correction".',
+      placeholder: 'What should ' + name + ' avoid / do instead?',
+    },
+  };
+  const c = COPY[kind] || COPY.example;
+  if (hint) hint.textContent = c.hint;
+  ta.placeholder = c.placeholder;
+
+  // Toggle active button
+  ['example','rule','correction'].forEach(k => {
+    const btn = $('ad-teach-kind-' + k);
+    if (btn) btn.classList.toggle('active', k === kind);
+  });
+}
+
+// Single submit handler — picks the right endpoint based on kind.
+async function adTeachSubmit(name) {
+  const ta = $('ad-teach-content');
+  const content = (ta && ta.value || '').trim();
+  if (!content) return alert('Type something first.');
+  const kind = (ta && ta.dataset.kind) || 'example';
+  const tags = ($('ad-teach-tags').value || '').split(',').map(s => s.trim()).filter(Boolean);
+  const importance = parseInt($('ad-teach-imp').value, 10) || 4;
+
+  let url, body;
+  if (kind === 'example') {
+    url = `${PROXY}/agents/${name}/example`;
+    body = { content, tags, importance };
+  } else {
+    // rule + correction both go to procedural memory; tag distinguishes them.
+    url = `${PROXY}/agents/${name}/memory`;
+    body = { type: 'procedural', content, tags: [kind, ...tags], importance };
+  }
+
+  try {
+    const r = await authFetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (r.status === 401) return alert('Sign in required.');
+    const j = await r.json();
+    if (!j.ok) return alert('Failed: ' + (j.error || '?'));
+    ta.value = '';
+    $('ad-teach-tags').value = '';
+    loadAdTrainKPIs(name);
+    loadAdTrainEvals(name);
+  } catch (e) { alert('Error: ' + e.message); }
 }
 
 async function loadAdTrainKPIs(name) {
@@ -4764,47 +4910,8 @@ async function loadAdTrainEvals(name) {
 }
 
 // Action handlers
-async function trainAddExample(name) {
-  const content = $('train-ex-content').value.trim();
-  if (!content) return alert('Paste an example first.');
-  const tags = $('train-ex-tags').value.split(',').map(s => s.trim()).filter(Boolean);
-  const importance = parseInt($('train-ex-imp').value, 10) || 4;
-  try {
-    const r = await authFetch(`${PROXY}/agents/${name}/example`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content, tags, importance }),
-    });
-    if (r.status === 401) return alert('Sign in required.');
-    const j = await r.json();
-    if (!j.ok) return alert('Failed: ' + (j.error || '?'));
-    $('train-ex-content').value = '';
-    $('train-ex-tags').value = '';
-    loadAdTrainEvals(name);
-    loadAdTrainKPIs(name);
-    // Memory tab will refresh next time it's opened.
-  } catch (e) { alert('Error: ' + e.message); }
-}
-
-async function trainAddRule(name) {
-  const content = $('train-rule-content').value.trim();
-  if (!content) return alert('Type a rule first.');
-  const tags = $('train-rule-tags').value.split(',').map(s => s.trim()).filter(Boolean);
-  const importance = parseInt($('train-rule-imp').value, 10) || 4;
-  // A rule is a procedural memory — write directly
-  try {
-    const r = await authFetch(`${PROXY}/agents/${name}/memory`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'procedural', content, tags: ['rule', ...tags], importance }),
-    });
-    if (r.status === 401) return alert('Sign in required.');
-    const j = await r.json();
-    if (!j.ok) return alert('Failed: ' + (j.error || '?'));
-    $('train-rule-content').value = '';
-    $('train-rule-tags').value = '';
-    alert('Rule saved as procedural memory · obeyed on every run');
-    loadAdTrainKPIs(name);
-  } catch (e) { alert('Error: ' + e.message); }
-}
+// (trainAddExample / trainAddRule were removed in M22 — both inputs
+// are now unified into the single Teach card via adTeachSubmit().)
 
 async function trainRateRun(runId, agent, score) {
   const note = prompt(`Rate run ${runId.slice(0,8)} as ${score}★. Optional note (why?):`) || null;
