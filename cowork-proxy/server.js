@@ -89,49 +89,37 @@ function log(line) {
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────
-// Map shorthand model aliases (legacy `claude` CLI accepts these) to real
-// Anthropic model IDs. Anything else is passed through unchanged.
+// Shorthand model aliases. The legacy CLI accepted `sonnet`/`opus`/`haiku`;
+// kept for back-compat but mapped to the M16 flagship roster. Anything that
+// looks like a real model id (contains `/` or starts with `claude-`/`gpt-`/`o3`)
+// passes through unchanged.
 const MODEL_ALIASES = {
-  sonnet:  'claude-sonnet-4-5-20250929',
+  sonnet:  'claude-sonnet-4-6',
   opus:    'claude-opus-4-7',
-  haiku:   'claude-haiku-4-5-20251001',
+  haiku:   'claude-sonnet-4-6',     // haiku dropped in M16 — alias falls back to balanced flagship
+  gpt:     'gpt-5.5',
+  reason:  'o3',
 };
 
-// runClaude — drop-in replacement for the old `claude --print` subprocess.
-// Direct Anthropic API call. Same input/output shape so existing callers
-// (/run-agent, /run-agents-parallel) work without changes.
+const llm = require('./llm');
+
+// runLLM — provider-agnostic one-shot LLM call. Replaces the old
+// `runClaude` (which was Anthropic-only). Same input/output shape so
+// existing callers (/run-agent, /run-agents-parallel) work unchanged.
 //
-// Returns: { output, model, usage } on success
-// Rejects:  { code, error } on failure (error string for legacy compatibility)
-async function runClaude({ prompt, model = 'sonnet' }) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    return Promise.reject({ code: -1, error: 'ANTHROPIC_API_KEY not set' });
-  }
-  const resolvedModel = MODEL_ALIASES[model] || model;
+// Returns: { output, model, usage }
+// Rejects:  { code, error }
+async function runLLM({ prompt, model = 'claude-sonnet-4-6' }) {
+  const resolved = MODEL_ALIASES[model] || model;
   try {
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: resolvedModel,
-        max_tokens: parseInt(process.env.ANTHROPIC_MAX_TOKENS, 10) || 4096,
-        messages: [{ role: 'user', content: String(prompt || '') }],
-      }),
+    const r = await llm.chat({
+      model: resolved,
+      messages: [{ role: 'user', content: String(prompt || '') }],
+      maxTokens: parseInt(process.env.LLM_MAX_TOKENS, 10) || 4096,
     });
-    if (!r.ok) {
-      const errText = await r.text();
-      return Promise.reject({ code: r.status, error: `Anthropic ${r.status}: ${errText.slice(0, 400)}` });
-    }
-    const j = await r.json();
-    const text = (j.content && j.content[0] && j.content[0].text) || '';
-    return { output: text, model: resolvedModel, usage: j.usage || null };
+    return { output: r.output, model: r.model, usage: r.usage };
   } catch (e) {
-    return Promise.reject({ code: -1, error: (e && e.message) || String(e) });
+    return Promise.reject({ code: e.code || -1, error: (e && e.message) || String(e) });
   }
 }
 
@@ -264,7 +252,7 @@ app.post('/run-agent', async (req, res) => {
   }
   log(`run-agent agent=${agent} model=${model} prompt-len=${prompt.length}`);
   try {
-    const { output } = await runClaude({ prompt, model });
+    const { output } = await runLLM({ prompt, model });
     res.json({ ok: true, agent, output, model });
   } catch (e) {
     log(`FAIL agent=${agent} code=${e.code} err=${(e.error || '').slice(0, 200)}`);
@@ -280,7 +268,7 @@ app.post('/run-agents-parallel', async (req, res) => {
   }
   log(`run-agents-parallel count=${agents.length}`);
   const results = await Promise.allSettled(
-    agents.map(a => runClaude({ prompt: a.prompt, model: a.model || 'sonnet' })
+    agents.map(a => runLLM({ prompt: a.prompt, model: a.model || 'sonnet' })
       .then(({ output }) => ({ agent: a.agent, output, ok: true }))
       .catch(e => ({ agent: a.agent, error: e.error, code: e.code, ok: false }))
     )

@@ -24,6 +24,7 @@ const agentMemory = require('./agent-memory');
 const brandProfile = require('./brand-profile');
 const KB = require('./knowledge-base');
 const handoffs = require('./agent-handoffs');
+const llm = require('./llm');     // M16 · provider-agnostic dispatcher
 const { query, queryValue, queryReturning, q: _q, qJson: _qjson } = require('./db');
 
 // Read at call time so a later .env change picks up after a proxy restart
@@ -159,70 +160,23 @@ async function streamChat({ agent, userMessage, chatId = null, onText, onUsage, 
   ];
 
   // Resolve which model to use for THIS agent. Per-agent overrides take
-  // priority over the global ANTHROPIC_MODEL env, falling back to default.
+  // priority. The dispatcher (llm.js) routes to Anthropic or OpenAI
+  // based on the resolved model's `provider` field — both providers
+  // give us the same { fullText, usage } shape via streaming.
   const { id: chatModel, info: chatModelInfo } = agentModels.resolveModel(agent);
 
-  // Make the API call.
-  let fullText = '', usage = null;
-  try {
-    const r = await fetch(ANTHROPIC_URL, {
-      method: 'POST',
-      headers: {
-        'x-api-key': ANTHROPIC_KEY(),
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: chatModel,
-        max_tokens: ANTHROPIC_MAX_TOKENS,
-        system: systemPrompt,
-        messages: apiMessages,
-        stream: true,
-      }),
-    });
-    if (!r.ok) {
-      const errText = await r.text();
-      onError(new Error(`Anthropic ${r.status}: ${errText.slice(0, 500)}`));
-      return;
-    }
-
-    // Parse SSE stream.
-    const reader = r.body.getReader();
-    const decoder = new TextDecoder('utf-8');
-    let buffer = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      // SSE events separated by \n\n.
-      let idx;
-      while ((idx = buffer.indexOf('\n\n')) !== -1) {
-        const block = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 2);
-        // Each block may have lines: "event: …" then "data: …"
-        const dataLine = block.split('\n').find(l => l.startsWith('data: '));
-        if (!dataLine) continue;
-        const json = dataLine.slice(6).trim();
-        if (!json) continue;
-        try {
-          const evt = JSON.parse(json);
-          if (evt.type === 'content_block_delta' && evt.delta && evt.delta.type === 'text_delta') {
-            fullText += evt.delta.text;
-            onText(evt.delta.text);
-          } else if (evt.type === 'message_delta' && evt.usage) {
-            usage = { ...(usage || {}), output_tokens: evt.usage.output_tokens };
-          } else if (evt.type === 'message_start' && evt.message && evt.message.usage) {
-            usage = {
-              input_tokens: evt.message.usage.input_tokens,
-              output_tokens: evt.message.usage.output_tokens || 0,
-            };
-          }
-        } catch (_) { /* ignore parse errors on partial events */ }
-      }
-    }
-  } catch (e) {
-    onError(e); return;
-  }
+  let fullText = '', usage = null, streamErrored = false;
+  await llm.streamChat({
+    model: chatModel,
+    system: systemPrompt,
+    messages: apiMessages,
+    maxTokens: ANTHROPIC_MAX_TOKENS,
+    onText:  (t) => { fullText += t; onText(t); },
+    onUsage: (u) => { usage = u; },
+    onError: (e) => { streamErrored = true; onError(e); },
+    onDone:  ({ usage: finalUsage }) => { if (finalUsage) usage = finalUsage; },
+  });
+  if (streamErrored) return;
 
   if (usage) onUsage(usage);
 
