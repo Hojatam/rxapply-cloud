@@ -47,6 +47,12 @@ const CAPABILITY_REGISTRY = {
   // register Afshin here so handoff_intent + future agent-mediated visual
   // briefs route through Afshin properly.
   afshin:    ['image'],
+
+  // Channel-shaped final formatting (HTML email, Telegram-HTML, X tweet
+  // split, Gmail payload, etc.). Render stages don't call an LLM but we
+  // attribute them to Payvand so they show up in his Train tab and the
+  // founder can rate format quality over time.
+  payvand:   ['render'],
 };
 
 // Inverse index: capability → ordered agent list.

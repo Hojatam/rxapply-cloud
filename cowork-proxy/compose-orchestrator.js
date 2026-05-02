@@ -708,9 +708,28 @@ async function _executeLlmStage({ runId, run, recipe, stage, stageIndex, lang, p
   return await getRun(runId);
 }
 
+// Map a renderer name to the agent that "owns" it. Image-cover is Afshin's
+// territory; format renderers are Payvand's. Used for compose_stages.agent
+// + an agent_runs row so renderers show up in the relevant Train tab.
+const _RENDERER_AGENT = {
+  'image-cover': 'afshin',
+  'email-html':  'payvand',
+  'seo-article': 'payvand',
+  'telegram':    'payvand',
+  'facebook':    'payvand',
+  'x-thread':    'payvand',
+  'ig':          'payvand',
+};
+
 async function _executeRenderer({ runId, run, recipe, stage, stageIndex, lang }) {
-  const stageName = 'render';
+  // Use the recipe stage name (e.g. 'image' or 'render') so we don't
+  // collapse two distinct stages into one row.
+  const stageName = stage.name || (stage.renderer === 'image-cover' ? 'image' : 'render');
   const rendererName = stage.renderer || `${recipe.id}-default`;
+  // M35 · Attribute the renderer to its owning agent so the work shows in
+  // that agent's Train tab + history. Falls back to null for unmapped
+  // renderers, which preserves prior behaviour.
+  const renderAgent = _RENDERER_AGENT[rendererName] || null;
   // Determine inputs: master output for master-lang render; translated output for target.
   const stages = run.stages || [];
   let sourceForRender;
@@ -727,6 +746,23 @@ async function _executeRenderer({ runId, run, recipe, stage, stageIndex, lang })
   }
 
   const startedAt = Date.now();
+
+  // Open an agent_runs row for the owning agent (when one is mapped).
+  // Image renderers (afshin) ALSO write their own agent_runs from inside
+  // compose-image.js — to avoid double-counting cost we set costUsd=0 here
+  // for image stages and let compose-image carry the actual cost.
+  let renderRunId = null;
+  if (renderAgent) {
+    try {
+      const lr = await logWriter.recordRunStart({
+        agent: renderAgent,
+        command: `compose:${recipe.id}:${stageName}${lang ? ':' + lang : ''}:${rendererName}`,
+        args: [run.topic],
+      });
+      renderRunId = lr.runId;
+    } catch (_) { /* non-fatal */ }
+  }
+
   let rendered, errMsg = null;
   try {
     const fn = renderers[rendererName] || renderers._default;
@@ -737,9 +773,12 @@ async function _executeRenderer({ runId, run, recipe, stage, stageIndex, lang })
   }
 
   if (errMsg) {
+    if (renderRunId) {
+      try { await logWriter.recordRunEnd({ runId: renderRunId, agent: renderAgent, status: 'fail', error: errMsg, durationMs: Date.now() - startedAt, costUsd: 0 }); } catch (_) {}
+    }
     await _writeStage({
       runId, stageIndex, stageName, capability: null, lang: lang || null,
-      agent: null, model: null,
+      agent: renderAgent, model: rendererName,
       input: { renderer: rendererName, source_keys: sourceForRender ? Object.keys(sourceForRender) : [] },
       output: null, status: 'failed', error: errMsg,
     });
@@ -748,13 +787,40 @@ async function _executeRenderer({ runId, run, recipe, stage, stageIndex, lang })
   }
 
   // Some renderers (image-cover) actually cost money. If the renderer
-  // returned a numeric cost_usd, attribute it to the stage row.
+  // returned a numeric cost_usd, attribute it to the stage row. (Image
+  // cost is also recorded against Afshin in compose-image.js's own
+  // agent_runs row — we don't double-write here. The compose_stages
+  // row carries the canonical cost; the agent_runs row at this layer
+  // gets cost=0 for image stages to avoid double-counting in the
+  // Overview rollup.)
   const renderCost = (rendered && typeof rendered.cost_usd === 'number') ? rendered.cost_usd : 0;
+
+  if (renderRunId) {
+    try {
+      await logWriter.recordRunEnd({
+        runId: renderRunId,
+        agent: renderAgent,
+        status: 'success',
+        // Pass a tiny structured summary so the Train tab "Recent runs"
+        // can show something meaningful (excerpt of the rendered text).
+        parsedOutput: rendered ? {
+          renderer: rendererName,
+          summary: (rendered.subject || rendered.title || rendered.body_plain || rendered.caption || '').toString().slice(0, 200),
+          url: rendered.url || null,
+        } : null,
+        // Render costs are attributed to the renderer's own audit trail,
+        // NOT to the format-renderer agent_runs row (which is free work
+        // for Payvand, and double-counted otherwise for Afshin).
+        costUsd: 0,
+        durationMs: Date.now() - startedAt,
+      });
+    } catch (_) { /* non-fatal */ }
+  }
 
   await _writeStage({
     runId, stageIndex, stageName, capability: null, lang: lang || null,
-    agent: null, model: (rendered && rendered.model) || rendererName,
-    input: { renderer: rendererName },
+    agent: renderAgent, model: (rendered && rendered.model) || rendererName,
+    input: { renderer: rendererName, agent_run_id: renderRunId },
     output: rendered, status: 'done',
     costUsd: renderCost,
   });
