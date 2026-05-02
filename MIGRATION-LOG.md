@@ -13,6 +13,28 @@ Format:
 
 ---
 
+## 2026-05-01 · M2 · permissions.js + knowledge-base.js ported
+
+- `permissions.js` ported to `pg`. All write operations are now async
+  (`setMode`, `queue`, `approve`, `reject`, `recordExecutionResult`,
+  `recordExecutionFailure`, `pruneExpired`). `getMode()` and `listAll()`
+  intentionally stay sync — they're called inside synchronous validation
+  chains (chat policy gate, etc.). New `refresh()` does the async cache
+  reload; called on boot and after each `setMode()`.
+- `knowledge-base.js` fully ported. Every CRUD + recall + render call
+  now async. `recall()` still bumps `last_used_at` / `use_count` on
+  the recalled rows.
+- Updated KB callers in server.js: 9 routes now async.
+- Updated permissions callers in server.js: `/permissions PATCH`,
+  `/inbox`, `/inbox/count`, `/inbox/:id/approve`, `/inbox/:id/reject`,
+  `/agents/hire`, plus `tools/runtime.js permissions.queue()` call.
+
+Status of Track 1 #1 (pg port): 3 of ~13 modules ported (cost,
+permissions, knowledge-base). Remaining: anthropic-chat, compose-stages,
+daneshyar-router, afshin-router, agent-evals, agent-handoffs,
+agent-memory, agent-models, brand-profile, log-writer, prompt-versions,
+services, tools/db.
+
 ## 2026-05-01 · M1 · pg-client foundation + cost.js ported
 
 - Added `cowork-proxy/db.js` — single `pg` (node-postgres) entry point.

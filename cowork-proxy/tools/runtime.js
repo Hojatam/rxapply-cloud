@@ -183,7 +183,7 @@ async function execute({ agent, tool: toolSlug, op, args, taskContext, requestId
       status: decision === 'policy_ask' ? 'policy_ask' : 'pending',
     });
     try {
-      permissions.queue({
+      await permissions.queue({
         agent,
         action: `tool:${toolSlug}:${op}`,
         payload: { tool: toolSlug, op, args, callId, taskContext },

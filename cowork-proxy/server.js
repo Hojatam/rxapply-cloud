@@ -257,7 +257,7 @@ app.post('/run-helper', async (req, res) => {
     // the action verb so the founder sees it.
     const verbPart = (String(command).toLowerCase() === 'run') ? '' : ' ' + command;
     const argPart = args.length ? ' ' + args.join(' ') : '';
-    const queued = permissions.queue({
+    const queued = await permissions.queue({
       agent, action: command,
       payload: { kind: 'run-helper', command, args, stdin },
       preview: `Run ${agent}${verbPart}${argPart}`.trim(),
@@ -598,7 +598,7 @@ app.post('/afshin/draft', auth.middleware, async (req, res) => {
   const mode = permissions.getMode('afshin', 'draft', 0.005);
   if (mode === 'blocked') return res.status(403).json({ ok: false, error: 'afshin:draft is blocked in the permission matrix' });
   if (mode === 'ask') {
-    const queued = permissions.queue({
+    const queued = await permissions.queue({
       agent: 'afshin', action: 'draft',
       payload: { kind, topic, language, notes },
       preview: `Generate SVG draft for "${(topic||'').slice(0,80)}" (${kind})`,
@@ -620,7 +620,7 @@ app.post('/afshin/render/:mediaId', auth.middleware, async (req, res) => {
   const mode = permissions.getMode('afshin', 'render', 0.04);
   if (mode === 'blocked') return res.status(403).json({ ok: false, error: 'afshin:render is blocked in the permission matrix' });
   if (mode === 'ask') {
-    const queued = permissions.queue({
+    const queued = await permissions.queue({
       agent: 'afshin', action: 'render',
       payload: { mediaId, prompt, modelKey },
       preview: `Render PNG via ${modelKey || 'default model'} for media ${mediaId.slice(0,8)}`,
@@ -689,10 +689,10 @@ app.get('/permissions', (_, res) => {
   try { res.json({ ok: true, rows: permissions.listAll() }); }
   catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
-app.patch('/permissions', auth.middleware, (req, res) => {
+app.patch('/permissions', auth.middleware, async (req, res) => {
   const { agent, action, mode, cost_threshold_usd, notes } = req.body || {};
   if (!agent || !action || !mode) return res.status(400).json({ error: 'send {agent, action, mode}' });
-  const r = permissions.setMode(agent, action, mode, {
+  const r = await permissions.setMode(agent, action, mode, {
     costThreshold: cost_threshold_usd, notes,
   });
   if (!r.ok) return res.status(400).json(r);
@@ -701,26 +701,26 @@ app.patch('/permissions', auth.middleware, (req, res) => {
 });
 
 // ── K1 · Inbox (pending approvals queue) ────────────────────────────
-app.get('/inbox', (req, res) => {
+app.get('/inbox', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit, 10) || 50;
-    res.json({
-      ok: true,
-      pending: permissions.listPending({ limit }),
-      recent: permissions.listRecent({ limit: 30 }),
-    });
+    const [pending, recent] = await Promise.all([
+      permissions.listPending({ limit }),
+      permissions.listRecent({ limit: 30 }),
+    ]);
+    res.json({ ok: true, pending, recent });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-app.get('/inbox/count', (_, res) => {
-  try { res.json({ ok: true, count: permissions.countPending() }); }
+app.get('/inbox/count', async (_, res) => {
+  try { res.json({ ok: true, count: await permissions.countPending() }); }
   catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 app.post('/inbox/:id/approve', auth.middleware, async (req, res) => {
   const id = req.params.id;
   const note = (req.body && req.body.note) || null;
-  const row = permissions.approve(id, note, 'founder');
+  const row = await permissions.approve(id, note, 'founder');
   if (!row) return res.status(404).json({ ok: false, error: 'not pending or not found' });
 
   // Now actually execute the action. Currently we support:
@@ -729,18 +729,18 @@ app.post('/inbox/:id/approve', auth.middleware, async (req, res) => {
   log(`inbox.approve ${id.slice(0,8)} ${row.agent}:${row.action}`);
   try {
     const exec = await _executeApprovedAction(row);
-    permissions.recordExecutionResult(id, exec);
+    await permissions.recordExecutionResult(id, exec);
     res.json({ ok: true, decided: row, executed: exec });
   } catch (e) {
-    permissions.recordExecutionFailure(id, e.message);
+    await permissions.recordExecutionFailure(id, e.message);
     res.status(500).json({ ok: false, error: e.message, decided: row });
   }
 });
 
-app.post('/inbox/:id/reject', auth.middleware, (req, res) => {
+app.post('/inbox/:id/reject', auth.middleware, async (req, res) => {
   const id = req.params.id;
   const note = (req.body && req.body.note) || null;
-  const row = permissions.reject(id, note, 'founder');
+  const row = await permissions.reject(id, note, 'founder');
   if (!row) return res.status(404).json({ ok: false, error: 'not pending or not found' });
   // T1 · If the rejected card was a tool call, mark the tool_calls row too.
   if (row.action && row.action.startsWith('tool:') && row.payload && row.payload.callId) {
@@ -1023,7 +1023,7 @@ app.post('/handoffs/:id/redirect', auth.middleware, (req, res) => {
 // POST /agents/hire { name, role, division, description? }
 // Creates: agents/<name>/SKILL.md + agents/<name>/<name>.py stub.
 // Seeds two default permissions: chat (auto), help (auto).
-app.post('/agents/hire', auth.middleware, (req, res) => {
+app.post('/agents/hire', auth.middleware, async (req, res) => {
   const { name, role, division = 'Operations', description = '', avatar_b64 = null, avatar_ext = null } = req.body || {};
   if (!name || !AGENT_NAME_RE.test(name)) return res.status(400).json({ ok: false, error: 'name must be a-z, 0-9, _, - (max 40 chars)' });
   if (!role) return res.status(400).json({ ok: false, error: 'role required' });
@@ -1045,8 +1045,8 @@ app.post('/agents/hire', auth.middleware, (req, res) => {
     fs.writeFileSync(path.join(dir, `${name}.py`), helper, 'utf-8');
 
     // Seed default permissions
-    permissions.setMode(name, 'help', 'auto', { notes: 'safe — stub help command' });
-    permissions.setMode(name, 'chat', 'auto', { notes: 'F5 chat tab' });
+    await permissions.setMode(name, 'help', 'auto', { notes: 'safe — stub help command' });
+    await permissions.setMode(name, 'chat', 'auto', { notes: 'F5 chat tab' });
 
     log(`agents.hire name=${name} role="${role}" division=${division}`);
     res.json({ ok: true, name, dir, role, division });
@@ -1145,47 +1145,49 @@ app.delete('/agents/:name/avatar', auth.middleware, (req, res) => {
 // ── K6 · Knowledge Base ───────────────────────────────────────────────
 // Founder-facing CRUD for the KB. All other agents read via injected
 // renderAsBlock(); these routes manage the data.
-app.get('/kb', auth.middleware, (req, res) => {
+app.get('/kb', auth.middleware, async (req, res) => {
   const { country, category, status, query, limit } = req.query || {};
-  res.json({ ok: true, entries: KB.list({ country, category, status, query, limit }) });
+  res.json({ ok: true, entries: await KB.list({ country, category, status, query, limit }) });
 });
-app.get('/kb/:id', auth.middleware, (req, res) => {
-  const e = KB.getOne(req.params.id);
+app.get('/kb/:id', auth.middleware, async (req, res) => {
+  const e = await KB.getOne(req.params.id);
   if (!e) return res.status(404).json({ ok: false, error: 'not found' });
   res.json({ ok: true, entry: e });
 });
-app.post('/kb', auth.middleware, (req, res) => {
-  const r = KB.add({ ...(req.body || {}), verifiedBy: 'founder' });
+app.post('/kb', auth.middleware, async (req, res) => {
+  const r = await KB.add({ ...(req.body || {}), verifiedBy: 'founder' });
   if (!r.ok) return res.status(400).json(r);
   log(`kb.add ${(req.body && req.body.country) || '?'}/${(req.body && req.body.category) || '?'} "${(req.body && req.body.title || '').slice(0,60)}"`);
   res.json(r);
 });
-app.patch('/kb/:id', auth.middleware, (req, res) => {
-  const r = KB.update(req.params.id, req.body || {});
+app.patch('/kb/:id', auth.middleware, async (req, res) => {
+  const r = await KB.update(req.params.id, req.body || {});
   if (!r.ok) return res.status(400).json(r);
   res.json(r);
 });
-app.post('/kb/:id/verify-mark', auth.middleware, (req, res) => {
-  const r = KB.markVerified(req.params.id, 'founder');
+app.post('/kb/:id/verify-mark', auth.middleware, async (req, res) => {
+  const r = await KB.markVerified(req.params.id, 'founder');
   res.json(r);
 });
-app.post('/kb/:id/stale', auth.middleware, (req, res) => {
-  const r = KB.markStale(req.params.id);
+app.post('/kb/:id/stale', auth.middleware, async (req, res) => {
+  const r = await KB.markStale(req.params.id);
   res.json(r);
 });
-app.post('/kb/:id/supersede', auth.middleware, (req, res) => {
-  const r = KB.supersede(req.params.id, { ...(req.body || {}), verifiedBy: 'founder' });
+app.post('/kb/:id/supersede', auth.middleware, async (req, res) => {
+  const r = await KB.supersede(req.params.id, { ...(req.body || {}), verifiedBy: 'founder' });
   if (!r.ok) return res.status(400).json(r);
   res.json(r);
 });
-app.delete('/kb/:id', auth.middleware, (req, res) => {
-  res.json(KB.remove(req.params.id));
+app.delete('/kb/:id', auth.middleware, async (req, res) => {
+  res.json(await KB.remove(req.params.id));
 });
 // Recall (debug): ad-hoc query of what would be injected
-app.get('/kb/recall/preview', auth.middleware, (req, res) => {
+app.get('/kb/recall/preview', auth.middleware, async (req, res) => {
   const { country, category, query, limit } = req.query || {};
-  const rows = KB.recall({ country, category, query, limit });
-  const block = KB.renderAsBlock({ country, category, query, limit });
+  const [rows, block] = await Promise.all([
+    KB.recall({ country, category, query, limit }),
+    KB.renderAsBlock({ country, category, query, limit }),
+  ]);
   res.json({ ok: true, rows, block });
 });
 
