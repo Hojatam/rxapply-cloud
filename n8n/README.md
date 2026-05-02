@@ -5,8 +5,12 @@ alongside `cowork-proxy`.
 
 ## Files
 
-- `Dockerfile` — wraps `n8nio/n8n:<version>` and fixes the Railway
-  volume permission issue (see comments inside).
+- `Dockerfile` — wraps `n8nio/n8n:<version>`, installs `su-exec`,
+  and runs as root so the entrypoint can chown the volume.
+- `entrypoint.sh` — runs at every container start: chowns the
+  Railway volume to `node:node`, then drops privileges and execs
+  n8n. Required because Railway's volume mount overlays `/data`
+  at runtime AFTER image build.
 - `workflows/` — exported workflow JSONs. Imported via UI or API,
   NOT baked into the image (see `.dockerignore`).
 - `credentials.json` — exported credential stubs. Same: imported at
