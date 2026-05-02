@@ -3500,6 +3500,7 @@ const SERVICE_META = {
   storage:   { label: 'Object storage',    accent: 'teal',    icon: 'workflows', sub: 'Cloudflare R2' },
   anthropic: { label: 'Anthropic API',     accent: 'amber',   icon: 'pipelines', sub: 'Claude · LLM provider' },
   openai:    { label: 'OpenAI API',        accent: 'emerald', icon: 'pipelines', sub: 'GPT-5.x / o3 · LLM provider' },
+  n8n:       { label: 'n8n',               accent: 'rose',    icon: 'workflows', sub: 'Workflow engine · self-hosted' },
   process:   { label: 'Proxy process',     accent: 'copper',  icon: 'services',  sub: 'Node + Express runtime' },
 };
 
@@ -3513,13 +3514,14 @@ async function renderServices() {
       <button class="btn btn-ghost btn-xs" onclick="renderServices()">${ICONS.refresh} Refresh</button>
     </div>
     <div id="services-grid" class="services-grid">
-      ${skeletonCards(5, { cls: 'service-card' })}
+      ${skeletonCards(6, { cls: 'service-card' })}
     </div>
     <div class="card mt-6">
       <h3 class="font-semibold text-sm mb-3">About this panel</h3>
       <ul class="text-xs list-disc pl-5 space-y-2" style="color:var(--text-muted);">
         <li>Each probe runs server-side with a 5-second timeout. Anthropic + OpenAI probes cost about $0.0001 each.</li>
         <li>OpenAI is grey-pilled "skipped" if <code class="mono">OPENAI_API_KEY</code> isn't set — that's normal until you add it.</li>
+        <li>n8n is grey-pilled "skipped" if <code class="mono">N8N_URL</code> isn't set. With <code class="mono">N8N_API_KEY</code> set, the probe also verifies the key against <code class="mono">/api/v1/workflows</code>.</li>
         <li>Service control (start / stop / restart) lives in Railway's dashboard now — this proxy doesn't manage containers any more.</li>
       </ul>
     </div>
@@ -3533,7 +3535,7 @@ async function loadServices() {
     const j = await r.json();
     if (!j.ok) throw new Error(j.error || 'failed');
     const grid = $('services-grid');
-    const order = ['database', 'storage', 'anthropic', 'openai', 'process'];
+    const order = ['database', 'storage', 'anthropic', 'openai', 'n8n', 'process'];
     grid.innerHTML = order
       .filter(name => j.services && (name in j.services))
       .map(name => {
@@ -3570,6 +3572,11 @@ async function loadServices() {
         if (s.node_version) {
           rows.push(`<div class="service-meta"><span class="service-meta-label">Node</span>
             <span class="service-meta-value mono">${escapeHtml(s.node_version)}</span></div>`);
+        }
+        if (typeof s.api_key_valid === 'boolean') {
+          rows.push(`<div class="service-meta"><span class="service-meta-label">API key</span>
+            <span class="service-meta-value mono" style="color:${s.api_key_valid ? 'var(--ok)' : 'var(--err)'};">
+              ${s.api_key_valid ? 'valid' : 'invalid'}</span></div>`);
         }
 
         const errorRow = s.ok === false && s.error

@@ -16,7 +16,11 @@
 //                     Costs <$0.0001 per probe.
 //   4. openai       — 5-token call to gpt-5.4 (cheaper than 5.5 for
 //                     pings). Skipped if OPENAI_API_KEY is not set.
-//   5. process      — Node memory + uptime. Always green; cosmetic.
+//   5. n8n          — GET {N8N_URL}/healthz. Confirms the workflow
+//                     engine is reachable. If N8N_API_KEY is set, also
+//                     pings /api/v1/workflows to verify the key.
+//                     Skipped if N8N_URL is not set.
+//   6. process      — Node memory + uptime. Always green; cosmetic.
 //
 // Each probe is bounded by a 5-second timeout so a stalled provider
 // doesn't make the whole panel hang. Probes run concurrently.
@@ -132,7 +136,43 @@ async function probeOpenAI() {
   }
 }
 
-// ── 5. Node process ─────────────────────────────────────────────────
+// ── 5. n8n ──────────────────────────────────────────────────────────
+async function probeN8n() {
+  const t0 = Date.now();
+  const url = process.env.N8N_URL;
+  if (!url) return { ok: null, latency_ms: 0, note: 'N8N_URL not set (skipped)' };
+  const base = url.replace(/\/+$/, '');
+  try {
+    // 1. Health endpoint (no auth needed)
+    const r = await _withTimeout(fetch(`${base}/healthz`), 'n8n.healthz');
+    if (!r.ok) {
+      return { ok: false, latency_ms: Date.now() - t0, status: r.status, error: `healthz returned ${r.status}` };
+    }
+    let body = null;
+    try { body = await r.json(); } catch {}
+    const status = body && body.status ? body.status : 'ok';
+
+    // 2. Optional API key check — does NOT fail the probe if missing
+    const apiKey = process.env.N8N_API_KEY;
+    let api_key_valid = null;
+    if (apiKey) {
+      try {
+        const r2 = await _withTimeout(
+          fetch(`${base}/api/v1/workflows?limit=1`, { headers: { 'X-N8N-API-KEY': apiKey } }),
+          'n8n.api');
+        api_key_valid = r2.ok;
+      } catch {
+        api_key_valid = false;
+      }
+    }
+
+    return { ok: true, latency_ms: Date.now() - t0, status, api_key_valid };
+  } catch (e) {
+    return { ok: false, latency_ms: Date.now() - t0, error: e.message.slice(0, 200) };
+  }
+}
+
+// ── 6. Node process ─────────────────────────────────────────────────
 function probeProcess() {
   const m = process.memoryUsage();
   return {
@@ -147,8 +187,8 @@ function probeProcess() {
 
 // ── Public API ──────────────────────────────────────────────────────
 async function probeAll() {
-  const [database, storageR, anthropic, openai] = await Promise.all([
-    probeDatabase(), probeStorage(), probeAnthropic(), probeOpenAI(),
+  const [database, storageR, anthropic, openai, n8n] = await Promise.all([
+    probeDatabase(), probeStorage(), probeAnthropic(), probeOpenAI(), probeN8n(),
   ]);
   return {
     generated_at: new Date().toISOString(),
@@ -157,6 +197,7 @@ async function probeAll() {
       storage: storageR,
       anthropic,
       openai,
+      n8n,
       process: probeProcess(),
     },
   };
@@ -168,6 +209,7 @@ async function probe(name) {
     case 'storage':   return await probeStorage();
     case 'anthropic': return await probeAnthropic();
     case 'openai':    return await probeOpenAI();
+    case 'n8n':       return await probeN8n();
     case 'process':   return probeProcess();
     default: return { ok: false, error: `unknown service: ${name}` };
   }
