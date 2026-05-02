@@ -1,5 +1,0 @@
-agent,kind,payload
-roya,market_heatmap,"{""cells"":[{""language"":""en"",""destination"":""canada"",""priority_score"":0.82},{""language"":""fa"",""destination"":""canada"",""priority_score"":0.71},{""language"":""ar"",""destination"":""uae"",""priority_score"":0.68}],""top_3_movers"":[{""cell"":""fa-canada"",""delta_pct"":18,""why"":""new RCDS exam dates""},{""cell"":""ar-uae"",""delta_pct"":14,""why"":""DHA fee reduction""},{""cell"":""en-uk"",""delta_pct"":-9,""why"":""GDC backlog""}]}"
-shahed,competitor_diff,"{""competitor"":""dentmoves.example"",""change_type"":""FEE"",""before"":""$1,200 program fee"",""after"":""$950 program fee"",""suggested_response"":""highlight RxApply included consultation""}"
-dadbeh,reg_change,"{""trigger_date"":""2026-04-22"",""regulator"":""NDEB Canada"",""change_summary"":""AFK exam scheduling moves to monthly cohorts"",""affected_modules"":[""advisor"",""guide:canada""]}"
-nasim,trend_spike,"{""topic"":""bridging program timeline 2026"",""momentum_pct"":42,""sample_threads"":[""r/dentistry/12345"",""t.me/dentmoves/678""],""predicted_relevance"":0.81}"
