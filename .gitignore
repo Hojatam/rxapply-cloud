@@ -27,6 +27,11 @@ cowork-proxy/startup.err
 # Local-disk storage fallback (used when R2 isn't configured)
 cowork-proxy/.local-storage/
 
+# OPS/ — local-only operational notes, plans, architecture, history.
+# Never committed. Never copied into the Docker image. See OPS/PLAN.md
+# for the active roadmap.
+OPS/
+
 # Docker volumes / data
 supabase/.branches/
 supabase/.temp/

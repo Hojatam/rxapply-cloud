@@ -54,8 +54,8 @@ COPY --from=builder /opt/venv /opt/venv
 COPY cowork-proxy/     ./cowork-proxy/
 COPY agents/           ./agents/
 COPY supabase/         ./supabase/
-COPY dashboard.html    ./
-COPY architecture.html ./
+COPY dashboard.html ./
+# architecture.html removed in M14 — moved to founder's local OPS/.
 
 # Non-root user. Railway runs containers as root by default but we
 # don't need that, so drop privileges.

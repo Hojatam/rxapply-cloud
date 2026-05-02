@@ -177,74 +177,16 @@ function runHelper({ agent, command = 'help', args = [], stdin = null, timeoutMs
   });
 }
 
-// ── First-run state ─────────────────────────────────────────────────────────
-// Cached so the middleware below stays sync (Express requires it). Refreshed
-// on boot and after the wizard finishes. Default behaviour: if the column
-// is missing or unreadable, treat as DONE so we never block the dashboard
-// on a transient DB hiccup.
-
-let _firstRunCache = { done: true, stamp: 0 };
-const FIRST_RUN_TTL_MS = 30_000;
-
-async function _refreshFirstRun() {
-  try {
-    const raw = await db.queryValue(`SELECT first_run_done FROM dashboard_settings WHERE id = 1;`);
-    _firstRunCache = { done: raw === 'true', stamp: Date.now() };
-  } catch (_) {
-    // Column might not exist yet (very early in a fresh deploy, before
-    // migrations run). Default to "done" so /setup doesn't loop on itself.
-    _firstRunCache = { done: true, stamp: Date.now() };
-  }
-}
-
-function _isFirstRunDone() {
-  if (Date.now() - _firstRunCache.stamp > FIRST_RUN_TTL_MS) {
-    _refreshFirstRun().catch(() => {});
-  }
-  return _firstRunCache.done;
-}
-
-// Routes that are reachable BEFORE the wizard finishes. Anything else
-// gets redirected to /setup. Order matters; the most-specific prefixes
-// come first.
-const SETUP_ALLOWLIST = new Set([
-  '/health', '/config.js',
-  '/setup', '/setup/',
-  '/static',                 // sprite + drawflow vendor
-  '/storage',                // local-fallback object reads
-  '/auth/status', '/auth/set-password', '/auth/login', '/auth/logout',
-]);
-
-function _isSetupAllowed(url) {
-  if (url === '/' || url === '/dashboard') return false;       // → redirect
-  for (const prefix of SETUP_ALLOWLIST) {
-    if (url === prefix || url.startsWith(prefix + '/') || url.startsWith(prefix + '?')) {
-      return true;
-    }
-  }
-  // The setup wizard's own API surface lives under /setup/*.
-  return url.startsWith('/setup/');
-}
-
-// First-run middleware. Mounted before all other routes.
-function firstRunGate(req, res, next) {
-  if (_isFirstRunDone()) return next();
-  if (_isSetupAllowed(req.path)) return next();
-  // For HTML navigations, redirect. For API calls, return 503 so the
-  // dashboard can show a "setup not finished" banner.
-  const wantsHtml = (req.headers.accept || '').includes('text/html');
-  if (wantsHtml) {
-    res.redirect(302, '/setup');
-  } else {
-    res.status(503).json({ ok: false, error: 'setup_required', wizard_url: '/setup' });
-  }
-}
-
 // ── routes ──────────────────────────────────────────────────────────────────
-
-// First-run gate. Redirects non-allowlisted requests to /setup until the
-// wizard finishes. Mount BEFORE any handler that should be gated.
-app.use(firstRunGate);
+//
+// The first-run wizard (v0.1) was removed in M14 once the founder finished
+// setup. Re-enabling it would require reverting that commit. New deploys
+// going forward bootstrap by either:
+//   1. Setting auth_password_hash directly via a one-off `psql` insert,
+//   2. Or temporarily setting AUTH_DISABLED=1 to access /settings via the
+//      dashboard and changing the password from there.
+// Reason for removal: the wizard was an unauthenticated entry point that
+// became a perpetual attack surface once setup was done.
 
 // CSRF gate. Skips GET/HEAD/OPTIONS, dev-mode (AUTH_DISABLED), and the
 // bootstrap window before the founder password is set. State-changing
@@ -258,148 +200,11 @@ app.use(auth.csrfMiddleware);
 // the boot sequence enough to use the dashboard. The /setup/api/*
 // routes are the JSON layer the wizard talks to.
 
-app.get('/setup', (_req, res) => {
-  res.sendFile(path.resolve(__dirname, 'setup.html'));
-});
-
-// /setup/api/* — JSON layer the wizard UI talks to.
-app.get('/setup/api/state', async (_req, res) => {
-  try {
-    const raw = await db.queryValue(`SELECT row_to_json(s) FROM (
-      SELECT first_run_done, setup_progress, founder_email, totp_secret IS NOT NULL AS totp_set
-      FROM dashboard_settings WHERE id = 1
-    ) s;`);
-    res.json({ ok: true, state: raw ? JSON.parse(raw) : { first_run_done: false } });
-  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
-});
-
-app.post('/setup/api/progress', async (req, res) => {
-  try {
-    await db.query(`UPDATE dashboard_settings
-                       SET setup_progress = ${db.q(JSON.stringify(req.body || {}))}::jsonb,
-                           updated_at = NOW()
-                     WHERE id = 1;`);
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
-});
-
-app.post('/setup/api/finish', async (_req, res) => {
-  try {
-    await db.query(`UPDATE dashboard_settings
-                       SET first_run_done = true, updated_at = NOW()
-                     WHERE id = 1;`);
-    await _refreshFirstRun();
-    log('setup.finish');
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
-});
-
-// Validate an Anthropic API key by making a 5-token call. Used by the
-// wizard's "Test key" button before the founder commits to it.
-app.post('/setup/api/test-anthropic', async (req, res) => {
-  const { api_key } = req.body || {};
-  if (!api_key || typeof api_key !== 'string') return res.status(400).json({ ok: false, error: 'api_key required' });
-  if (!/^sk-ant-/.test(api_key)) return res.status(400).json({ ok: false, error: 'looks malformed (expected sk-ant-…)' });
-  try {
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': api_key,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 5,
-        messages: [{ role: 'user', content: 'ping' }],
-      }),
-    });
-    if (!r.ok) {
-      const errText = await r.text();
-      return res.status(400).json({ ok: false, error: `Anthropic ${r.status}: ${errText.slice(0, 200)}` });
-    }
-    const j = await r.json();
-    res.json({ ok: true, usage: j.usage || null });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-// DB status — applied + pending migrations.
-app.get('/setup/api/db-status', async (_req, res) => {
-  try {
-    const s = await migrate.status();
-    res.json({ ok: true, applied: s.applied.length, pending: s.pending.length, total: s.total, pending_list: s.pending });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-// Apply pending migrations (idempotent).
-app.post('/setup/api/migrate', async (_req, res) => {
-  try {
-    const r = await migrate.apply({ log: () => {} });
-    res.json({ ok: !r.failed, ...r });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-// Sprite upload (5×5 team sprite) — saved to storage at static/team/team.jpg.
-// Auto-detects extension from upload; everything is normalised to JPEG via
-// the front-end (PNG is fine too — just larger). 5MB cap.
-app.post('/setup/api/sprite-upload', async (req, res) => {
-  const { content_b64, ext } = req.body || {};
-  if (!content_b64) return res.status(400).json({ ok: false, error: 'content_b64 required' });
-  const safeExt = String(ext || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 4) || 'jpg';
-  const buf = Buffer.from(content_b64, 'base64');
-  if (buf.length > 5 * 1024 * 1024) return res.status(400).json({ ok: false, error: 'sprite too large (max 5MB)' });
-  try {
-    // Sprite lives at a fixed key — the dashboard CSS references team.jpg.
-    await storage.put({
-      key: `team/team.${safeExt}`,
-      body: buf,
-      contentType: `image/${safeExt === 'jpg' ? 'jpeg' : safeExt}`,
-    });
-    res.json({ ok: true, bytes: buf.length, url: storage.urlFor(`team/team.${safeExt}`) });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message.slice(0, 300) });
-  }
-});
-
-// Round-trip a 32-byte test object to R2 (or local-disk fallback) so
-// the wizard can confirm storage is wired correctly. Reports the backend
-// in use so the founder sees `r2` vs `local` immediately.
-app.post('/setup/api/test-r2', async (_req, res) => {
-  try {
-    const probe = `setup-probe-${Date.now()}`;
-    const body = Buffer.from('rxapply-storage-probe');
-    await storage.put({ key: `_probes/${probe}`, body, contentType: 'text/plain' });
-    const got = await storage.get(`_probes/${probe}`);
-    await storage.remove(`_probes/${probe}`);
-    res.json({
-      ok: true,
-      backend: storage.BACKEND,
-      bytes: got.size,
-      verified: got.body.toString('utf-8') === 'rxapply-storage-probe',
-    });
-  } catch (e) {
-    res.status(500).json({ ok: false, backend: storage.BACKEND, error: e.message });
-  }
-});
-
-// Manual reset (debug / re-run wizard).
-app.post('/setup/api/reset', auth.middleware, async (_req, res) => {
-  try {
-    await db.query(`UPDATE dashboard_settings
-                       SET first_run_done = false, setup_progress = '{}'::jsonb,
-                           updated_at = NOW()
-                     WHERE id = 1;`);
-    await _refreshFirstRun();
-    log('setup.reset');
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
-});
+// /setup and /setup/api/* deleted in M14. They were the unauthenticated
+// bootstrap surface; once the founder finished the wizard they were just
+// attack surface (a stray `UPDATE dashboard_settings SET first_run_done=false`
+// would re-enable them). To re-onboard a fresh deploy: revert M14, redeploy,
+// run the wizard, then re-apply M14.
 
 // /config.js · runtime configuration injected into dashboard.html.
 // Replaces the previously-hardcoded SUPABASE_URL/KEY/etc. so the HTML
@@ -2275,19 +2080,15 @@ const PORT = Number(process.env.PORT) || 7777;
 // on boot so the UI's catalog list never lags behind the registry.
 app.use('/tools', toolsRouter);
 
-// Boot sequence: migrate → refresh caches → start listening.
+// Boot sequence: migrate → tools registry sync → start listening.
 //   1. migrate.runIfNeeded() applies any pending SQL migrations. Set
-//      MIGRATE_ON_BOOT=false in env to skip (e.g. if you're applying
-//      migrations from CI instead).
-//   2. _refreshFirstRun() seeds the first-run cache so middleware doesn't
-//      block on a cold call.
-//   3. tools registry sync.
+//      MIGRATE_ON_BOOT=false in env to skip.
+//   2. tools registry sync.
 (async () => {
   try {
     const r = await migrate.runIfNeeded();
     if (r && r.failed) console.error(`[boot] migration FAILED: ${r.failed.error || r.failed}`);
   } catch (e) { console.error(`[boot] migrate.runIfNeeded threw: ${e.message}`); }
-  await _refreshFirstRun();
   try {
     const n = await toolsRegistry.sync();
     console.log(`  tools registry: synced ${n} tools to Postgres`);

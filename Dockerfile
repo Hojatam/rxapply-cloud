@@ -45,8 +45,8 @@ COPY cowork-proxy/    ./cowork-proxy/
 COPY agents/          ./agents/
 COPY supabase/        ./supabase/
 # server.js serves these at /dashboard and the Reference links.
-COPY dashboard.html   ./
-COPY architecture.html ./
+COPY dashboard.html ./
+# architecture.html removed in M14 — moved to founder's local OPS/.
 RUN useradd --create-home --shell /bin/bash rxapply \
     && chown -R rxapply:rxapply /app
 USER rxapply

@@ -27,6 +27,8 @@ yarn-debug.log*
 cowork-proxy/runs/
 cowork-proxy/.local-storage/
 logs/
+# Local operational notes — never reach the Docker image
+OPS/
 
 # Environment / secrets — must NEVER end up in the image
 .env
