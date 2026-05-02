@@ -1,0 +1,102 @@
+{
+  "lead": {
+    "id": "d6e4be83-8f84-43ab-ba08-59e029e5cd27",
+    "email": "saeed.tehrani@example.com",
+    "language": "fa",
+    "origin_country": "IR",
+    "destination_intent": [
+      "canada",
+      "germany"
+    ],
+    "experience_years": 6,
+    "source": "advisor",
+    "engagement_score": 0.0,
+    "created_at": "2026-04-30 01:48:10.875864+00"
+  },
+  "events": [
+    {
+      "id": "f732bf88-b300-4925-8953-4715f6007100",
+      "kind": "page_view",
+      "platform": "web",
+      "language": "fa",
+      "payload": {
+        "path": "/guide/canada",
+        "time_on_page_s": 420,
+        "bineh_test_seed": true
+      },
+      "created_at": "2026-04-30 03:19:33.096016+00"
+    },
+    {
+      "id": "57f3aa76-c58b-4dd2-a2fb-7f0f0ccddac8",
+      "kind": "click",
+      "platform": "email",
+      "language": "fa",
+      "payload": {
+        "link": "/guide/ndeb-afk-monthly",
+        "step": 2,
+        "sequence": "fa-canada-v1",
+        "bineh_test_seed": true
+      },
+      "created_at": "2026-04-30 03:19:33.096016+00"
+    },
+    {
+      "id": "b93b08a6-d261-4fbf-885c-5aa618780ca2",
+      "kind": "page_view",
+      "platform": "web",
+      "language": "fa",
+      "payload": {
+        "path": "/pricing",
+        "time_on_page_s": 210,
+        "bineh_test_seed": true
+      },
+      "created_at": "2026-04-30 03:19:33.096016+00"
+    },
+    {
+      "id": "74401c4b-146a-48d9-963f-4e06710b352b",
+      "kind": "advisor_completion",
+      "platform": "web",
+      "language": "fa",
+      "payload": {
+        "score": 78,
+        "completed_at": "2026-04-22T10:14:00Z",
+        "bineh_test_seed": true,
+        "top_destination": "canada"
+      },
+      "created_at": "2026-04-30 03:19:33.096016+00"
+    },
+    {
+      "id": "3d1da3cd-6869-4671-ac29-bdc9181c5053",
+      "kind": "open",
+      "platform": "email",
+      "language": "fa",
+      "payload": {
+        "step": 2,
+        "sequence": "fa-canada-v1",
+        "bineh_test_seed": true
+      },
+      "created_at": "2026-04-30 03:19:33.096016+00"
+    },
+    {
+      "id": "8e3a870f-f853-4310-8952-6632561f131f",
+      "kind": "dm",
+      "platform": "instagram",
+      "language": "fa",
+      "payload": {
+        "text": "salam, tarikh emtahan AFK chand mahe digar mishe?",
+        "sender_handle": "@saeed_dent"
+      },
+      "created_at": "2026-04-30 01:50:13.454477+00"
+    },
+    {
+      "id": "eb6f0e0b-6531-40e1-ae64-84ddb77197f1",
+      "kind": "dm",
+      "platform": "instagram",
+      "language": "fa",
+      "payload": {
+        "text": "salam, tarikh emtahan AFK chand mahe digar mishe?",
+        "sender_handle": "@saeed_dent"
+      },
+      "created_at": "2026-04-30 01:50:13.255041+00"
+    }
+  ]
+}

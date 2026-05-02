@@ -1,0 +1,52 @@
+<svg viewBox="0 0 1080 1080" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="1080" height="1080" fill="#f8fafc"/>
+  
+  <!-- Maple leaf corners -->
+  <path d="M80 120 L90 95 L100 120 L125 115 L105 135 L120 155 L95 145 L90 170 L85 145 L60 155 L75 135 L55 115 Z" fill="#4f46e5" opacity="0.15"/>
+  <path d="M980 120 L990 95 L1000 120 L1025 115 L1005 135 L1020 155 L995 145 L990 170 L985 145 L960 155 L975 135 L955 115 Z" fill="#4f46e5" opacity="0.15"/>
+  <path d="M80 960 L90 935 L100 960 L125 955 L105 975 L120 995 L95 985 L90 1010 L85 985 L60 995 L75 975 L55 955 Z" fill="#4f46e5" opacity="0.15"/>
+  <path d="M980 960 L990 935 L1000 960 L1025 955 L1005 975 L1020 995 L995 985 L990 1010 L985 985 L960 995 L975 975 L955 955 Z" fill="#4f46e5" opacity="0.15"/>
+  
+  <!-- Central exam document -->
+  <rect x="390" y="320" width="300" height="400" rx="8" fill="white" stroke="#0f172a" stroke-width="3"/>
+  
+  <!-- Document lines -->
+  <line x1="420" y1="370" x2="660" y2="370" stroke="#4f46e5" stroke-width="2" opacity="0.3"/>
+  <line x1="420" y1="410" x2="660" y2="410" stroke="#4f46e5" stroke-width="2" opacity="0.3"/>
+  <line x1="420" y1="450" x2="660" y2="450" stroke="#4f46e5" stroke-width="2" opacity="0.3"/>
+  <line x1="420" y1="490" x2="580" y2="490" stroke="#4f46e5" stroke-width="2" opacity="0.3"/>
+  
+  <!-- Checkmarks on document -->
+  <path d="M430 390 L445 405 L470 375" fill="none" stroke="#4f46e5" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M430 430 L445 445 L470 415" fill="none" stroke="#4f46e5" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M430 470 L445 485 L470 455" fill="none" stroke="#4f46e5" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- Stylized tooth (left) -->
+  <path d="M250 480 Q250 450 270 440 Q290 435 300 450 Q310 435 330 440 Q350 450 350 480 Q350 520 340 550 Q330 570 320 570 Q310 570 305 560 Q300 570 295 570 Q290 570 280 570 Q270 570 260 550 Q250 520 250 480 Z" fill="#4f46e5" stroke="#0f172a" stroke-width="2"/>
+  
+  <!-- Dental mirror (right) -->
+  <circle cx="780" cy="500" r="35" fill="none" stroke="#4f46e5" stroke-width="3"/>
+  <line x1="780" y1="535" x2="780" y2="620" stroke="#0f172a" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="780" cy="500" r="25" fill="#4f46e5" opacity="0.2"/>
+  
+  <!-- Examination chart (top) -->
+  <rect x="490" y="180" width="100" height="80" rx="4" fill="white" stroke="#4f46e5" stroke-width="3"/>
+  <line x1="510" y1="200" x2="570" y2="200" stroke="#0f172a" stroke-width="2"/>
+  <line x1="510" y1="220" x2="570" y2="220" stroke="#0f172a" stroke-width="2"/>
+  <line x1="510" y1="240" x2="550" y2="240" stroke="#0f172a" stroke-width="2"/>
+  <circle cx="520" cy="200" r="3" fill="#4f46e5"/>
+  <circle cx="520" cy="220" r="3" fill="#4f46e5"/>
+  <circle cx="520" cy="240" r="3" fill="#4f46e5"/>
+  
+  <!-- Secondary dental chart (bottom) -->
+  <rect x="490" y="760" width="100" height="60" rx="4" fill="white" stroke="#4f46e5" stroke-width="3"/>
+  <path d="M510 780 L530 800 L570 780" fill="none" stroke="#0f172a" stroke-width="2"/>
+  <path d="M510 800 L530 785 L570 800" fill="none" stroke="#0f172a" stroke-width="2"/>
+  
+  <!-- Decorative geometric elements -->
+  <circle cx="200" cy="300" r="8" fill="#4f46e5" opacity="0.4"/>
+  <circle cx="880" cy="300" r="8" fill="#4f46e5" opacity="0.4"/>
+  <circle cx="200" cy="780" r="8" fill="#4f46e5" opacity="0.4"/>
+  <circle cx="880" cy="780" r="8" fill="#4f46e5" opacity="0.4"/>
+</svg>

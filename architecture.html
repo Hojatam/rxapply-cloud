@@ -1,0 +1,1851 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RxApply Test Phase · Architecture & Knowledge Map</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root { color-scheme: light; }
+  body { font-family: ui-sans-serif, system-ui, Inter, "Segoe UI", sans-serif; }
+  .mono { font-family: ui-monospace, "JetBrains Mono", Consolas, monospace; }
+  .ascii { font-family: ui-monospace, Consolas, monospace; white-space: pre; line-height: 1.4; font-size: 12px; }
+  pre { white-space: pre-wrap; word-break: break-word; }
+  .anchor { scroll-margin-top: 80px; }
+  details > summary { cursor: pointer; }
+  table { border-collapse: collapse; }
+  td, th { border: 1px solid #e2e8f0; padding: 6px 10px; vertical-align: top; }
+  th { background: #f8fafc; text-align: left; font-weight: 600; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:9999px; font-size:11px; font-weight:600; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+
+<header class="bg-gradient-to-br from-violet-700 via-indigo-700 to-slate-900 text-white py-10 px-6">
+  <div class="max-w-6xl mx-auto">
+    <div class="text-xs font-bold uppercase tracking-wider text-violet-200 mb-2">rxapply-test · architecture · v2.5</div>
+    <h1 class="text-3xl md:text-4xl font-black">The full knowledge map</h1>
+    <p class="mt-3 max-w-3xl text-violet-100">What got built during the test phase → Phases A→E (foundation, admin dashboard, the 10 missing agents, n8n workflows, polish) → V2 / Phase F (consolidated control plane: F2–F9 + F8b) → Report v.1 hardening → V2.5 (Compose + per-agent LLM + Brand profile) → V3 (K1–K6: the AI-employee platform · Outputs + Permissions + Inbox + Memory + Training + Handoffs + Org chart + Hire + Knowledge Base + Daneshyar) → and now <strong>V4</strong> (Claude Design system · luxury polish · agent avatars · Overview redesign with real charts · cost tracking that finally works). How the pieces fit, why each piece exists, and the precise levers for managing, activating, extending, and refining the stack. One document, no jumping between READMEs.</p>
+    <div class="mt-3 inline-flex items-center gap-2 text-xs bg-emerald-500/20 border border-emerald-300/40 rounded px-3 py-1">
+      <span class="w-2 h-2 rounded-full bg-emerald-300"></span>
+      <span class="font-bold">V4 shipped · Claude Design system + luxury polish + agent avatars + Overview redesign</span>
+      <span class="text-violet-200">· 23 agents · 23 tables · 50+ proxy routes · 5 workflows · 1 dashboard</span>
+    </div>
+    <div class="mt-5 grid sm:grid-cols-4 gap-2 text-xs">
+      <a href="#overview" class="bg-white/10 hover:bg-white/20 rounded-lg px-3 py-2">1 Overview</a>
+      <a href="#layers" class="bg-white/10 hover:bg-white/20 rounded-lg px-3 py-2">2 The 4 layers</a>
+      <a href="#dataflow" class="bg-white/10 hover:bg-white/20 rounded-lg px-3 py-2">3 Data flow</a>
+      <a href="#pattern" class="bg-white/10 hover:bg-white/20 rounded-lg px-3 py-2">4 Skill pattern</a>
+      <a href="#agents" class="bg-white/10 hover:bg-white/20 rounded-lg px-3 py-2">5 The 23 agents</a>
+      <a href="#tables" class="bg-white/10 hover:bg-white/20 rounded-lg px-3 py-2">6 The 28 tables</a>
+      <a href="#ops" class="bg-white/10 hover:bg-white/20 rounded-lg px-3 py-2">7 Operations</a>
+      <a href="#extend" class="bg-white/10 hover:bg-white/20 rounded-lg px-3 py-2">8 Extensions</a>
+      <a href="#gotchas" class="bg-white/10 hover:bg-white/20 rounded-lg px-3 py-2">9 Gotchas</a>
+      <a href="#realbuild" class="bg-white/10 hover:bg-white/20 rounded-lg px-3 py-2">10 Real build</a>
+      <a href="#tests" class="bg-white/10 hover:bg-white/20 rounded-lg px-3 py-2">11 The 12 tests</a>
+      <a href="#v2" class="bg-violet-400/30 hover:bg-violet-400/40 rounded-lg px-3 py-2 font-bold">★ V2 / Phase F</a>
+      <a href="#hardening" class="bg-emerald-400/30 hover:bg-emerald-400/40 rounded-lg px-3 py-2 font-bold">★ Report v.1 hardening</a>
+      <a href="#v25" class="bg-amber-400/30 hover:bg-amber-400/40 rounded-lg px-3 py-2 font-bold">★ V2.5 Compose + Brand</a>
+      <a href="#v3" class="bg-indigo-400/30 hover:bg-indigo-400/40 rounded-lg px-3 py-2 font-bold">★ V3 · AI-employee platform (K1–K6)</a>
+      <a href="#v4" class="bg-teal-400/30 hover:bg-teal-400/40 rounded-lg px-3 py-2 font-bold">★ V4 · Design system + luxury polish</a>
+      <a href="#ref" class="bg-white/10 hover:bg-white/20 rounded-lg px-3 py-2">12 Quick ref</a>
+    </div>
+  </div>
+</header>
+
+<main class="max-w-6xl mx-auto px-6 py-10 space-y-12">
+
+<section id="overview" class="anchor">
+  <div class="text-xs font-bold uppercase tracking-wider text-violet-700 mb-1">1 · Overview</div>
+  <h2 class="text-2xl font-bold mb-4">What is this thing?</h2>
+  <p class="mb-4">The test phase is a <strong>locally-running, full-fidelity replica of the RxApply production stack</strong>, used to validate the 22-agent + 8-workflow architecture <em>before</em> committing to the real build. It runs on your laptop, costs $0, and uses Claude / the Anthropic API as the LLM substrate (with optional multi-provider image gen for Afshin).</p>
+  <p class="mb-4">The original 12 test scenarios all passed (T1–T12). Phases A→E expanded the stack to its full 21-agent shape, added an operational admin dashboard, fleshed out the proxy with five new HTTP routes, and packaged the n8n trigger surface as five importable workflow JSONs. <strong>V2 / Phase F</strong> then consolidated everything into a single dashboard, added the 22nd agent (Afshin · designs), shipped a 9-feature control plane (F2–F9 + F6 + F8b), and applied the Report v.1 hardening pass on top.</p>
+  <div class="bg-white border border-slate-200 rounded-2xl p-5">
+    <div class="text-sm font-bold uppercase tracking-wider text-slate-500 mb-3">What the stack actually is, in one sentence each</div>
+    <ul class="space-y-2 text-sm">
+      <li>• <strong>Anthropic API + Claude / Cowork</strong> — runs the agent prompts when LLM inference is needed (Sonnet 4.5 by default); chat is streamed via SSE; cost telemetry tracks tokens × per-token pricing per call.</li>
+      <li>• <strong>Postgres (Supabase local)</strong> — single source of truth: <strong>23</strong> tables now (16 baseline + agent_journal + the V2 set: prompt_versions, agent_chats, dashboard_settings, media_library, pipelines, agent_actions, plus an <code class="mono">image_model_defaults</code> jsonb column).</li>
+      <li>• <strong>n8n (Docker)</strong> — installed, credentialed, running, with <strong>5 trigger workflows</strong> (4 cron + 1 webhook). The proxy now also exposes a full <em>n8n control surface</em> (list/get/run/import/activate via the n8n REST API) so you can drive it from the dashboard without leaving the app.</li>
+      <li>• <strong>MailHog (Docker)</strong> — a local SMTP sink. Captures every email Ravi, Mehmandar, or any other agent sends so you can inspect them without real delivery.</li>
+      <li>• <strong>cowork-proxy (Node, port 7777)</strong> — load-bearing control plane. <strong>50+ routes</strong> across the F2–F9 + V2.5 features (logs, services, n8n, chat, pipelines, auth/settings/prompts versioning, designs, multi-model defaults, cost, <strong>Compose orchestration</strong>, <strong>per-agent LLM resolver</strong>, <strong>brand profile injector</strong>). Cowork-style helper-running is still there alongside the new feature routes. Now also serves <code class="mono">/dashboard</code> directly so the dashboard can be loaded over HTTP instead of file:// (Drawflow CDN works either way).</li>
+      <li>• <strong>The 23 agent skills</strong> — one folder per agent at <code class="mono">agents/&lt;name&gt;/</code>, each with a SKILL.md (instructions for Claude) plus a small Python helper (DB boundary). Afshin (#22) is design-only and uses Claude SVG drafts + paid raster renders. <strong>compose-ig</strong> (#23, V2.5) is a one-shot agent that generates 3 IG captions + a design plan in a single Anthropic call.</li>
+      <li>• <strong>One dashboard</strong> — <code class="mono">dashboard.html</code> consolidates the V1 test-phase scorecard and the V1 admin operations into a single Tailwind+Drawflow control plane: Overview, Workflows, Agents (with per-agent Run/Chat/History/Forward tabs), Pipelines (visual editor), <strong>Compose</strong> (per-step pipeline with 3-language output viewer), Logs (L2), Approvals, Designs, Services, Settings (auth + cap + sandbox + image model defaults + <strong>per-agent LLM model</strong> + <strong>Brand profile editor</strong> + prompt editor with rollback).</li>
+    </ul>
+  </div>
+  <div class="mt-4 bg-amber-50 border-l-4 border-amber-500 rounded-r-xl p-4 text-sm text-slate-700">
+    <strong>The architectural decision that shaped Phase C.</strong> n8n stays a trigger surface, not a logic surface. Every helper is callable directly from the proxy with one HTTP POST, and every cron/webhook in n8n is just <em>"on schedule, POST to <code class="mono">/run-helper</code>"</em>. This keeps the agent logic in one place (Python helpers + SKILL.md) and avoids the "logic spread across 100 n8n nodes" problem.
+  </div>
+  <div class="mt-4 bg-blue-50 border-l-4 border-blue-500 rounded-r-xl p-4 text-sm text-slate-700">
+    <strong>Two foundation agents anchor the data layer.</strong> <code class="mono">Zirak</code> is the only sanctioned writer for <code class="mono">agent_journal</code> — every other agent shells out to it after each run with a one-line input/output summary. <code class="mono">Paya</code> is the only sanctioned writer for <code class="mono">intel_snapshots</code> — it validates payload shape per <code class="mono">kind</code>, so the 5 intel agents (Roya, Shahed, Dadbeh, Nasim, Ramin) can drift without breaking Pooya's reader. The schema contract for each kind lives in one file: <code class="mono">paya.py</code>.
+  </div>
+</section>
+
+<section id="layers" class="anchor">
+  <div class="text-xs font-bold uppercase tracking-wider text-violet-700 mb-1">2 · Layers</div>
+  <h2 class="text-2xl font-bold mb-4">The 4 layers, top to bottom</h2>
+  <div class="space-y-4">
+    <div class="bg-white border-2 border-rose-300 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-rose-700 mb-1">Layer 1 — Skills (the surface you talk to)</div>
+      <h3 class="text-lg font-bold mb-2">Cowork skills + Markdown / JSON outputs</h3>
+      <p class="text-sm text-slate-700 mb-2">When you say "run pooya", Claude (Cowork) reads the matching <code class="mono">SKILL.md</code>, runs the helper to fetch input from Postgres, generates the agent's output (JSON, Markdown, scoring, whatever shape that agent owns), and runs the helper again to persist back to Postgres. <strong>The skill is the API; everything below is implementation.</strong></p>
+      <p class="text-sm text-slate-700">Lives at <code class="mono">rxapply-test/agents/&lt;name&gt;/</code>. <strong>21 of these</strong> after Phase C.</p>
+    </div>
+    <div class="bg-white border-2 border-amber-300 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-amber-700 mb-1">Layer 2 — Helpers (the DB boundary)</div>
+      <h3 class="text-lg font-bold mb-2">Python helpers + .bat launchers</h3>
+      <p class="text-sm text-slate-700 mb-2">Every skill has a <code class="mono">&lt;name&gt;.py</code> sibling (~100–300 lines, zero pip deps) that uses <code class="mono">subprocess</code> + <code class="mono">docker exec</code> to talk to Postgres. The Python is intentionally dumb — it shuttles bytes safely. Claude is the brain; the helper is the hand.</p>
+      <p class="text-sm text-slate-700 mb-2">Pattern: every helper exposes <code class="mono">fetch</code>/<code class="mono">compose</code>/<code class="mono">list</code> (read), <code class="mono">save</code>/<code class="mono">run</code>/<code class="mono">write</code> (persist), and ends each persist by shelling out to <code class="mono">zirak.py log</code> for the activity feed. Intel agents additionally pipe their payload through <code class="mono">paya.py write</code> for shape validation before persistence.</p>
+      <p class="text-sm text-slate-700">.bat files are convenience launchers — double-click to run. Phase D added <code class="mono">smoke-everything.bat</code> as a one-click PASS/FAIL across the whole stack.</p>
+    </div>
+    <div class="bg-white border-2 border-emerald-300 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-emerald-700 mb-1">Layer 3 — Data plane (the source of truth)</div>
+      <h3 class="text-lg font-bold mb-2">Postgres (Supabase local) — 17 tables</h3>
+      <p class="text-sm text-slate-700 mb-2">Every state transition the system makes lands in one of 17 tables. The 16-table baseline is owned by <code class="mono">supabase/migrations/20260429000000_initial_schema.sql</code>; Phase A added <code class="mono">agent_journal</code> via <code class="mono">supabase/migrations/20260430000000_agent_journal.sql</code> (apply with <code class="mono">apply-migration-agent-journal.bat</code> — never <code class="mono">supabase db reset</code>, which wipes test data).</p>
+      <p class="text-sm text-slate-700">Studio UI: <a href="http://127.0.0.1:54323" class="text-violet-700 underline">localhost:54323</a>. Direct connection: <code class="mono">postgresql://postgres:postgres@127.0.0.1:54322/postgres</code>.</p>
+    </div>
+    <div class="bg-white border-2 border-blue-300 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-blue-700 mb-1">Layer 4 — Infrastructure (the bedrock)</div>
+      <h3 class="text-lg font-bold mb-2">Docker containers + the host</h3>
+      <table class="text-sm w-full mt-2">
+        <tr><th>Container</th><th>Port</th><th>What it is</th></tr>
+        <tr><td class="mono">supabase_db_rxapply-test</td><td>54322</td><td>Postgres 15</td></tr>
+        <tr><td class="mono">supabase_studio_rxapply-test</td><td>54323</td><td>Studio UI</td></tr>
+        <tr><td class="mono">supabase_kong_rxapply-test</td><td>54321</td><td>API gateway (REST/GraphQL/Auth)</td></tr>
+        <tr><td class="mono">+ 8 other supabase_*</td><td>—</td><td>Auth, Storage, Realtime, Pg Meta, Inbucket, Vector, Analytics</td></tr>
+        <tr><td class="mono">n8n-test</td><td>5678</td><td>Workflow engine (idle but running)</td></tr>
+        <tr><td class="mono">mailhog-test</td><td>1025 / 8025</td><td>SMTP sink + web UI</td></tr>
+      </table>
+      <p class="text-sm text-slate-700 mt-2">Plus on the host: <code class="mono">cowork-proxy</code> Node server (port 7777, started by <code class="mono">start-proxy.bat</code>, with 6 routes powering the admin dashboard and n8n) and Python (3.11/3.13) for running helpers.</p>
+    </div>
+    <div class="bg-white border-2 border-violet-300 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-violet-700 mb-1">Layer 0 — Operations surface (V2 / Phase F)</div>
+      <h3 class="text-lg font-bold mb-2">cowork-proxy routes + consolidated dashboard + n8n workflows</h3>
+      <p class="text-xs text-slate-600 mb-2">The proxy ships <strong>30+ routes</strong> grouped by feature. Auth-gated endpoints require a Bearer session token issued by <code class="mono">/auth/login</code>; all others are public from <code class="mono">localhost</code>.</p>
+      <table class="text-sm w-full mb-3">
+        <tr><th>Group</th><th>Endpoints</th></tr>
+        <tr><td class="font-bold">Cowork core</td><td class="mono text-xs">/health · /run-agent · /run-agents-parallel · /run-helper · /agents · /prompts/:agent (GET, PUT 🔒) · /prompts/:agent/versions(/:n) · /prompts/:agent/rollback 🔒</td></tr>
+        <tr><td class="font-bold">F2 · Logs L2</td><td class="mono text-xs">/logs · /logs/:runid · /logs/:runid/download — every run-helper invocation auto-records an <code>agent_runs</code> row + a per-day <code>logs/YYYY-MM-DD/&lt;runid&gt;</code> bundle; gzip after 7d, delete after 30d.</td></tr>
+        <tr><td class="font-bold">F3 · Services</td><td class="mono text-xs">/services · /services/:name · /services/:name/:action 🔒 — start/stop/restart Supabase, n8n, mailhog from the dashboard. Health probes use a real <code>apikey</code> for Supabase (post Report v.1 fix) and only mark "reachable" when the response status is in <code>healthyStatuses</code>.</td></tr>
+        <tr><td class="font-bold">F4 · n8n control</td><td class="mono text-xs">/n8n/workflows(/:id) · /n8n/workflows/:id/active 🔒 · /n8n/workflows/:id/run 🔒 · /n8n/workflows/library · /n8n/workflows/import 🔒 · /n8n/executions — thin wrapper around the n8n REST API (needs <code>N8N_API_KEY</code> in <code>.env</code>).</td></tr>
+        <tr><td class="font-bold">F5 · Agent chat</td><td class="mono text-xs">/agent/:name/chat 🔒 (SSE streaming) · /agent/:name/chats(/:chatId) — Anthropic Sonnet 4.5 chat per agent; system prompt = SKILL.md + last 10 runs; persisted to <code>agent_chats</code> with cost.</td></tr>
+        <tr><td class="font-bold">F6 · Pipelines</td><td class="mono text-xs">/pipelines · /pipelines/:name · /pipelines/run 🔒 (SSE) · /pipelines/:name/run 🔒 (SSE) — Drawflow visual editor; agent / conditional / transform / output node types; topological sort + sandboxed <code>vm.createContext</code> eval (post Report v.1 fix); SSE flushes between async-spawn steps.</td></tr>
+        <tr><td class="font-bold">F7 · Auth + settings</td><td class="mono text-xs">/auth/{login,logout,status,set-password} · /settings 🔒 (GET, PATCH) — single-user scrypt password; in-memory sessions; <code>isInitialized()</code> result cached after first true (post Report v.1 fix); /settings now also returns <code>extra_keys</code> for STABILITY/IDEOGRAM/REPLICATE/RECRAFT/N8N status pills.</td></tr>
+        <tr><td class="font-bold">F8 · Designs (Afshin)</td><td class="mono text-xs">/afshin/draft 🔒 · /afshin/render/:mediaId 🔒 · /afshin/approve/:mediaId 🔒 · /afshin/archive/:mediaId 🔒 · /afshin/gallery · /assets/generated/* — Claude SVG drafts → approval gate → multi-provider raster render → media_library row.</td></tr>
+        <tr><td class="font-bold">F8b · Multi-model</td><td class="mono text-xs">/afshin/models · /afshin/models/defaults 🔒 (PATCH) — registry of 7 image-gen models (gpt-image-1, dall-e-3, stability-sd3, ideogram-v2, flux-schnell, flux-dev, recraft-v3); per-kind defaults persisted in <code>dashboard_settings.image_model_defaults</code>.</td></tr>
+        <tr><td class="font-bold">F9 · Cost</td><td class="mono text-xs">/cost — UNION ALL of <code>agent_runs.cost_usd_actual</code> + <code>agent_chats.total_cost</code>, today / 7d / 30d / all-time + cap %. Snapshot cached 5s (post Report v.1 fix). <code>canSpend()</code> hard-blocks paid calls when month-to-date ≥ <code>monthly_cap_usd</code>.</td></tr>
+      </table>
+      <p class="text-sm text-slate-700 mb-2"><strong>Single consolidated dashboard.</strong> <code class="mono">dashboard.html</code> (V2) is the only operator surface — Tailwind + Drawflow + Vazirmatn for FA/AR. Sections: Overview · Workflows · Agents (Run/Chat/History/Forward tabs per agent) · Pipelines (visual editor with sidebar of saved pipelines + SSE run log) · Logs (L2: Input/Actions/Output/Stderr/Errors tabs per run) · Approvals · Designs (gallery with per-kind filters + per-render model picker) · Services · Settings (auth + cap + sandbox + per-kind image model defaults + prompts editor with rollback). The two earlier files (<code class="mono">dashboard.html</code> v1 read-only + <code class="mono">admin-dashboard.html</code>) were merged into this.</p>
+      <p class="text-sm text-slate-700 mt-2">5 n8n workflow JSONs in <code class="mono">n8n-workflows/</code> imported via <code class="mono">import-n8n-workflows.bat</code>. Each is a thin <em>Trigger → POST <code class="mono">host.docker.internal:7777/run-helper</code></em> chain. Imported as inactive on purpose — toggle on after sanity-checking the cron expression.</p>
+    </div>
+  </div>
+</section>
+
+<section id="dataflow" class="anchor">
+  <div class="text-xs font-bold uppercase tracking-wider text-violet-700 mb-1">3 · Data flow</div>
+  <h2 class="text-2xl font-bold mb-4">The chains the agents form</h2>
+  <p class="mb-4">There isn't <em>one</em> pipeline — there are <strong>seven chains</strong> that run on different cadences and feed each other. Phase C added the intel pipeline, the governance loop, the partnership outreach, and the guest pipeline. The journaling layer (Zirak) sits orthogonal to everything else.</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="bg-white border border-slate-200 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-rose-700 mb-2">Content chain (the long one)</div>
+      <pre class="ascii bg-slate-50 rounded-lg p-3">intel_snapshots
+   │ (last 7d, 4 rows)
+   ▼
+[POOYA] T1
+   │ writes 3 rows
+   ▼
+content_briefs (status=pending_g1)
+   │  (Founder G1 approves)
+   ▼
+[SEPEHR] T2
+   │ writes 1 row
+   ▼
+content_assets (kind=master, lang=en)
+   │  (Founder G2 approves)
+   ▼
+[GOYESH] T3
+   │ writes 2 rows
+   ▼
+content_assets (kind=master, lang=fa+ar)
+   │
+   ▼
+[AVANG] T4
+   │ writes 11 rows
+   ▼
+scheduled_posts (status=pending)
+   │
+   ▼
+[CROSS-POST DRY_RUN] T5
+   │ flips status
+   ▼
+scheduled_posts (status=dry_run_logged)</pre>
+    </div>
+    <div class="bg-white border border-slate-200 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-emerald-700 mb-2">Engagement chain (per inbound)</div>
+      <pre class="ascii bg-slate-50 rounded-lg p-3">leads (3 personas)
+   │
+   ▼
+engagement_events
+  (advisor / clicks / DMs)
+   │
+   ├──► [BINEH] T9
+   │       │ score 0–1
+   │       ▼
+   │    leads.engagement_score
+   │
+   └──► [MEHRBAN] T8
+           │ drafts FA reply
+           ▼
+        engagement_events
+        (kind=reply)</pre>
+    </div>
+    <div class="bg-white border border-slate-200 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-blue-700 mb-2">Lead-ingress chain</div>
+      <pre class="ascii bg-slate-50 rounded-lg p-3">leads (3 personas)
+   │
+   ▼
+[RAHNAMA] T6      ──► chat
+  scores destinations
+
+[RAHBAR] T7
+   │ picks sequence_id
+   │ generates 5 emails
+   │ Day 0/2/4/7/14
+   ▼
+nurture_schedule (15 rows)
+   │
+   ▼
+(future cron sender → MailHog)</pre>
+    </div>
+    <div class="bg-white border border-slate-200 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-amber-700 mb-2">Audit chain</div>
+      <pre class="ascii bg-slate-50 rounded-lg p-3">agent_runs (24h, 29 rows)
+   │
+   ▼
+[BIDAR] T11a
+   │ aggregates per agent
+   ▼
+agent_efficiency (21 rows)
+   bidar_recommendation:
+   promote / demote / rewrite / keep
+
+n8n_executions (5 rows)
+   │
+   ▼
+[DAVARI] T11b
+   │ flow_health JSON
+   ▼
+chat (no DB write)</pre>
+    </div>
+    <div class="md:col-span-2 bg-white border border-slate-200 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-indigo-700 mb-2">Reporting chain (Monday morning)</div>
+      <pre class="ascii bg-slate-50 rounded-lg p-3">funnel-14d.csv  +  agent_runs (24h)  +  this-week plan
+                          │
+                          ▼
+                      [RAVI] T10
+                          │ 600-word narrative
+                          ▼
+                  SMTP → mailhog-test (port 1025)
+                          │
+                          ▼
+                  http://localhost:8025  (web UI)</pre>
+    </div>
+    <div class="md:col-span-2 bg-white border-2 border-violet-300 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-violet-700 mb-2">Intel pipeline (Phase C — runs daily 06:00 via cron-intel-daily.json)</div>
+      <pre class="ascii bg-slate-50 rounded-lg p-3">leads + customers (14d)         competitor_fixtures.json     regulatory_fixtures (built-in)     engagement_events (3d/14d)
+        │                                  │                              │                                │
+        ▼                                  ▼                              ▼                                ▼
+    [ROYA]                             [SHAHED]                       [DADBEH]                          [NASIM]
+    market_heatmap                     competitor_diff                regulatory_change                 trend_spike
+        │                                  │                              │                                │
+        └──────────────────────────────────┴───────────[ PAYA validates payload by kind ]──────────────────┘
+                                                              │
+                                                              ▼
+                                                    intel_snapshots (one row per call)
+                                                              │
+                                                              ▼
+                                                          [RAMIN]      ← reads last-7d of all 4 above
+                                                  keyword_candidates    via PAYA list / by-kind
+                                                              │
+                                                              ▼
+                                                  intel_snapshots (kind=keyword_candidates)
+                                                              │
+                                                              ▼
+                                                          [POOYA] T1   (weekly)
+                                                              │
+                                                              ▼
+                                                       content_briefs</pre>
+      <p class="text-xs text-slate-600 mt-2">Each agent calls <code class="mono">paya.py write</code> for the insert, then <code class="mono">zirak.py log</code> for the journal entry. Paya never writes to <code class="mono">agent_journal</code> — that responsibility stays with the calling intel agent so a Paya-side bug never silently swallows journal rows.</p>
+    </div>
+    <div class="bg-white border border-slate-200 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-fuchsia-700 mb-2">Governance loop (G2 gate)</div>
+      <pre class="ascii bg-slate-50 rounded-lg p-3">content_assets (status=pending_g2)
+   │
+   ▼
+[KHERAD]                      ← reads ramin's latest keyword baseline
+  scores 4 rules:
+    citation density
+    banned-word filler
+    keyword coverage
+    factual anchoring
+   │
+   ├──► score ≥ 0.7  ──► content_assets.status = g2_ready
+   │
+   └──► score &lt; 0.7  ──► content_assets.status = needs_refine
+                          + N rows in corrections (one per failed rule)</pre>
+    </div>
+    <div class="bg-white border border-slate-200 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-cyan-700 mb-2">Outreach + guest chains</div>
+      <pre class="ascii bg-slate-50 rounded-lg p-3">partnerships             guest_pipeline
+  (status=targeted)        (per-stage rows)
+   │                         │
+   ▼                         ▼
+[PAYVAND]                 [MEHMANDAR]
+  templates by              digest + per-stage
+  type+country              follow-up emails
+   │                         │
+   ▼                         ▼
+partnerships             SMTP → mailhog
+  .outreach_drafts          weekly digest
+  (pending_human_review)    + per-overdue nudge</pre>
+      <p class="text-xs text-slate-600 mt-2">Payvand never sends — drafts sit in JSONB awaiting founder review. Mehmandar does send to MailHog (local-only), then journals the count.</p>
+    </div>
+    <div class="md:col-span-2 bg-white border-l-4 border-emerald-500 rounded-r-2xl p-4 text-sm text-slate-700">
+      <strong>Cross-cutting layer — journaling.</strong> Every agent (all 21) ends each invocation with one shell-out to <code class="mono">zirak.py log</code> recording status, input summary, output summary, and the row id/table it touched. The admin dashboard's "Activity journal" panel is a live <code class="mono">SELECT … FROM agent_journal ORDER BY created_at DESC LIMIT 50</code> over those rows.
+    </div>
+  </div>
+</section>
+
+<section id="pattern" class="anchor">
+  <div class="text-xs font-bold uppercase tracking-wider text-violet-700 mb-1">4 · The skill pattern</div>
+  <h2 class="text-2xl font-bold mb-4">How a skill is shaped (and why)</h2>
+  <p class="mb-4">Every one of the 21 agents follows the same shape. Once you've seen one, you can read or write any of them. The 10 added in Phase C also follow a "compose → paya/zirak → emit" sub-pattern (see the intel pipeline diagram above).</p>
+  <div class="bg-white border border-slate-200 rounded-2xl p-5">
+    <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Anatomy of <code class="mono">agents/&lt;name&gt;/</code></div>
+    <pre class="ascii bg-slate-50 rounded-lg p-4">agents/pooya/
+├── SKILL.md          ←  what Claude reads when triggered
+├── pooya.py          ←  Python helper · DB boundary · ~150 lines
+├── &lt;launcher&gt;.bat    ←  optional convenience double-click target
+└── &lt;output&gt;.json     ←  saved record of the most recent run</pre>
+  </div>
+  <h3 class="text-lg font-bold mt-6 mb-2">Why each piece exists</h3>
+  <div class="grid md:grid-cols-3 gap-4">
+    <div class="bg-white border rounded-xl p-4">
+      <div class="font-bold text-sm mb-2">SKILL.md</div>
+      <p class="text-xs text-slate-700 mb-2"><strong>Frontmatter</strong> — name + description. The description is what Cowork matches against to decide whether to invoke this skill on a user message. Keep it triggery: include phrasings the user might type.</p>
+      <p class="text-xs text-slate-700"><strong>Body</strong> — instructions for Claude. What inputs to expect, what output shape to produce, the workflow steps, voice rules, edge cases.</p>
+    </div>
+    <div class="bg-white border rounded-xl p-4">
+      <div class="font-bold text-sm mb-2">helper.py</div>
+      <p class="text-xs text-slate-700 mb-2"><strong>Boundary, not brain.</strong> The helper never tries to "understand" the agent's content — it shuttles JSON safely between Claude and Postgres.</p>
+      <p class="text-xs text-slate-700"><strong>Two commands</strong> typically: <code class="mono">fetch</code> (read JSON to stdout) and <code class="mono">save</code>/<code class="mono">run</code> (insert/update). Some helpers add <code class="mono">enroll</code>, <code class="mono">preview</code>, <code class="mono">list</code>.</p>
+      <p class="text-xs text-slate-700"><strong>No pip deps.</strong> Just <code class="mono">subprocess</code> + <code class="mono">json</code> + standard lib. Slower than psycopg2, but zero install friction.</p>
+    </div>
+    <div class="bg-white border rounded-xl p-4">
+      <div class="font-bold text-sm mb-2">.bat launcher</div>
+      <p class="text-xs text-slate-700 mb-2">Convenience for testing. Double-click to run the full workflow: fetch → save → verify with a SQL count → print scorecard pass/fail.</p>
+      <p class="text-xs text-slate-700">In production, n8n would replace these — a workflow node calls the helper directly.</p>
+    </div>
+  </div>
+  <h3 class="text-lg font-bold mt-6 mb-2">The DB boundary recipe (every helper uses this)</h3>
+  <div class="bg-slate-900 text-slate-100 rounded-xl p-4 ascii text-xs">def _psql(sql, *, tA=False, stdin=None):
+    args = ["docker", "exec", "-i", "supabase_db_rxapply-test", "psql",
+            "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1"]
+    if tA: args += ["-tA"]
+    if stdin is None:
+        args += ["-c", sql]
+        r = subprocess.run(args, capture_output=True)        # bytes!
+    else:
+        r = subprocess.run(args, input=stdin.encode("utf-8"), capture_output=True)
+    out = r.stdout.decode("utf-8", errors="replace")
+    if r.returncode != 0: sys.exit(...)
+    return out</div>
+  <p class="text-xs text-slate-600 mt-2">Why bytes-then-decode? Windows defaults stdout to <code class="mono">cp1252</code> which mangles Farsi/Arabic. Forcing UTF-8 at the boundary is the fix.</p>
+  <h3 class="text-lg font-bold mt-6 mb-2">For long INSERTs with lots of text</h3>
+  <p class="text-sm mb-2">Don't escape inline. Use <code class="mono">\set</code> with backtick-cat:</p>
+  <div class="bg-slate-900 text-slate-100 rounded-xl p-4 ascii text-xs"># 1. Write content to host tmp file
+# 2. docker cp to /tmp/&lt;name&gt;.json inside container
+# 3. Run psql with:
+\set my_var `cat /tmp/&lt;name&gt;.json`
+INSERT INTO ... VALUES (..., :'my_var'::jsonb);</div>
+</section>
+
+<section id="agents" class="anchor">
+  <div class="text-xs font-bold uppercase tracking-wider text-violet-700 mb-1">5 · Agents</div>
+  <h2 class="text-2xl font-bold mb-1">The 23 agents, one card each</h2>
+  <p class="text-sm text-slate-600 mb-4">11 from the test phase (T1–T11 + cross-post) plus 10 added in Phase C plus <strong>Afshin</strong> (#22, V2 / Phase F · designs) plus <strong>Daneshyar</strong> (#23, V3 / K6 · KB scholar). Cards below are grouped by role color: <span class="pill bg-rose-100 text-rose-700">content</span> <span class="pill bg-amber-100 text-amber-700">ops</span> <span class="pill bg-emerald-100 text-emerald-700">engage</span> <span class="pill bg-blue-100 text-blue-700">decide</span> <span class="pill bg-indigo-100 text-indigo-700">inspect</span> <span class="pill bg-violet-100 text-violet-700">distribution</span> <span class="pill bg-fuchsia-100 text-fuchsia-700">intel</span> <span class="pill bg-slate-200 text-slate-700">infra</span> <span class="pill bg-pink-100 text-pink-700">design</span> <span class="pill bg-emerald-100 text-emerald-700">knowledge</span></p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="bg-white border-2 border-rose-300 rounded-xl p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-mono text-xs bg-rose-100 text-rose-700 px-2 py-0.5 rounded">T1</span>
+        <span class="font-bold">Pooya</span>
+        <span class="pill bg-rose-100 text-rose-700">intel</span>
+        <span class="ml-auto text-xs text-slate-500">sonnet</span>
+      </div>
+      <p class="text-xs text-slate-600 mb-2">Reads last-7-day intel_snapshots. Synthesizes 3 topic briefs as JSON.</p>
+      <div class="text-xs"><strong>In:</strong> 4+ rows of intel · <strong>Out:</strong> 3 rows in <code class="mono">content_briefs</code></div>
+    </div>
+    <div class="bg-white border-2 border-rose-300 rounded-xl p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-mono text-xs bg-rose-100 text-rose-700 px-2 py-0.5 rounded">T2</span>
+        <span class="font-bold">Sepehr</span>
+        <span class="pill bg-rose-100 text-rose-700">content</span>
+        <span class="ml-auto text-xs text-slate-500">sonnet</span>
+      </div>
+      <p class="text-xs text-slate-600 mb-2">Brief → 2,000–2,500-word EN master article (Markdown, TLDR + body + FAQ + ≥3 citations).</p>
+      <div class="text-xs"><strong>In:</strong> 1 brief · <strong>Out:</strong> 1 row in <code class="mono">content_assets</code> (kind=master, lang=en)</div>
+    </div>
+    <div class="bg-white border-2 border-rose-300 rounded-xl p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-mono text-xs bg-rose-100 text-rose-700 px-2 py-0.5 rounded">T3</span>
+        <span class="font-bold">Goyesh</span>
+        <span class="pill bg-rose-100 text-rose-700">content</span>
+        <span class="ml-auto text-xs text-slate-500">sonnet</span>
+      </div>
+      <p class="text-xs text-slate-600 mb-2">EN master → FA + AR culturally-reweighted versions. FA = Iranian credential-conversion. AR = Gulf private-practice.</p>
+      <div class="text-xs"><strong>In:</strong> 1 EN master · <strong>Out:</strong> 2 rows (lang=fa, lang=ar)</div>
+    </div>
+    <div class="bg-white border-2 border-rose-300 rounded-xl p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-mono text-xs bg-rose-100 text-rose-700 px-2 py-0.5 rounded">T4</span>
+        <span class="font-bold">Avang</span>
+        <span class="pill bg-rose-100 text-rose-700">content</span>
+        <span class="ml-auto text-xs text-slate-500">sonnet</span>
+      </div>
+      <p class="text-xs text-slate-600 mb-2">3 masters → 11 platform variants. ig+fb+telegram for all 3 langs (×9), linkedin EN-only (1), youtube EN-only (1).</p>
+      <div class="text-xs"><strong>In:</strong> 3 masters · <strong>Out:</strong> 11 rows in <code class="mono">scheduled_posts</code></div>
+    </div>
+    <div class="bg-white border-2 border-violet-300 rounded-xl p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-mono text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded">T5</span>
+        <span class="font-bold">cross-post DRY_RUN</span>
+        <span class="pill bg-violet-100 text-violet-700">distribution</span>
+        <span class="ml-auto text-xs text-slate-500">no-LLM</span>
+      </div>
+      <p class="text-xs text-slate-600 mb-2">Reads pending scheduled_posts, console-logs the would-be API call, flips status to <code class="mono">dry_run_logged</code>. Never hits a real social API.</p>
+      <div class="text-xs"><strong>In:</strong> N pending posts · <strong>Out:</strong> N status flips</div>
+    </div>
+    <div class="bg-white border-2 border-amber-300 rounded-xl p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-mono text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded">T6</span>
+        <span class="font-bold">Rahnama</span>
+        <span class="pill bg-amber-100 text-amber-700">ops</span>
+        <span class="ml-auto text-xs text-slate-500">haiku</span>
+      </div>
+      <p class="text-xs text-slate-600 mb-2">Quiz answers → top-3 destinations with 6-dim score breakdown + 2-sentence rationale per destination.</p>
+      <div class="text-xs"><strong>In:</strong> 1 quiz JSON · <strong>Out:</strong> chat-only (no DB write)</div>
+    </div>
+    <div class="bg-white border-2 border-emerald-300 rounded-xl p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-mono text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded">T7</span>
+        <span class="font-bold">Rahbar</span>
+        <span class="pill bg-emerald-100 text-emerald-700">engage</span>
+        <span class="ml-auto text-xs text-slate-500">haiku</span>
+      </div>
+      <p class="text-xs text-slate-600 mb-2">Lead → picks one of 7 sequences (fa-canada-v1, ar-uae-v1, en-canada-v1, etc.), renders 5 emails, schedules at Day 0/2/4/7/14.</p>
+      <div class="text-xs"><strong>In:</strong> 1 lead · <strong>Out:</strong> 5 rows in <code class="mono">nurture_schedule</code></div>
+    </div>
+    <div class="bg-white border-2 border-emerald-300 rounded-xl p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-mono text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded">T8</span>
+        <span class="font-bold">Mehrban</span>
+        <span class="pill bg-emerald-100 text-emerald-700">engage</span>
+        <span class="ml-auto text-xs text-slate-500">sonnet</span>
+      </div>
+      <p class="text-xs text-slate-600 mb-2">Inbound DM → reply in sender's language with mandatory disclaimer + next-step CTA.</p>
+      <div class="text-xs"><strong>In:</strong> 1 engagement_event (kind=dm) · <strong>Out:</strong> 1 engagement_event (kind=reply)</div>
+    </div>
+    <div class="bg-white border-2 border-emerald-300 rounded-xl p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-mono text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded">T9</span>
+        <span class="font-bold">Bineh</span>
+        <span class="pill bg-emerald-100 text-emerald-700">engage</span>
+        <span class="ml-auto text-xs text-slate-500">haiku</span>
+      </div>
+      <p class="text-xs text-slate-600 mb-2">Lead's full event history → engagement_score (0–1, 2 dp) + 3 top_signals strings.</p>
+      <div class="text-xs"><strong>In:</strong> 1 lead + N events · <strong>Out:</strong> UPDATE <code class="mono">leads.engagement_score</code></div>
+    </div>
+    <div class="bg-white border-2 border-blue-300 rounded-xl p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-mono text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">T10</span>
+        <span class="font-bold">Ravi</span>
+        <span class="pill bg-blue-100 text-blue-700">decide</span>
+        <span class="ml-auto text-xs text-slate-500">sonnet</span>
+      </div>
+      <p class="text-xs text-slate-600 mb-2">Last-week funnel + agent costs → 600-word Monday narrative email (3 sections), sent via SMTP to MailHog.</p>
+      <div class="text-xs"><strong>In:</strong> CSV + agent_runs · <strong>Out:</strong> 1 email in MailHog inbox</div>
+    </div>
+    <div class="bg-white border-2 border-indigo-300 rounded-xl p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-mono text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded">T11a</span>
+        <span class="font-bold">Bidar</span>
+        <span class="pill bg-indigo-100 text-indigo-700">inspect</span>
+        <span class="ml-auto text-xs text-slate-500">sonnet</span>
+      </div>
+      <p class="text-xs text-slate-600 mb-2">agent_runs (24h) → daily rollup per agent + recommendation (promote/demote/rewrite/keep).</p>
+      <div class="text-xs"><strong>In:</strong> 21+ agent_runs · <strong>Out:</strong> 21 rows in <code class="mono">agent_efficiency</code></div>
+    </div>
+    <div class="bg-white border-2 border-indigo-300 rounded-xl p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-mono text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded">T11b</span>
+        <span class="font-bold">Davari</span>
+        <span class="pill bg-indigo-100 text-indigo-700">inspect</span>
+        <span class="ml-auto text-xs text-slate-500">haiku</span>
+      </div>
+      <p class="text-xs text-slate-600 mb-2">n8n_executions (24h) → per-workflow flow_health (green/amber/red) + suggested_fixes.</p>
+      <div class="text-xs"><strong>In:</strong> N executions · <strong>Out:</strong> chat JSON, no DB write</div>
+    </div>
+  </div>
+
+  <h3 class="text-lg font-bold mt-8 mb-3">The 10 agents added in Phase C</h3>
+  <div class="grid md:grid-cols-2 gap-4">
+
+    <div class="bg-white border-2 border-slate-300 rounded-xl p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-mono text-xs bg-slate-200 text-slate-700 px-2 py-0.5 rounded">C1</span>
+        <span class="font-bold">Zirak</span>
+        <span class="pill bg-slate-200 text-slate-700">infra</span>
+        <span class="ml-auto text-xs text-slate-500">no-LLM</span>
+      </div>
+      <p class="text-xs text-slate-600 mb-2">The only sanctioned writer for <code class="mono">agent_journal</code>. Subcommands: <code class="mono">log</code>, <code class="mono">start</code>/<code class="mono">finish</code>, <code class="mono">tail</code>, <code class="mono">for-agent</code>, <code class="mono">failures</code>. Every other agent shells out to it once per invocation.</p>
+      <div class="text-xs"><strong>In:</strong> agent + status + 1-line summaries · <strong>Out:</strong> 1 row in <code class="mono">agent_journal</code></div>
+    </div>
+
+    <div class="bg-white border-2 border-slate-300 rounded-xl p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-mono text-xs bg-slate-200 text-slate-700 px-2 py-0.5 rounded">C2</span>
+        <span class="font-bold">Paya</span>
+        <span class="pill bg-slate-200 text-slate-700">infra</span>
+        <span class="ml-auto text-xs text-slate-500">no-LLM</span>
+      </div>
+      <p class="text-xs text-slate-600 mb-2">The only sanctioned writer for <code class="mono">intel_snapshots</code>. Validates <code class="mono">payload</code> against a per-<code class="mono">kind</code> schema. Subcommands: <code class="mono">write</code>, <code class="mono">bulk</code>, <code class="mono">list</code>, <code class="mono">by-kind</code>, <code class="mono">by-agent</code>, <code class="mono">since</code>, <code class="mono">schema</code>.</p>
+      <div class="text-xs"><strong>In:</strong> JSON payload via stdin · <strong>Out:</strong> 1+ rows in <code class="mono">intel_snapshots</code></div>
+    </div>
+
+    <div class="bg-white border-2 border-fuchsia-300 rounded-xl p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-mono text-xs bg-fuchsia-100 text-fuchsia-700 px-2 py-0.5 rounded">C3</span>
+        <span class="font-bold">Roya</span>
+        <span class="pill bg-fuchsia-100 text-fuchsia-700">intel</span>
+        <span class="ml-auto text-xs text-slate-500">no-LLM</span>
+      </div>
+      <p class="text-xs text-slate-600 mb-2">Market heatmap. Samples last-14-day <code class="mono">leads.country_of_interest</code> + <code class="mono">customers.target_destination</code>, weights customers 3× leads, normalizes top to 1.0. Snapshot summary explicitly notes "(local-signals only)".</p>
+      <div class="text-xs"><strong>In:</strong> leads + customers (14d) · <strong>Out:</strong> <code class="mono">intel_snapshots</code> kind=market_heatmap</div>
+    </div>
+
+    <div class="bg-white border-2 border-fuchsia-300 rounded-xl p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-mono text-xs bg-fuchsia-100 text-fuchsia-700 px-2 py-0.5 rounded">C4</span>
+        <span class="font-bold">Shahed</span>
+        <span class="pill bg-fuchsia-100 text-fuchsia-700">intel</span>
+        <span class="ml-auto text-xs text-slate-500">no-LLM</span>
+      </div>
+      <p class="text-xs text-slate-600 mb-2">Competitor diff. Compares <code class="mono">competitor_fixtures.json</code> (or built-in 3-competitor seed) against the most recent diff snapshot per competitor. Emits one row per detected change: new topic, new language, primary URL change.</p>
+      <div class="text-xs"><strong>In:</strong> fixture + last snapshot · <strong>Out:</strong> N rows kind=competitor_diff</div>
+    </div>
+
+    <div class="bg-white border-2 border-fuchsia-300 rounded-xl p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-mono text-xs bg-fuchsia-100 text-fuchsia-700 px-2 py-0.5 rounded">C5</span>
+        <span class="font-bold">Dadbeh</span>
+        <span class="pill bg-fuchsia-100 text-fuchsia-700">intel</span>
+        <span class="ml-auto text-xs text-slate-500">no-LLM</span>
+      </div>
+      <p class="text-xs text-slate-600 mb-2">Regulatory change. Built-in seed of 6 plausible 2026 events (NDEB AFK, ADC, GDC, DHA, ZAB, BC bridging). Filters to <code class="mono">[today-7d, today+90d]</code>, dedups against last-14-day snapshots.</p>
+      <div class="text-xs"><strong>In:</strong> regulatory fixture · <strong>Out:</strong> N rows kind=regulatory_change</div>
+    </div>
+
+    <div class="bg-white border-2 border-fuchsia-300 rounded-xl p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-mono text-xs bg-fuchsia-100 text-fuchsia-700 px-2 py-0.5 rounded">C6</span>
+        <span class="font-bold">Nasim</span>
+        <span class="pill bg-fuchsia-100 text-fuchsia-700">intel</span>
+        <span class="ml-auto text-xs text-slate-500">no-LLM</span>
+      </div>
+      <p class="text-xs text-slate-600 mb-2">Trend spike. Tokenises <code class="mono">engagement_events.payload-&gt;'text'</code> into 1-2-word phrases, compares last-3d rate vs. 14d baseline. A phrase counts as a spike at ≥2× ratio AND ≥3 recent mentions. Caps output at 10.</p>
+      <div class="text-xs"><strong>In:</strong> engagement_events 3d/14d · <strong>Out:</strong> N rows kind=trend_spike</div>
+    </div>
+
+    <div class="bg-white border-2 border-fuchsia-300 rounded-xl p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-mono text-xs bg-fuchsia-100 text-fuchsia-700 px-2 py-0.5 rounded">C7</span>
+        <span class="font-bold">Ramin</span>
+        <span class="pill bg-fuchsia-100 text-fuchsia-700">intel</span>
+        <span class="ml-auto text-xs text-slate-500">no-LLM</span>
+      </div>
+      <p class="text-xs text-slate-600 mb-2">Keyword candidates. Reads last-7d of intel from the four agents above, cross-products top destinations × regulatory hooks × trend topics. Adds heuristic volume + intent classification. Capped at 20 candidates per snapshot.</p>
+      <div class="text-xs"><strong>In:</strong> intel_snapshots last-7d · <strong>Out:</strong> 1 row kind=keyword_candidates</div>
+    </div>
+
+    <div class="bg-white border-2 border-blue-300 rounded-xl p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-mono text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">C8</span>
+        <span class="font-bold">Kherad</span>
+        <span class="pill bg-blue-100 text-blue-700">decide</span>
+        <span class="ml-auto text-xs text-slate-500">no-LLM</span>
+      </div>
+      <p class="text-xs text-slate-600 mb-2">Quality scorer. Reads <code class="mono">pending_g2</code> assets, scores 4 rules: citation density, banned-word filler, keyword coverage vs. Ramin's baseline, factual-anchor liveness. ≥0.7 → status=g2_ready; below → status=needs_refine + one <code class="mono">corrections</code> row per failed rule.</p>
+      <div class="text-xs"><strong>In:</strong> content_assets pending_g2 · <strong>Out:</strong> status flips + N <code class="mono">corrections</code> rows</div>
+    </div>
+
+    <div class="bg-white border-2 border-amber-300 rounded-xl p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-mono text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded">C9</span>
+        <span class="font-bold">Payvand</span>
+        <span class="pill bg-amber-100 text-amber-700">ops</span>
+        <span class="ml-auto text-xs text-slate-500">no-LLM</span>
+      </div>
+      <p class="text-xs text-slate-600 mb-2">Partnership outreach drafter. Templates per <code class="mono">type</code> (rcic/oisc/mara/exam_prep/university/recruiter) × <code class="mono">country</code>. Drafts append to <code class="mono">partnerships.outreach_drafts</code> as <code class="mono">pending_human_review</code>. Status flips <code class="mono">targeted</code>→<code class="mono">draft_ready</code>. Never sends.</p>
+      <div class="text-xs"><strong>In:</strong> partnerships status=targeted · <strong>Out:</strong> JSONB drafts in same row</div>
+    </div>
+
+    <div class="bg-white border-2 border-amber-300 rounded-xl p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-mono text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded">C10</span>
+        <span class="font-bold">Mehmandar</span>
+        <span class="pill bg-amber-100 text-amber-700">ops</span>
+        <span class="ml-auto text-xs text-slate-500">no-LLM</span>
+      </div>
+      <p class="text-xs text-slate-600 mb-2">Guest-pipeline curator. Reads <code class="mono">guest_pipeline</code>, classifies overdue per stage SLA, sends per-stage nudges + a weekly digest to MailHog. Pairs with Ravi's Monday narrative.</p>
+      <div class="text-xs"><strong>In:</strong> guest_pipeline + leads · <strong>Out:</strong> N MailHog emails + 1 digest</div>
+    </div>
+
+  </div>
+
+  <h3 class="text-lg font-bold mt-8 mb-3">The 22nd agent, added in V2 / Phase F</h3>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="bg-white border-2 border-pink-300 rounded-xl p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-mono text-xs bg-pink-100 text-pink-700 px-2 py-0.5 rounded">F8</span>
+        <span class="font-bold">Afshin</span>
+        <span class="pill bg-pink-100 text-pink-700">design</span>
+        <span class="ml-auto text-xs text-slate-500">sonnet + image-gen</span>
+      </div>
+      <p class="text-xs text-slate-600 mb-2">Two-stage design pipeline. <strong>Draft</strong>: Claude generates an SVG mock for one of 6 kinds (ig_carousel_slide, telegram_cover, youtube_thumb, web_banner, email_header_ravi, custom) at the brand's exact dimensions, with palette + typography rules baked in. Saved to <code class="mono">assets/generated/drafts/&lt;id&gt;.svg</code>; cost ~$0.005. <strong>Render</strong>: after founder approval, dispatches to one of 7 image-gen providers (gpt-image-1, DALL·E 3, Stability SD3, Ideogram v2, Flux Schnell/Dev, Recraft v3) — explicit override → per-kind default → gpt-image-1 fallback. Saved to <code class="mono">assets/generated/renders/&lt;id&gt;.png</code>.</p>
+      <div class="text-xs"><strong>In:</strong> kind + topic + language + notes · <strong>Out:</strong> 1 row in <code class="mono">media_library</code> with draft_path then render_path</div>
+    </div>
+  </div>
+
+  <h3 class="text-lg font-bold mt-8 mb-3">The 23rd agent, added in V2.5</h3>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="bg-white border-2 border-amber-300 rounded-xl p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-mono text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded">V2.5</span>
+        <span class="font-bold">compose-ig</span>
+        <span class="pill bg-amber-100 text-amber-700">compose</span>
+        <span class="ml-auto text-xs text-slate-500">configurable LLM</span>
+      </div>
+      <p class="text-xs text-slate-600 mb-2">Topic-to-trio synthesizer. Single Anthropic call per topic, produces three Instagram captions (en / fa / ar with native script + RTL), localized hashtags per language (Persian/Arabic-native + a few universal English tags), and a shared design plan (concept + image_prompt + palette + layout + typography). Output is structured JSON consumed by the Compose viewer. Brand profile is injected into the system prompt at call time.</p>
+      <div class="text-xs"><strong>In:</strong> topic + tone + brand profile · <strong>Out:</strong> JSON {languages.{en,fa,ar}, design_plan, shared_meta} <br><strong>Cost:</strong> ~$0.05 per run on Sonnet 4.5; ~$0.27 on Opus 4.7</div>
+    </div>
+  </div>
+
+  <div class="mt-6 bg-emerald-50 border-l-4 border-emerald-500 rounded-r-xl p-4 text-sm">
+    <strong>All 23 agents now live.</strong> 21 plan-v3 agents with <code class="mono">SKILL.md</code> + <code class="mono">&lt;name&gt;.py</code>, plus Afshin (design pipeline) and compose-ig (compose synthesizer). Each is callable from the V2 dashboard's Agents panel (with per-agent LLM model + Anthropic chat), the Pipelines visual editor, .bat launchers, n8n via the proxy, or as Cowork skills. The brand profile (Settings → Brand profile) is injected into every Anthropic call across all agents that talk to LLMs.
+  </div>
+</section>
+
+<section id="tables" class="anchor">
+  <div class="text-xs font-bold uppercase tracking-wider text-violet-700 mb-1">6 · Tables</div>
+  <h2 class="text-2xl font-bold mb-4">The 28 Postgres tables</h2>
+  <p class="mb-4">Every table is in the <code class="mono">public</code> schema. The 16-table baseline is owned by <code class="mono">supabase/migrations/20260429000000_initial_schema.sql</code>; <code class="mono">agent_journal</code> was added by <code class="mono">…20260430000000_agent_journal.sql</code> in Phase A. <strong>V2 added 4 migrations × 6 new tables + extra columns</strong>: <code class="mono">…20260501_logs_l2.sql</code> (agent_actions + I/O/cost columns on agent_runs), <code class="mono">…20260502_prompts_chats.sql</code> (prompt_versions, agent_chats, dashboard_settings), <code class="mono">…20260503_media_library.sql</code> (media_library), <code class="mono">…20260504_image_model_defaults.sql</code> (pipelines + image_model_defaults jsonb on dashboard_settings). <strong>V3 added 5 migrations × 5 new tables</strong>: <code class="mono">…20260508_permissions_renderers.sql</code> (agent_permissions + agent_actions_pending), <code class="mono">…20260509_agent_memory.sql</code> (agent_memory), <code class="mono">…20260510_agent_evals.sql</code> (agent_evals), <code class="mono">…20260511_agent_handoffs.sql</code> (agent_handoffs), <code class="mono">…20260512_knowledge_base.sql</code> (knowledge_base).</p>
+  <table class="text-sm w-full">
+    <thead><tr><th>Table</th><th>Owns</th><th>Filled by</th><th>Read by</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">leads</td><td>Every form capture, advisor run, checklist download</td><td>web app · seeds · Bineh (UPDATE engagement_score)</td><td>Rahbar · Bineh · Mehrban · Rahnama · Roya · Mehmandar</td></tr>
+      <tr><td class="mono">customers</td><td>Lead → customer on first paid Stripe event</td><td>(future) Stripe webhook</td><td>Roya (signal sampling)</td></tr>
+      <tr><td class="mono">consultations</td><td>Cal.com bookings + post-call notes</td><td>(future) Cal.com</td><td>(future)</td></tr>
+      <tr><td class="mono">content_briefs</td><td>Topic briefs awaiting / past G1 approval</td><td>Pooya</td><td>Sepehr · Goyesh · Kherad (anchor-liveness check)</td></tr>
+      <tr><td class="mono">content_assets</td><td>Every artifact shipped — masters + variants</td><td>Sepehr · Goyesh · (future) Avang derivatives</td><td>Avang · Mehrban · Kherad (status updates)</td></tr>
+      <tr><td class="mono">engagement_events</td><td>Every comment, DM, open, click, page_view</td><td>web · Mehrban (replies) · seed scripts</td><td>Bineh · Mehrban · Nasim (3d/14d trend windows)</td></tr>
+      <tr><td class="mono">corrections</td><td>Quality-rule failures + community feedback</td><td>Kherad (one row per failed rule)</td><td>(future) refinement agent</td></tr>
+      <tr><td class="mono">partnerships</td><td>RCIC + exam-prep + recruiter CRM</td><td>seed · Payvand (drafts)</td><td>(future) outreach panel</td></tr>
+      <tr><td class="mono">guest_pipeline</td><td>Podcast guest pipeline</td><td>seed · (future) booking webhook</td><td>Mehmandar (digest + nudges)</td></tr>
+      <tr><td class="mono">intel_snapshots</td><td>5 intel agents' daily output</td><td>Roya · Shahed · Dadbeh · Nasim · Ramin (all via Paya)</td><td>Pooya · Ramin · Kherad (keyword-coverage rule)</td></tr>
+      <tr><td class="mono">agent_runs</td><td>Per-call billing log (tokens, cost, duration)</td><td>seed · (future) cowork-proxy</td><td>Bidar · Ravi · admin dashboard cost widget</td></tr>
+      <tr><td class="mono">agent_efficiency</td><td>Bidar's daily per-agent rollup</td><td>Bidar</td><td>Ravi · admin dashboard agent-health strip</td></tr>
+      <tr><td class="mono">approval_queue</td><td>Pending G1/G2/G3 reviews + founder action</td><td>(future) gated agents</td><td>admin dashboard approval-queue panel (Approve/Reject PATCH)</td></tr>
+      <tr><td class="mono">n8n_executions</td><td>Mirror of n8n exec log</td><td>seed · (future) n8n hook</td><td>Davari</td></tr>
+      <tr><td class="mono">scheduled_posts</td><td>The cross-post queue (replaces Publer)</td><td>Avang</td><td>cross-post DRY_RUN · (future) real cross-post</td></tr>
+      <tr><td class="mono">nurture_schedule</td><td>The email queue (replaces MailerLite)</td><td>Rahbar</td><td>(future) cron sender → MailHog/Resend</td></tr>
+      <tr class="bg-emerald-50"><td class="mono"><strong>agent_journal</strong></td><td>Narrative-shaped append-only feed of every agent invocation</td><td><strong>Zirak</strong> (every agent shells out to it after each run)</td><td>admin dashboard activity feed (last 50, ORDER BY created_at DESC)</td></tr>
+      <tr class="bg-violet-50"><td class="mono"><strong>agent_actions</strong></td><td><strong>V2 / F2.</strong> Sub-step rows for a run (kind, status, duration, action_data jsonb)</td><td>log-writer.js auto-records during run-helper</td><td>Logs panel "Actions" tab</td></tr>
+      <tr class="bg-violet-50"><td class="mono"><strong>prompt_versions</strong></td><td><strong>V2 / F7.</strong> Append-only history of every SKILL.md edit (body, edited_by, diff_chars, reason)</td><td>prompt-versions.js on every PUT /prompts/:agent</td><td>Settings → Prompts editor (rollback dropdown)</td></tr>
+      <tr class="bg-violet-50"><td class="mono"><strong>agent_chats</strong></td><td><strong>V2 / F5.</strong> Anthropic-streamed chats per agent (messages jsonb, total_tokens, total_cost)</td><td>anthropic-chat.js on every /agent/:name/chat call</td><td>Agents panel · Chat tab + History tab</td></tr>
+      <tr class="bg-violet-50"><td class="mono"><strong>dashboard_settings</strong></td><td><strong>V2 / F7+F8b+F9.</strong> Singleton row (id=1) holding scrypt password hash, sandbox_mode, monthly_cap_usd, auth_session_hours, image_model_defaults jsonb, key-presence flags</td><td>auth.js · server.js PATCH /settings · afshin-router.js</td><td>Topbar cost widget · Settings panel · canSpend() guard</td></tr>
+      <tr class="bg-violet-50"><td class="mono"><strong>media_library</strong></td><td><strong>V2 / F8.</strong> Afshin's design rows (kind, topic, language, draft_path, render_path, costs, approved bool, metadata jsonb with render_model)</td><td>Afshin (afshin-router.js) draft + render</td><td>Designs panel gallery + per-card render/approve/archive</td></tr>
+      <tr class="bg-violet-50"><td class="mono"><strong>pipelines</strong></td><td><strong>V2 / F6.</strong> Saved Drawflow graphs mirrored from <code class="mono">pipelines/&lt;slug&gt;.json</code> (name, description, graph_data jsonb, node_count)</td><td>pipeline-runner.js on POST /pipelines</td><td>Pipelines panel sidebar list</td></tr>
+    </tbody>
+  </table>
+  <p class="text-xs text-slate-600 mt-3"><strong>Indexes</strong> on hot paths: leads (language, engagement_score DESC), engagement_events (platform, created_at DESC), agent_runs (agent, created_at DESC), scheduled_posts (status, scheduled_at) WHERE status='pending'. <strong>agent_journal</strong> has three indexes: <code class="mono">(created_at DESC)</code>, <code class="mono">(agent, created_at DESC)</code>, and a partial <code class="mono">(created_at DESC) WHERE status='fail'</code> for the dashboard's failure scan. <strong>RLS</strong> is enabled on leads, customers, consultations.</p>
+  <div class="mt-3 bg-blue-50 border-l-4 border-blue-500 rounded-r p-3 text-xs">
+    <strong>Why two log tables?</strong> <code class="mono">agent_runs</code> is billing-shaped (input_tokens, output_tokens, cost_usd, duration_ms) — Bidar's audit needs that. <code class="mono">agent_journal</code> is narrative-shaped (input_summary, output_summary, where the result landed) — the dashboard needs that. Same agents, different lenses.
+  </div>
+</section>
+
+<section id="ops" class="anchor">
+  <div class="text-xs font-bold uppercase tracking-wider text-violet-700 mb-1">7 · Operations</div>
+  <h2 class="text-2xl font-bold mb-4">Run, verify, debug</h2>
+  <h3 class="text-lg font-bold mb-2">Cold start (after a reboot)</h3>
+  <ol class="list-decimal pl-6 text-sm space-y-1 mb-5">
+    <li>Open <strong>Docker Desktop</strong>; wait for the whale icon to be steady.</li>
+    <li>In PowerShell: <code class="mono bg-slate-100 px-1 rounded">docker start n8n-test mailhog-test</code>. Supabase containers usually auto-start.</li>
+    <li>Double-click <code class="mono bg-slate-100 px-1 rounded">start-proxy.bat</code> — the proxy is now load-bearing for both dashboards and n8n.</li>
+    <li>Double-click <code class="mono bg-slate-100 px-1 rounded">verify.bat</code> to confirm n8n + mailhog + cowork-proxy = HTTP 200.</li>
+    <li>Run <code class="mono bg-slate-100 px-1 rounded">smoke-everything.bat</code> for a one-click PASS/FAIL across 30+ checks (services, proxy routes, all 21 SKILL.md files present, all 5 workflow JSONs valid, table count ≥17).</li>
+    <li>Open <code class="mono">admin-dashboard.html</code> for the operations control plane (or <code class="mono">dashboard.html</code> for the test-phase scorecard).</li>
+  </ol>
+  <h3 class="text-lg font-bold mb-2">Run a single agent — four ways now</h3>
+  <div class="grid md:grid-cols-2 gap-3">
+    <div class="bg-white border rounded-xl p-3">
+      <div class="font-bold text-sm mb-1">Path A — open a fresh Cowork chat and ask</div>
+      <p class="text-xs text-slate-700">Say <em>"run pooya"</em> or <em>"score Saeed"</em> in chat. Claude reads the matching <code class="mono">SKILL.md</code>, runs the helper, persists, replies. Best path when LLM inference is needed.</p>
+    </div>
+    <div class="bg-white border rounded-xl p-3">
+      <div class="font-bold text-sm mb-1">Path B — double-click the agent's <code class="mono">.bat</code></div>
+      <p class="text-xs text-slate-700">Each <code class="mono">agents/&lt;name&gt;/</code> has at least one launcher. Smoke <code class="mono">.bat</code>s for the new agents are also at top-level: <code class="mono">smoke-phase-c.bat</code>, <code class="mono">smoke-intel-pipeline.bat</code>.</p>
+    </div>
+    <div class="bg-white border rounded-xl p-3">
+      <div class="font-bold text-sm mb-1">Path C — admin dashboard trigger panel</div>
+      <p class="text-xs text-slate-700">Open <code class="mono">admin-dashboard.html</code>, pick the agent from the dropdown (21 listed), enter command + args, hit Run. POSTs to <code class="mono">/run-helper</code>; stdout/stderr render in a result box. Has a "preview only" checkbox to see the request body without executing.</p>
+    </div>
+    <div class="bg-white border rounded-xl p-3">
+      <div class="font-bold text-sm mb-1">Path D — n8n cron / webhook</div>
+      <p class="text-xs text-slate-700">5 imported workflows fire on schedule (Bidar 02:00, intel chain 06:00, Ravi Mon 09:00, cross-post every 5 min) or on webhook (lead-form). Each posts to <code class="mono">/run-helper</code> via <code class="mono">host.docker.internal:7777</code>. Workflows imported as inactive — toggle on in the n8n UI.</p>
+    </div>
+  </div>
+  <h3 class="text-lg font-bold mt-5 mb-2">Edit an agent's prompt (SKILL.md) without touching the disk</h3>
+  <p class="text-sm text-slate-700 mb-2">The admin dashboard's "Prompts editor" panel: pick an agent, click <strong>Load</strong>, edit in the textarea, click <strong>Save</strong>. The proxy's PUT <code class="mono">/prompts/:agent</code> validates frontmatter and writes atomically (<code class="mono">.tmp</code> file then rename). The save button is disabled until you have unsaved changes; the status line shows char/byte counts.</p>
+  <h3 class="text-lg font-bold mt-5 mb-2">Common debugging moves</h3>
+  <table class="text-sm w-full">
+    <thead><tr><th>Symptom</th><th>Probable cause</th><th>Fix</th></tr></thead>
+    <tbody>
+      <tr><td>Helper exits with "psql failed"</td><td>Container down; SQL typo</td><td><code class="mono">docker ps</code> to check; copy SQL into Studio to debug</td></tr>
+      <tr><td>UnicodeDecodeError on cp1252</td><td>Subprocess defaulting to cp1252</td><td>Use binary I/O + <code class="mono">.decode("utf-8")</code></td></tr>
+      <tr><td>cowork-proxy returns 000</td><td>Its terminal got closed</td><td>Re-run <code class="mono">start-proxy.bat</code></td></tr>
+      <tr><td>Email not in MailHog</td><td>Sent to wrong host</td><td>Check <code class="mono">SMTP_HOST=localhost</code> in <code class="mono">.env</code></td></tr>
+      <tr><td>Studio shows 0 tables</td><td>Migration not applied</td><td>Run <code class="mono">supabase db reset</code> from rxapply-test</td></tr>
+      <tr><td>Container won't start</td><td>WSL stuck</td><td><code class="mono">wsl --shutdown</code> then restart Docker Desktop</td></tr>
+      <tr><td>Bidar finds 0 runs</td><td>agent_runs older than 24h</td><td>Re-run <code class="mono">seed-fixtures.bat</code></td></tr>
+    </tbody>
+  </table>
+  <h3 class="text-lg font-bold mt-5 mb-2">Logs to check, in order</h3>
+  <ul class="list-disc pl-6 text-sm space-y-1">
+    <li><code class="mono">%TEMP%\rxapply-setup.log</code> — initial setup</li>
+    <li><code class="mono">%TEMP%\rxapply-verify.log</code> — verify.bat output</li>
+    <li><code class="mono">cowork-proxy/proxy.log</code> — every /run-agent call</li>
+    <li><code class="mono">docker logs n8n-test</code> · <code class="mono">docker logs supabase_db_rxapply-test</code></li>
+    <li>For an agent: open Studio → run the agent's verify SQL by hand</li>
+  </ul>
+  <h3 class="text-lg font-bold mt-5 mb-2">Restart from a clean slate</h3>
+  <pre class="bg-slate-900 text-slate-100 ascii rounded p-3 text-xs">cd C:\Users\Hojat\OneDrive\Desktop\rxapply-test
+supabase db reset           # drops + recreates DB, replays migrations
+.\setup2-fixed.bat          # re-installs node deps, ensures containers running
+.\seed-fixtures.bat         # repopulates the 4 base fixture sets
+.\agents\bineh\run-bineh-saeed.bat
+# ... then re-run any agent .bats you want</pre>
+</section>
+
+<section id="extend" class="anchor">
+  <div class="text-xs font-bold uppercase tracking-wider text-violet-700 mb-1">8 · Extensions</div>
+  <h2 class="text-2xl font-bold mb-4">How to grow the stack</h2>
+  <h3 class="text-lg font-bold mb-2">Pattern A — Add an agent</h3>
+  <ol class="list-decimal pl-6 text-sm space-y-1 mb-4">
+    <li>Create <code class="mono">agents/&lt;name&gt;/SKILL.md</code> using the template at the bottom. Copy the trigger phrasing pattern from any existing skill.</li>
+    <li>Create <code class="mono">agents/&lt;name&gt;/&lt;name&gt;.py</code> using the helper template. Two commands minimum: <code class="mono">fetch</code> and <code class="mono">save</code>.</li>
+    <li>Create one <code class="mono">.bat</code> launcher that runs the workflow + a verify SQL.</li>
+    <li>Test by double-clicking. Verify with a SELECT in Studio.</li>
+    <li>(Optional) Register the skill with Cowork via junction (see below).</li>
+  </ol>
+  <h3 class="text-lg font-bold mb-2">Pattern B — Add a new nurture sequence</h3>
+  <ol class="list-decimal pl-6 text-sm space-y-1 mb-4">
+    <li>Open <code class="mono">agents/rahbar/rahbar.py</code>.</li>
+    <li>Add a row to the <code class="mono">pick_sequence()</code> table with the <code class="mono">(language, top_destination)</code> key and a new sequence_id.</li>
+    <li>Add subjects + bodies for steps 1–5 in <code class="mono">render_email()</code>.</li>
+    <li>Re-enroll a lead. UNIQUE(lead_id, sequence_id, step_number) prevents accidental dupes.</li>
+  </ol>
+  <h3 class="text-lg font-bold mb-2">Pattern C — Add a new platform to cross-post</h3>
+  <ol class="list-decimal pl-6 text-sm space-y-1 mb-4">
+    <li>Open <code class="mono">agents/avang/avang.py</code>.</li>
+    <li>Add a tuple to <code class="mono">PLATFORM_MATRIX</code>: <code class="mono">(platform, langs_tuple, hours_offset_dict)</code>.</li>
+    <li>Add a corresponding entry to <code class="mono">PLATFORM_LIMITS</code>.</li>
+    <li>Re-runs are NOT idempotent — TRUNCATE first if you want a clean re-fan-out.</li>
+  </ol>
+  <h3 class="text-lg font-bold mb-2">Pattern D — Swap dry_run for real cross-posting</h3>
+  <p class="text-sm mb-4">Replace <code class="mono">agents/cross-post/dryrun.py</code> with a sender that actually calls Instagram Graph / Telegram Bot / etc. Same input contract (read pending), same output (UPDATE status to <code class="mono">'posted'</code> or <code class="mono">'failed'</code> with <code class="mono">published_url</code>).</p>
+  <h3 class="text-lg font-bold mb-2">Pattern E — Move from Cowork-skill to n8n-orchestrated</h3>
+  <ol class="list-decimal pl-6 text-sm space-y-1 mb-4">
+    <li>Each helper is already callable as <code class="mono">python &lt;agent&gt;.py &lt;cmd&gt;</code>. n8n's HTTP Request node calls cowork-proxy at <code class="mono">http://host.docker.internal:7777/run-agent</code>.</li>
+    <li>For agents that don't need Claude inference (cross-post DRY_RUN, Bidar's SQL aggregation), n8n can call the helper directly via Execute Command — no LLM round-trip.</li>
+    <li>Add Cron nodes for time-based agents (Bidar nightly, Ravi Monday morning).</li>
+    <li>Add Webhook nodes for event-triggered agents (Rahbar on lead INSERT, Mehrban on inbound DM).</li>
+    <li>Wire Wait nodes for G1/G2/G3 approval gates.</li>
+  </ol>
+  <h3 class="text-lg font-bold mb-2">Registering a skill with Cowork</h3>
+  <pre class="bg-slate-900 text-slate-100 ascii rounded p-3 text-xs"># In an admin PowerShell, junction the agent into Cowork's user-skills folder:
+New-Item -ItemType Junction `
+  -Path "&lt;cowork-skills-user-path&gt;\pooya" `
+  -Target "C:\Users\Hojat\OneDrive\Desktop\rxapply-test\agents\pooya"</pre>
+  <p class="text-xs text-slate-600 mt-1">Junction = OS treats this name like a folder, but it actually points to that folder. Edits flow through automatically.</p>
+  <details class="mt-4">
+    <summary class="font-bold text-sm">SKILL.md template (click to expand)</summary>
+    <pre class="bg-slate-900 text-slate-100 ascii rounded p-3 text-xs mt-2">---
+name: agent-name
+description: One-line job description. Use this skill whenever the user says "run agent-name", "&lt;trigger phrase 1&gt;", "&lt;trigger phrase 2&gt;", or wants to test scenario T# of the test phase.
+---
+
+# &lt;Agent Name&gt; — &lt;one-line summary&gt;
+
+## Inputs
+[which tables / files, with shape]
+
+## Output
+[what shape, with example, with field rules]
+
+## Voice rules
+[hype-free, specific, etc.]
+
+## Workflow when invoked
+### 1. Fetch
+[command]
+### 2. Generate
+[what Claude does inline]
+### 3. Save
+[command]
+### 4. Confirm
+[what to report back]
+
+## Edge cases
+
+## Why no n8n</pre>
+  </details>
+  <details class="mt-3">
+    <summary class="font-bold text-sm">helper.py template (click to expand)</summary>
+    <pre class="bg-slate-900 text-slate-100 ascii rounded p-3 text-xs mt-2">"""&lt;agent&gt; helper — one-line description.
+
+Usage: python &lt;agent&gt;.py &lt;cmd&gt; [args]
+"""
+import argparse, json, os, subprocess, sys
+CONTAINER = os.environ.get("SUPABASE_DB_CONTAINER", "supabase_db_rxapply-test")
+
+def _psql(sql, *, tA=False, stdin=None):
+    args = ["docker", "exec", "-i", CONTAINER, "psql",
+            "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1"]
+    if tA: args += ["-tA"]
+    if stdin is None:
+        args += ["-c", sql]
+        r = subprocess.run(args, capture_output=True)
+    else:
+        r = subprocess.run(args, input=stdin.encode("utf-8"), capture_output=True)
+    out = r.stdout.decode("utf-8", errors="replace")
+    err = r.stderr.decode("utf-8", errors="replace")
+    if r.returncode != 0: sys.stderr.write(err); sys.exit(r.returncode)
+    return out
+
+def cmd_fetch(...): ...
+def cmd_save(...): ...
+
+def main():
+    cmd = sys.argv[1] if len(sys.argv) &gt; 1 else "help"
+    if cmd == "fetch": cmd_fetch(...)
+    elif cmd == "save": cmd_save(...)
+    else: print(__doc__)
+
+if __name__ == "__main__": main()</pre>
+  </details>
+</section>
+
+<section id="gotchas" class="anchor">
+  <div class="text-xs font-bold uppercase tracking-wider text-violet-700 mb-1">9 · Gotchas</div>
+  <h2 class="text-2xl font-bold mb-4">Things that bit us, in order of likelihood</h2>
+  <div class="space-y-3">
+    <div class="bg-white border-l-4 border-rose-400 rounded p-4">
+      <div class="font-bold text-sm">Windows cp1252 stdin/stdout</div>
+      <p class="text-xs text-slate-700">When you pipe a UTF-8 file into Python via <code class="mono">&lt; file.md</code>, Windows decodes as cp1252 by default and dies on Farsi/Arabic bytes. Two fixes already applied: (a) <code class="mono">--file</code> argument that reads with explicit UTF-8 encoding, and (b) binary subprocess I/O with explicit decode. Apply the same pattern to any new agent that handles non-ASCII input.</p>
+    </div>
+    <div class="bg-white border-l-4 border-rose-400 rounded p-4">
+      <div class="font-bold text-sm">OneDrive locks files mid-write</div>
+      <p class="text-xs text-slate-700">The whole rxapply-test folder is on Desktop, which is OneDrive-synced. OneDrive grabs locks on log files we're appending to and corrupts the output. Fix: write logs to <code class="mono">%TEMP%\</code>, never inside the workspace. If rebuilds get slow because of node_modules sync, move the project to <code class="mono">C:\dev\rxapply-test\</code> outside OneDrive.</p>
+    </div>
+    <div class="bg-white border-l-4 border-amber-400 rounded p-4">
+      <div class="font-bold text-sm">Docker auto-detected system proxy</div>
+      <p class="text-xs text-slate-700">Docker Desktop reads Windows' system proxy by default. If V2RayTun / shecan / similar are installed but not running, Docker tries to route through localhost:10801 and times out. Fix: Settings → Resources → Proxies → both modes set to "No proxy".</p>
+    </div>
+    <div class="bg-white border-l-4 border-amber-400 rounded p-4">
+      <div class="font-bold text-sm">Browsers are tier "read" in Cowork's computer-use</div>
+      <p class="text-xs text-slate-700">When Claude is running on your computer, browser windows are visible-only — no clicks, no typing. To drive a web app from Claude, use the Claude-in-Chrome MCP extension.</p>
+    </div>
+    <div class="bg-white border-l-4 border-amber-400 rounded p-4">
+      <div class="font-bold text-sm">UAC prompts can't be clicked from a non-elevated process</div>
+      <p class="text-xs text-slate-700">Windows UIPI blocks input from lower-integrity processes. Anything that triggers UAC requires your physical click. Once elevated, the elevated cmd window also blocks Claude from sending input.</p>
+    </div>
+    <div class="bg-white border-l-4 border-blue-400 rounded p-4">
+      <div class="font-bold text-sm">Re-running agent .bats isn't always idempotent</div>
+      <p class="text-xs text-slate-700">Pooya, Sepehr, Goyesh, Avang, Mehrban all just <em>insert</em>. Re-running gives you duplicate rows. Bidar uses ON CONFLICT (agent, date) DO UPDATE — safe. Rahbar uses ON CONFLICT (lead_id, sequence_id, step_number) DO NOTHING — safe but silent. Bineh just UPDATEs. Cross-post DRY_RUN flips status — second run is a no-op.</p>
+    </div>
+    <div class="bg-white border-l-4 border-blue-400 rounded p-4">
+      <div class="font-bold text-sm">cowork-proxy doesn't auto-restart after reboot</div>
+      <p class="text-xs text-slate-700">It's a Node process you launched in a terminal. After a reboot, double-click <code class="mono">start-proxy.bat</code> to bring it back. <strong>Phase A→E made this load-bearing</strong> — the admin dashboard, n8n workflows, and prompts editor all break if it's down.</p>
+    </div>
+    <div class="bg-white border-l-4 border-rose-400 rounded p-4">
+      <div class="font-bold text-sm">Python text-mode <code class="mono">\n</code>→<code class="mono">\r\n</code> on Windows</div>
+      <p class="text-xs text-slate-700">When you write a UTF-8 file with <code class="mono">open(path, 'w', encoding='utf-8')</code> on Windows, Python adds <code class="mono">\r</code> to every newline — silently expanding the file by ~one byte per line. Bit us during PUT <code class="mono">/prompts/:agent</code> round-trip smoke-testing: the round-trip <em>was</em> identical at the wire level but the local file was 100+ bytes larger than the response. Fix: always use binary mode for round-trip comparisons — <code class="mono">open(path, 'wb').write(s.encode('utf-8'))</code>.</p>
+    </div>
+    <div class="bg-white border-l-4 border-amber-400 rounded p-4">
+      <div class="font-bold text-sm">Express <code class="mono">.text()</code> mishandles UTF-8</div>
+      <p class="text-xs text-slate-700">Bit us in the PUT <code class="mono">/prompts/:agent</code> route. <code class="mono">express.text()</code> defaults to a charset that mis-decodes multibyte UTF-8 (em-dashes, Farsi, Arabic). Fix already in place: switch to <code class="mono">express.raw({type: ['text/markdown','text/plain']})</code> and decode the Buffer explicitly with <code class="mono">.toString('utf-8')</code>.</p>
+    </div>
+    <div class="bg-white border-l-4 border-blue-400 rounded p-4">
+      <div class="font-bold text-sm">Proxy <code class="mono">/run-helper</code> resolves <code class="mono">&lt;agent&gt;/&lt;agent&gt;.py</code> exactly</div>
+      <p class="text-xs text-slate-700">If your folder is <code class="mono">cross-post/</code> but the helper is <code class="mono">dryrun.py</code>, the proxy can't find it. Fix used: a one-line shim — <code class="mono">cross-post/cross-post.py</code> that <code class="mono">runpy.run_path</code>s <code class="mono">dryrun.py</code>. Same pattern for any future folder/helper-name mismatch.</p>
+    </div>
+    <div class="bg-white border-l-4 border-blue-400 rounded p-4">
+      <div class="font-bold text-sm">n8n inside Docker can't reach <code class="mono">localhost</code> on the host</div>
+      <p class="text-xs text-slate-700">All 5 workflow JSONs use <code class="mono">http://host.docker.internal:7777/run-helper</code> — that's the magic hostname Docker Desktop (Windows + Mac) provides for "the host machine from inside the container". On Linux you may need to either add <code class="mono">--add-host=host.docker.internal:host-gateway</code> when starting n8n, or swap to the Docker bridge IP.</p>
+    </div>
+    <div class="bg-white border-l-4 border-slate-400 rounded p-4">
+      <div class="font-bold text-sm">supabase_vector restarts</div>
+      <p class="text-xs text-slate-700">The Vector container in the Supabase stack sometimes flaps. It's analytics ingestion; nothing in our test phase uses it. Safe to ignore.</p>
+    </div>
+  </div>
+</section>
+
+<section id="realbuild" class="anchor">
+  <div class="text-xs font-bold uppercase tracking-wider text-violet-700 mb-1">10 · Real build</div>
+  <h2 class="text-2xl font-bold mb-4">From here to production</h2>
+  <h3 class="text-lg font-bold mb-2">Already built (Phase A→E moved these from "future" to "done")</h3>
+  <ul class="list-disc pl-6 text-sm space-y-1 mb-4">
+    <li>The full <strong>17-table Postgres schema</strong> including <code class="mono">agent_journal</code>.</li>
+    <li>All <strong>21 agents</strong> with SKILL.md + helper.</li>
+    <li>The <strong>cowork-proxy</strong> with all 6 routes — the proxy is the n8n target in both test and production.</li>
+    <li>5 <strong>n8n workflow JSONs</strong> covering every cron + the lead-form webhook. Importable via <code class="mono">import-n8n-workflows.bat</code>.</li>
+    <li>An <strong>operational admin dashboard</strong> with approval queue, journal feed, trigger panel, prompts editor, cost widget.</li>
+    <li>The <strong>governance loop</strong> (Kherad scoring → corrections + status flips) drives the G2 gate.</li>
+    <li><strong>Outreach drafting</strong> (Payvand) and <strong>guest curation</strong> (Mehmandar) — both gated to local-only output until founder approves real sends.</li>
+  </ul>
+  <h3 class="text-lg font-bold mb-2">Stays the same on the path to production</h3>
+  <ul class="list-disc pl-6 text-sm space-y-1 mb-4">
+    <li>Postgres schema. Move from local Supabase to managed Supabase; same migrations.</li>
+    <li>Each agent's SKILL.md and helper's fetch/save contract.</li>
+    <li>The proxy's 6-route surface — production n8n calls the same endpoints.</li>
+    <li>The dashboard HTML files (the operational dashboard becomes the founder console; the test-phase dashboard retires).</li>
+  </ul>
+  <h3 class="text-lg font-bold mb-2">Still gets added before going live</h3>
+  <ul class="list-disc pl-6 text-sm space-y-1 mb-4">
+    <li><strong>Real social APIs</strong> — Instagram Graph, Telegram Bot, Facebook Graph, LinkedIn API, YouTube Data API. Cross-post DRY_RUN becomes a real sender; <code class="mono">scheduled_posts.status</code> flips to <code class="mono">'posted'</code> / <code class="mono">'failed'</code> with <code class="mono">published_url</code>.</li>
+    <li><strong>Stripe + Cal.com webhooks</strong> populating <code class="mono">customers</code> + <code class="mono">consultations</code>.</li>
+    <li><strong>Auth</strong> — Founder login on <code class="mono">admin-dashboard.html</code>; RLS becomes load-bearing.</li>
+    <li><strong>Real intel sources</strong> — Roya/Shahed/Dadbeh/Nasim/Ramin all currently note "(local-signals only)" in their snapshot summaries. Production swaps in SerpAPI / Telegram API / regulatory RSS / actual competitor scraping.</li>
+    <li><strong>Send-real-emails approval flow</strong> — Payvand drafts and Mehmandar's nudges are MailHog-only today; production needs an explicit gate before drafts hit real inboxes.</li>
+    <li><strong>Cron sender for nurture_schedule</strong> — Rahbar populates the queue; a separate cron sender pulls from it and ships to Resend at the right Day-N timestamp.</li>
+  </ul>
+  <h3 class="text-lg font-bold mb-2">Gets replaced</h3>
+  <ul class="list-disc pl-6 text-sm space-y-1 mb-4">
+    <li><strong>Local Postgres → Supabase Cloud.</strong> Same schema; only the connection string changes.</li>
+    <li><strong>Synthetic fixtures → real lead pipeline.</strong> Real data flows from the web app.</li>
+    <li><strong>MailHog → Resend.</strong> SMTP target moves; helper code is identical.</li>
+    <li><strong>The local-only secret key in dashboard JS → real auth.</strong> Replace the embedded <code class="mono">sb_secret_…</code> with a session cookie + RLS-aware queries.</li>
+  </ul>
+  <div class="bg-emerald-50 border-l-4 border-emerald-500 rounded p-4 text-sm">
+    <strong>What the test phase + Phases A→E actually proved.</strong> 12/12 test scenarios for the original 11 agents. The 10 newer agents (Phase C) ship with their own smoke harness — <code class="mono">smoke-phase-c.bat</code> exercises all 10 in dependency order. <code class="mono">smoke-everything.bat</code> validates the full stack: services, proxy routes, schema, every SKILL.md, every workflow JSON. The next decision isn't "does the architecture work" — it's "which dry_run channel do we promote to live first, and what's the human-approval flow for it?"
+  </div>
+</section>
+
+<section id="tests" class="anchor">
+  <div class="text-xs font-bold uppercase tracking-wider text-violet-700 mb-1">11 · The 12 tests</div>
+  <h2 class="text-2xl font-bold mb-4">What each test proved (and what it didn't)</h2>
+  <table class="text-sm w-full">
+    <thead><tr><th>#</th><th>Pass criterion</th><th>What it proves</th><th>What it does NOT prove</th></tr></thead>
+    <tbody>
+      <tr><td>T1</td><td>3 brief objects, all required fields, no JSON parse errors</td><td>Pooya can synthesize structured topic briefs from JSONB intel</td><td>Briefs are <em>good</em> — quality is subjective</td></tr>
+      <tr><td>T2</td><td>≥1500 words, ≥3 [^N] markers, H2 structure, TLDR, FAQ</td><td>Sepehr produces structurally compliant long-form Markdown</td><td>Prose quality, factual accuracy, voice</td></tr>
+      <tr><td>T3</td><td>FA + AR scripts present, length 80-110% of EN, citations preserved</td><td>Goyesh translates while preserving structure and citations</td><td>Translation accuracy or fluency</td></tr>
+      <tr><td>T4</td><td>Exactly 11 rows in scheduled_posts (3×3 + 2 EN-only)</td><td>Avang fans out to the right platform matrix</td><td>Generated copy is platform-appropriate</td></tr>
+      <tr><td>T5</td><td>11 rows flipped from pending → dry_run_logged</td><td>Cross-post wires up the queue read + status update</td><td>Real social API integrations work</td></tr>
+      <tr><td>T6</td><td>Top-3 destinations match plan's expected sets per persona</td><td>Rahnama's scoring heuristics align with stated logic</td><td>Scoring math is calibrated to real data</td></tr>
+      <tr><td>T7</td><td>15 rows = 5 × 3 leads, send_at staggered Day 0/2/4/7/14</td><td>Rahbar enrolls correctly per (language, destination)</td><td>Email body content quality</td></tr>
+      <tr><td>T8</td><td>Reply in target script with disclaimer phrase present</td><td>Mehrban produces compliant inbound replies</td><td>Tone, naturalness, helpfulness</td></tr>
+      <tr><td>T9</td><td>engagement_score numeric in [0,1], top_signals has 3 items</td><td>Bineh produces a normalized score with traceable signals</td><td>Score is well-calibrated to real conversion data</td></tr>
+      <tr><td>T10</td><td>Email lands in MailHog, 500-700 words, ≥3 numbers</td><td>Ravi composes structured weekly summaries via SMTP</td><td>Insight quality, decision recommendations</td></tr>
+      <tr><td>T11</td><td>≥21 efficiency rows, ≥1 rewrite, ≥1 P95-slow flag</td><td>Audit chain produces correct rollups + flags</td><td>Recommendations are actionable</td></tr>
+      <tr><td>T12</td><td>All 8 chain invariants hold</td><td>Pipeline holds end-to-end with no broken links</td><td>It runs at production speed / scale</td></tr>
+    </tbody>
+  </table>
+  <p class="text-sm text-slate-700 mt-3">In short: the test phase validates <em>structural correctness</em>, not <em>quality at scale</em>. Quality assessment is the job of the G1/G2/G3 approval gates (Kherad drives G2 in Phase C) and the Bidar/Davari audit loops once you're in production with real data.</p>
+
+  <h3 class="text-lg font-bold mt-5 mb-2">Phase A→E smoke harness (added on top of T1–T12)</h3>
+  <p class="text-sm text-slate-700 mb-3">The 10 Phase C agents weren't covered by the original T1–T12 scenarios — they run on local-only signals where there's no expected ground truth to assert against. So Phase E shipped a structural-validity harness instead:</p>
+  <table class="text-sm w-full">
+    <thead><tr><th>Script</th><th>What it asserts</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">smoke-everything.bat</td><td>5 services HTTP 200 · 3 proxy routes return valid JSON · Postgres has ≥17 tables · agent_journal exists · all 21 SKILL.md files present · all 5 workflow JSONs valid</td></tr>
+      <tr><td class="mono">smoke-phase-c.bat</td><td>Each of the 10 Phase C agents runs end-to-end · agent_journal accumulates 10+ rows · intel_snapshots accumulates ≥1 per kind</td></tr>
+      <tr><td class="mono">smoke-intel-pipeline.bat</td><td>Roya → Shahed → Dadbeh → Nasim → Ramin chain executes in order · last 10 intel rows include the latest run from each agent</td></tr>
+      <tr><td class="mono">smoke-prompts-put.bat</td><td>Round-trip GET → PUT → GET on /prompts/pooya is byte-identical (binary-mode comparison; UTF-8 preserved through em-dashes, Farsi, Arabic)</td></tr>
+      <tr><td class="mono">smoke-proxy-routes.bat</td><td>Each proxy route handles valid input + rejects invalid (e.g. invalid agent name fails path-traversal check)</td></tr>
+      <tr><td class="mono">smoke-webhook-lead-form.bat</td><td>POST to n8n's /webhook/lead-form returns 202 and triggers a rahbar journal row</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="v2" class="anchor">
+  <div class="text-xs font-bold uppercase tracking-wider text-violet-700 mb-1">★ V2 · Phase F</div>
+  <h2 class="text-2xl font-bold mb-4">The 9-feature consolidation pass</h2>
+  <p class="mb-4">V2 turned the test phase from "11 agents wired up + an admin dashboard" into a real local control plane. Each feature is independently togglable; everything is gated by the cost cap and (where it touches state) the auth password. Cost telemetry runs across every paid call.</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="bg-white border-2 border-amber-300 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-amber-700 mb-1">F2 · Logs L2</div>
+      <p class="text-sm text-slate-700">Every <code class="mono">/run-helper</code> call now writes a full bundle: <code class="mono">agent_runs</code> row (with input_payload, output_payload, error_payload, log_path, duration, cost) + a per-day on-disk folder <code class="mono">logs/YYYY-MM-DD/&lt;runid&gt;/</code> containing stdout.log, stderr.log, request.json. <code class="mono">_sanitize()</code> masks anything that looks like an API key. Retention: gzip after 7 days, delete after 30. The Logs panel renders runs in 5 tabs (Input · Actions · Output · Stderr · Errors).</p>
+    </div>
+    <div class="bg-white border-2 border-emerald-300 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-emerald-700 mb-1">F3 · Service control</div>
+      <p class="text-sm text-slate-700">The dashboard's Services panel can now start / stop / restart Supabase (via <code class="mono">supabase</code> CLI), n8n (docker), MailHog (docker), and read its own status. Health probes are real HTTP checks with provider-specific headers; only listed <code class="mono">healthyStatuses</code> count as reachable.</p>
+    </div>
+    <div class="bg-white border-2 border-blue-300 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-blue-700 mb-1">F4 · n8n control</div>
+      <p class="text-sm text-slate-700">List, view, run, activate/deactivate, and import-from-library — all via the n8n REST API (<code class="mono">X-N8N-API-KEY</code>). The Workflows panel mirrors what's in n8n + offers a "Library" sub-tab to one-click import any of the 5 packaged JSONs.</p>
+    </div>
+    <div class="bg-white border-2 border-rose-300 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-rose-700 mb-1">F5 · Agent chat</div>
+      <p class="text-sm text-slate-700">Per-agent streaming chat via the Anthropic API (<code class="mono">claude-sonnet-4-5</code> by default). System prompt = SKILL.md + last 10 runs of that agent. SSE token stream → dashboard. Persisted to <code class="mono">agent_chats</code> with token / cost. Rolls into F9 cap before each call.</p>
+    </div>
+    <div class="bg-white border-2 border-indigo-300 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-indigo-700 mb-1">F6 · Visual pipeline editor</div>
+      <p class="text-sm text-slate-700">Drawflow 0.0.61 in a Tailwind frame. Drag <em>agent / conditional / transform / output</em> nodes onto the canvas, wire them up, save. Save round-trips both to <code class="mono">pipelines/&lt;slug&gt;.json</code> and the <code class="mono">pipelines</code> table. Run = topological sort (Kahn) + sequential <code class="mono">spawn</code> per agent + sandboxed <code class="mono">vm.createContext</code> for conditional/transform. SSE log streams every step into the Run panel.</p>
+    </div>
+    <div class="bg-white border-2 border-fuchsia-300 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-fuchsia-700 mb-1">F7 · Auth + sandbox + prompt versioning</div>
+      <p class="text-sm text-slate-700">Single-user scrypt password (stored in <code class="mono">dashboard_settings.auth_password_hash</code>). Bearer-token sessions in memory, default 4-hour TTL. Sandbox toggle (forces every helper to dry-run). Every PUT to <code class="mono">/prompts/:agent</code> appends a <code class="mono">prompt_versions</code> row with diff_chars + reason; rollback restores any older version (and writes a fresh row with reason="rollback to vN").</p>
+    </div>
+    <div class="bg-white border-2 border-pink-300 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-pink-700 mb-1">F8 · Afshin design pipeline</div>
+      <p class="text-sm text-slate-700">Two-stage: Claude SVG draft → founder approves → paid raster render. Drafts are cheap (~$0.005); renders fire the cost cap. Six brand-aware kinds with built-in dimensions. All artifacts under <code class="mono">assets/generated/</code> served read-only by the proxy.</p>
+    </div>
+    <div class="bg-white border-2 border-violet-300 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-violet-700 mb-1">F8b · Multi-model registry</div>
+      <p class="text-sm text-slate-700">Seven providers in one registry: gpt-image-1, dall-e-3, stability-sd3, ideogram-v2, flux-schnell, flux-dev, recraft-v3. Per-kind defaults persist in <code class="mono">dashboard_settings.image_model_defaults</code>. Resolver order: explicit override → per-kind default → gpt-image-1 fallback. Each model's required env key is shown with ✓/✕ status in the Designs render modal and in Settings → Image model defaults.</p>
+    </div>
+    <div class="bg-white border-2 border-emerald-300 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-emerald-700 mb-1">F9 · Cost telemetry + monthly cap</div>
+      <p class="text-sm text-slate-700">UNION ALL of <code class="mono">agent_runs.cost_usd_actual</code> and <code class="mono">agent_chats.total_cost</code> aggregated to today / 7d / 30d / all-time. Cap default $25/month, configurable in Settings. Topbar cost widget polls every 30s; 5-second snapshot cache (post Report v.1 fix) avoids hammering psql. <code class="mono">canSpend(projected)</code> hard-blocks chat + render + draft when month-to-date ≥ cap.</p>
+    </div>
+  </div>
+  <div class="mt-4 bg-blue-50 border-l-4 border-blue-500 rounded-r-xl p-4 text-sm text-slate-700">
+    <strong>Cold start in V2.</strong> Run <code class="mono">start-v2.bat</code> — applies all 4 V2 migrations (idempotent), kills any old proxy on :7777, starts a fresh one, waits 4s, runs <code class="mono">smoke-v2.bat</code>. Smoke test asserts 11 things: proxy /health features map, all 6 V2 tables/columns present, F2 logs round-trip, F3 services list, F4 n8n response, F5 chat path, F7 auth/status, F8 gallery, F9 cost shape, F6 pipelines route, F8b model registry has gpt-image-1 + recraft-v3.
+  </div>
+</section>
+
+<section id="hardening" class="anchor">
+  <div class="text-xs font-bold uppercase tracking-wider text-emerald-700 mb-1">★ Report v.1 hardening</div>
+  <h2 class="text-2xl font-bold mb-4">The post-V2 audit fixes</h2>
+  <p class="mb-4">After V2 shipped, a full code audit (Report v.1) catalogued every defect, inconsistency, and gap. All fixable items were resolved in one pass; what's listed below is now in the codebase.</p>
+  <div class="grid md:grid-cols-2 gap-3">
+    <div class="bg-white border-l-4 border-rose-500 rounded p-4">
+      <div class="font-bold text-sm mb-1">C-1 · pipeline-runner: SSE no longer freezes</div>
+      <p class="text-xs text-slate-700">Agent nodes now run via async <code class="mono">spawn</code> wrapped in a Promise instead of <code class="mono">spawnSync</code>. Each <code class="mono">emit()</code> flushes between steps. Multi-agent pipeline runs no longer block the event loop until the entire run finishes.</p>
+    </div>
+    <div class="bg-white border-l-4 border-rose-500 rounded p-4">
+      <div class="font-bold text-sm mb-1">C-2 · Express route order</div>
+      <p class="text-xs text-slate-700"><code class="mono">POST /pipelines/run</code> registered <em>before</em> <code class="mono">POST /pipelines/:name/run</code>. The inline-graph run path is reachable instead of being shadowed by the <code class="mono">:name</code> capture.</p>
+    </div>
+    <div class="bg-white border-l-4 border-amber-500 rounded p-4">
+      <div class="font-bold text-sm mb-1">H-1 · Real Supabase health probe</div>
+      <p class="text-xs text-slate-700">services.js now sends the local anon <code class="mono">apikey</code> header to <code class="mono">/rest/v1/</code> and only marks reachable when status ∈ {200}. (Previously: 401 was silently treated as "up".)</p>
+    </div>
+    <div class="bg-white border-l-4 border-amber-500 rounded p-4">
+      <div class="font-bold text-sm mb-1">H-2 · Extra key status in /settings</div>
+      <p class="text-xs text-slate-700"><code class="mono">env_keys.extra_keys[]</code> now includes STABILITY / IDEOGRAM / REPLICATE / RECRAFT / N8N. The Settings panel renders ✓/✕ pills for all of them.</p>
+    </div>
+    <div class="bg-white border-l-4 border-amber-500 rounded p-4">
+      <div class="font-bold text-sm mb-1">H-3 · auth.isInitialized() cached</div>
+      <p class="text-xs text-slate-700">Once true, sticks. Negative cache 5s. No more docker-exec subprocess on every auth-gated request.</p>
+    </div>
+    <div class="bg-white border-l-4 border-amber-500 rounded p-4">
+      <div class="font-bold text-sm mb-1">H-4 / L-7 · Keys read at call time</div>
+      <p class="text-xs text-slate-700">anthropic-chat.js + n8n-control.js use getter functions (matching afshin-router.js). Consistent across modules.</p>
+    </div>
+    <div class="bg-white border-l-4 border-amber-500 rounded p-4">
+      <div class="font-bold text-sm mb-1">H-5 · Sandboxed pipeline eval</div>
+      <p class="text-xs text-slate-700">Conditional + transform nodes now run in <code class="mono">vm.createContext</code> with no access to <code class="mono">require/process/global/fs</code> and a 1s wall-clock timeout. Pipeline JSON can no longer drop a <code class="mono">child_process.execSync</code> bomb.</p>
+    </div>
+    <div class="bg-white border-l-4 border-amber-500 rounded p-4">
+      <div class="font-bold text-sm mb-1">H-6 · Replicate poll → 180s</div>
+      <p class="text-xs text-slate-700">Cold starts on free Replicate tiers routinely take 90–180s for Flux. Poll cap raised; "still processing" is now an explicit message with the prediction id, not a silent "no output".</p>
+    </div>
+    <div class="bg-white border-l-4 border-blue-500 rounded p-4">
+      <div class="font-bold text-sm mb-1">M-1 · n8n-control path shadowing</div>
+      <p class="text-xs text-slate-700">Local string variable renamed from <code class="mono">path</code> to <code class="mono">urlPath</code> so it doesn't clobber <code class="mono">require('path')</code>.</p>
+    </div>
+    <div class="bg-white border-l-4 border-blue-500 rounded p-4">
+      <div class="font-bold text-sm mb-1">M-2 · Agent name validation</div>
+      <p class="text-xs text-slate-700"><code class="mono">prompt-versions.saveAndVersion()</code> now validates with the same regex as the HTTP layer, even when called from non-HTTP contexts.</p>
+    </div>
+    <div class="bg-white border-l-4 border-blue-500 rounded p-4">
+      <div class="font-bold text-sm mb-1">M-3 · Better 401 errors in dashboard</div>
+      <p class="text-xs text-slate-700">"Sign in first" alerts on auth failures instead of generic "failed".</p>
+    </div>
+    <div class="bg-white border-l-4 border-blue-500 rounded p-4">
+      <div class="font-bold text-sm mb-1">M-4 · Pipeline run dialog clarity</div>
+      <p class="text-xs text-slate-700">Confirm dialog now says "Run current canvas (saved as &quot;X&quot;) — N nodes?" — explicit that unsaved canvas changes apply.</p>
+    </div>
+    <div class="bg-white border-l-4 border-blue-500 rounded p-4">
+      <div class="font-bold text-sm mb-1">M-8 · Cost snapshot cache</div>
+      <p class="text-xs text-slate-700">5-second TTL cache; <code class="mono">canSpend()</code> reads from cache; <code class="mono">invalidate()</code> exposed for callers who just paid.</p>
+    </div>
+    <div class="bg-white border-l-4 border-slate-500 rounded p-4">
+      <div class="font-bold text-sm mb-1">L-1 · Dead parameter removed</div>
+      <p class="text-xs text-slate-700"><code class="mono">_agentHtml(nodeId)</code> → <code class="mono">_agentHtml()</code>.</p>
+    </div>
+    <div class="bg-white border-l-4 border-slate-500 rounded p-4">
+      <div class="font-bold text-sm mb-1">L-2 · No stacked render modals</div>
+      <p class="text-xs text-slate-700">Render modal guarded by id check — rapid double-click doesn't stack two overlays.</p>
+    </div>
+    <div class="bg-white border-l-4 border-slate-500 rounded p-4">
+      <div class="font-bold text-sm mb-1">L-4 · Stale F6 note replaced</div>
+      <p class="text-xs text-slate-700">Agents → Forward tab now links to the Pipelines panel instead of saying "F6 makes this visual" (which it now does).</p>
+    </div>
+    <div class="bg-white border-l-4 border-slate-500 rounded p-4">
+      <div class="font-bold text-sm mb-1">L-5 · "Custom" kind in filter</div>
+      <p class="text-xs text-slate-700">Designs panel filter dropdown includes "Custom" so custom designs are filterable.</p>
+    </div>
+    <div class="bg-white border-l-4 border-slate-500 rounded p-4">
+      <div class="font-bold text-sm mb-1">L-6 · Helpful agent-not-found errors</div>
+      <p class="text-xs text-slate-700">Pipeline runner distinguishes "directory missing" from "script missing" so a typo in the agent name doesn't look the same as a broken folder.</p>
+    </div>
+    <div class="bg-white border-l-4 border-slate-500 rounded p-4">
+      <div class="font-bold text-sm mb-1">L-8 · Node 18+ enforced</div>
+      <p class="text-xs text-slate-700">cowork-proxy/package.json now declares <code class="mono">engines.node &gt;=18</code>; Stability provider returns a clear error if native FormData is missing.</p>
+    </div>
+    <div class="bg-white border-l-4 border-slate-500 rounded p-4">
+      <div class="font-bold text-sm mb-1">NW-4 · Pipeline description input</div>
+      <p class="text-xs text-slate-700">A description input was added to the Pipelines toolbar; saves through to <code class="mono">pipelines.description</code>; reloads from the loaded payload.</p>
+    </div>
+    <div class="bg-white border-l-4 border-slate-500 rounded p-4">
+      <div class="font-bold text-sm mb-1">M-5 / M-6 · Script comments synced</div>
+      <p class="text-xs text-slate-700"><code class="mono">start-v2.bat</code> says "4 migrations". <code class="mono">smoke-v2.bat</code> header lists all 11 checks instead of the original 9.</p>
+    </div>
+  </div>
+  <div class="mt-4 bg-emerald-50 border-l-4 border-emerald-500 rounded-r-xl p-4 text-sm text-slate-700">
+    <strong>Skipped from the report (and why).</strong> M-7 / NW-1 (model defaults persisted to DB) — the original report claim was wrong; <code class="mono">getModelDefaults()</code> + <code class="mono">setModelDefault()</code> already round-trip through the <code class="mono">image_model_defaults</code> jsonb column. NW-3 (separate /afshin/models/defaults route) — the existing /afshin/models response already carries kinds + defaults. NW-5 (Drawflow agent dropdown reset on load) — Drawflow's <code class="mono">import()</code> already syncs <code class="mono">df-*</code> attributes to form values natively; not a real bug. L-3 (hardcoded Supabase service-role key in dashboard.html) — accepted; it's the local-only key for an isolated Docker stack.
+  </div>
+</section>
+
+<section id="ref" class="anchor">
+  <div class="text-xs font-bold uppercase tracking-wider text-violet-700 mb-1">12 · Quick reference</div>
+  <h2 class="text-2xl font-bold mb-4">Cheat sheet</h2>
+  <h3 class="text-lg font-bold mb-2">Service URLs</h3>
+  <table class="text-sm w-full mb-5">
+    <tr><td class="mono">localhost:5678</td><td>n8n</td></tr>
+    <tr><td class="mono">localhost:8025</td><td>MailHog inbox</td></tr>
+    <tr><td class="mono">localhost:7777/health</td><td>cowork-proxy health (lists feature flags)</td></tr>
+    <tr><td class="mono">localhost:7777/agents</td><td>list agent folders the proxy can reach</td></tr>
+    <tr><td class="mono">localhost:7777/services</td><td><strong>F3</strong> · status of supabase / n8n / mailhog / self</td></tr>
+    <tr><td class="mono">localhost:7777/logs</td><td><strong>F2</strong> · paginated agent_runs (?agent=, ?status=)</td></tr>
+    <tr><td class="mono">localhost:7777/cost</td><td><strong>F9</strong> · today / 7d / 30d / cap %</td></tr>
+    <tr><td class="mono">localhost:7777/pipelines</td><td><strong>F6</strong> · saved Drawflow pipelines</td></tr>
+    <tr><td class="mono">localhost:7777/afshin/models</td><td><strong>F8b</strong> · model registry + per-kind defaults</td></tr>
+    <tr><td class="mono">localhost:7777/afshin/gallery</td><td><strong>F8</strong> · designs gallery</td></tr>
+    <tr><td class="mono">localhost:7777/n8n/workflows</td><td><strong>F4</strong> · workflows via n8n REST API</td></tr>
+    <tr><td class="mono">localhost:7777/auth/status</td><td><strong>F7</strong> · password initialized?</td></tr>
+    <tr><td class="mono">localhost:7777/prompts/:agent</td><td>GET / PUT a SKILL.md (PUT auto-versions)</td></tr>
+    <tr><td class="mono">localhost:54321</td><td>Supabase API (Kong)</td></tr>
+    <tr><td class="mono">localhost:54322</td><td>Postgres (psql / pg client)</td></tr>
+    <tr><td class="mono">localhost:54323</td><td>Supabase Studio</td></tr>
+    <tr><td class="mono">localhost:54324</td><td>Supabase Inbucket (auth emails)</td></tr>
+    <tr class="bg-emerald-50"><td class="mono"><a href="dashboard.html" class="text-violet-700 underline"><strong>dashboard.html</strong></a></td><td><strong>V2 consolidated dashboard</strong> — Overview, Workflows, Agents, Pipelines, Logs, Approvals, Designs, Services, Settings</td></tr>
+  </table>
+  <h3 class="text-lg font-bold mb-2">Top-level scripts at <code class="mono">rxapply-test/</code></h3>
+  <table class="text-sm w-full mb-5">
+    <tr class="bg-violet-50"><td class="mono"><strong>start-v2.bat</strong></td><td><strong>V2 cold start.</strong> Apply 4 V2 migrations (idempotent) → kill any old proxy on :7777 → launch fresh in a new window → wait 4s → run smoke-v2.bat.</td></tr>
+    <tr class="bg-violet-50"><td class="mono"><strong>smoke-v2.bat</strong></td><td><strong>V2 smoke test (11 checks).</strong> /health features map · 6 V2 tables/columns present · F2 logs round-trip · F3 services · F4 n8n · F5 chat · F7 auth · F8 gallery · F9 cost · F6 pipelines · F8b model registry.</td></tr>
+    <tr class="bg-violet-50"><td class="mono">apply-migration-logs-l2.bat</td><td><strong>V2 / F2.</strong> Idempotently apply <code class="mono">20260501_logs_l2.sql</code>.</td></tr>
+    <tr class="bg-violet-50"><td class="mono">apply-migration-prompts-chats.bat</td><td><strong>V2 / F5+F7.</strong> Idempotently apply <code class="mono">20260502_prompts_chats.sql</code>.</td></tr>
+    <tr class="bg-violet-50"><td class="mono">apply-migration-media-library.bat</td><td><strong>V2 / F8.</strong> Idempotently apply <code class="mono">20260503_media_library.sql</code>.</td></tr>
+    <tr class="bg-violet-50"><td class="mono">apply-migration-f6-models.bat</td><td><strong>V2 / F6+F8b.</strong> Idempotently apply <code class="mono">20260504_image_model_defaults.sql</code> (pipelines table + image_model_defaults column).</td></tr>
+    <tr><td class="mono">setup2-fixed.bat</td><td>One-shot: npm install + docker pulls + start containers</td></tr>
+    <tr><td class="mono">start-proxy.bat</td><td>Start cowork-proxy on port 7777</td></tr>
+    <tr><td class="mono">restart-proxy.bat</td><td>Kill the proxy on :7777 and re-launch (helpful after editing server.js)</td></tr>
+    <tr><td class="mono">verify.bat</td><td>HTTP-check n8n + mailhog + cowork-proxy</td></tr>
+    <tr><td class="mono">status-check.bat</td><td>Full status snapshot to last-status.txt</td></tr>
+    <tr><td class="mono">seed-fixtures.bat</td><td>Seed leads, intel_snapshots, agent_runs</td></tr>
+    <tr><td class="mono">seed-events-only.bat</td><td>Seed engagement_events only</td></tr>
+    <tr><td class="mono">apply-migration-agent-journal.bat</td><td><strong>Phase A:</strong> apply the agent_journal migration without wiping data</td></tr>
+    <tr><td class="mono">import-n8n-creds.bat</td><td>Re-import the 2 n8n credentials via container CLI</td></tr>
+    <tr><td class="mono">import-n8n-workflows.bat</td><td><strong>Phase D:</strong> docker-cp + n8n CLI import all 5 workflow JSONs</td></tr>
+    <tr><td class="mono">smoke-everything.bat</td><td><strong>Phase E:</strong> 30+ checks across services, proxy, schema, agents, workflows. Run this first when something is wrong.</td></tr>
+    <tr><td class="mono">smoke-phase-c.bat</td><td>Exercise all 10 Phase C agents in dependency order</td></tr>
+    <tr><td class="mono">smoke-intel-pipeline.bat</td><td>Run Roya → Shahed → Dadbeh → Nasim → Ramin and dump results</td></tr>
+    <tr><td class="mono">smoke-proxy-routes.bat</td><td>Hit each proxy route once with valid + invalid inputs</td></tr>
+    <tr><td class="mono">smoke-prompts-put.bat</td><td>Round-trip GET → PUT → GET on /prompts/pooya (binary mode, no <code class="mono">\n</code>→<code class="mono">\r\n</code> traps)</td></tr>
+    <tr><td class="mono">smoke-webhook-lead-form.bat</td><td>POST a fake lead-form payload to n8n's webhook</td></tr>
+    <tr><td class="mono">admin-dashboard.html</td><td>Operations dashboard (Phase B + E)</td></tr>
+    <tr><td class="mono">dashboard.html</td><td>Test-phase mission control</td></tr>
+    <tr><td class="mono">STATUS.md</td><td>Cold-start brief for someone joining the project</td></tr>
+    <tr><td class="mono">architecture.html</td><td>This document</td></tr>
+  </table>
+  <h3 class="text-lg font-bold mb-2">Per-agent scripts</h3>
+  <table class="text-sm w-full mb-5">
+    <tr><td class="mono">agents/pooya/insert-briefs.bat</td><td>Pooya end-to-end</td></tr>
+    <tr><td class="mono">agents/sepehr/save-master.bat</td><td>Sepehr saves article-001.md</td></tr>
+    <tr><td class="mono">agents/goyesh/save-translations.bat</td><td>Goyesh saves FA + AR</td></tr>
+    <tr><td class="mono">agents/avang/run-avang.bat</td><td>Avang fan-out</td></tr>
+    <tr><td class="mono">agents/cross-post/run-dryrun.bat</td><td>Cross-post DRY_RUN</td></tr>
+    <tr><td class="mono">agents/rahnama/fetch-personas.bat</td><td>Rahnama fetch all 3 quizzes</td></tr>
+    <tr><td class="mono">agents/rahbar/enroll-all.bat</td><td>Rahbar enroll 3 leads</td></tr>
+    <tr><td class="mono">agents/mehrban/save-reply-saeed.bat</td><td>Mehrban save FA reply</td></tr>
+    <tr><td class="mono">agents/bineh/run-bineh-saeed.bat</td><td>Bineh fetch Saeed events</td></tr>
+    <tr><td class="mono">agents/bineh/save-saeed-score.bat</td><td>Bineh persist score</td></tr>
+    <tr><td class="mono">agents/ravi/send-ravi.bat</td><td>Ravi send email</td></tr>
+    <tr><td class="mono">agents/bidar/run-bidar.bat</td><td>Bidar nightly audit</td></tr>
+    <tr><td class="mono">agents/davari/run-davari.bat</td><td>Davari flow health</td></tr>
+    <tr><td class="mono">agents/e2e/verify-t12.bat</td><td>T12 invariants check</td></tr>
+    <tr class="bg-emerald-50"><td class="mono">agents/zirak/smoke-zirak.bat</td><td><strong>Phase C:</strong> seed 3 journal rows + tail/failures</td></tr>
+    <tr class="bg-emerald-50"><td class="mono">agents/paya/smoke-paya.bat</td><td>Schema lookup + sample writes per kind</td></tr>
+    <tr class="bg-emerald-50"><td class="mono">agents/roya/smoke-roya.bat</td><td>Compose-only + run + verify</td></tr>
+  </table>
+  <h3 class="text-lg font-bold mb-2">n8n workflow JSONs (in <code class="mono">n8n-workflows/</code>)</h3>
+  <table class="text-sm w-full mb-5">
+    <tr><td class="mono">cron-bidar-nightly.json</td><td>Cron <code class="mono">0 2 * * *</code> → bidar run</td></tr>
+    <tr><td class="mono">cron-ravi-monday.json</td><td>Cron <code class="mono">0 9 * * 1</code> → ravi fetch → ravi send</td></tr>
+    <tr><td class="mono">cron-intel-daily.json</td><td>Cron <code class="mono">0 6 * * *</code> → roya → shahed → dadbeh → nasim → ramin</td></tr>
+    <tr><td class="mono">cron-cross-post-5min.json</td><td>Cron <code class="mono">*/5 * * * *</code> → cross-post run (DRY_RUN)</td></tr>
+    <tr><td class="mono">webhook-lead-form.json</td><td>POST <code class="mono">/webhook/lead-form</code> → rahbar enroll-all → respond 202</td></tr>
+  </table>
+  <h3 class="text-lg font-bold mb-2">Useful one-liners</h3>
+  <pre class="bg-slate-900 text-slate-100 ascii rounded p-3 text-xs"># Are containers running?
+docker ps
+
+# Quick row count across the chain (paste into Studio)
+SELECT 'briefs', COUNT(*) FROM content_briefs
+UNION ALL SELECT 'masters', COUNT(*) FROM content_assets WHERE kind='master'
+UNION ALL SELECT 'scheduled_posts', COUNT(*) FROM scheduled_posts
+UNION ALL SELECT 'nurture', COUNT(*) FROM nurture_schedule
+UNION ALL SELECT 'leads', COUNT(*) FROM leads
+UNION ALL SELECT 'engagement_events', COUNT(*) FROM engagement_events;
+
+# What did Bidar recommend today?
+SELECT agent, bidar_recommendation, runs, approval_ratio
+FROM agent_efficiency
+WHERE date = CURRENT_DATE
+ORDER BY CASE bidar_recommendation
+  WHEN 'rewrite' THEN 0 WHEN 'demote' THEN 1 ELSE 2 END;
+
+# Wipe scheduled_posts and re-fan-out
+TRUNCATE scheduled_posts;
+# then re-run agents/avang/run-avang.bat
+
+# Open the most recent emails
+explorer http://localhost:8025</pre>
+  <h3 class="text-lg font-bold mt-5 mb-2">Environment variables (in <code class="mono">.env</code>)</h3>
+  <table class="text-sm w-full">
+    <tr><td class="mono">SUPABASE_URL</td><td>http://127.0.0.1:54321</td></tr>
+    <tr><td class="mono">SUPABASE_PUBLISHABLE_KEY</td><td>sb_publishable_…</td></tr>
+    <tr><td class="mono">SUPABASE_SECRET_KEY</td><td>sb_secret_…</td></tr>
+    <tr><td class="mono">DATABASE_URL</td><td>postgresql://postgres:postgres@127.0.0.1:54322/postgres</td></tr>
+    <tr><td class="mono">SUPABASE_STUDIO</td><td>http://127.0.0.1:54323</td></tr>
+    <tr><td class="mono">COWORK_PROXY_URL</td><td>http://localhost:7777</td></tr>
+    <tr><td class="mono">PROXY_MODE</td><td>cowork</td></tr>
+    <tr><td class="mono">N8N_URL</td><td>http://localhost:5678</td></tr>
+    <tr><td class="mono">SMTP_HOST</td><td>localhost</td></tr>
+    <tr><td class="mono">SMTP_PORT</td><td>1025</td></tr>
+    <tr><td class="mono">MAILHOG_UI</td><td>http://localhost:8025</td></tr>
+  </table>
+</section>
+
+<section id="v25" class="anchor">
+  <div class="text-xs font-bold uppercase tracking-wider text-amber-700 mb-1">★ V2.5 · Compose + Brand profile + per-agent LLM</div>
+  <h2 class="text-2xl font-bold mb-4">The "type a topic, ship a post" track</h2>
+  <p class="mb-4">After V2, three intertwined features shipped that turned the stack from "an instrumented agent platform" into "a tool you actually use to make Instagram posts." Each is small and standalone; together they form the Compose flow.</p>
+
+  <div class="grid md:grid-cols-3 gap-4 mb-6">
+
+    <div class="bg-white border-2 border-amber-300 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-amber-700 mb-1">A · Compose · per-step</div>
+      <p class="text-sm text-slate-700 mb-2"><strong>Compose</strong> is a sidebar panel where you type a topic and hit Generate. Three trained agents run in sequence:</p>
+      <pre class="ascii bg-slate-50 rounded p-3 text-xs">topic
+  ▼
+[POOYA · brief]
+  audience pain · angle ·
+  key facts · regulatory ctx
+  ▼
+[COMPOSE-IG · captions]
+  3 captions (en/fa/ar)
+  + design plan
+  + localized hashtags
+  ▼
+[KHERAD · score]
+  brand_voice · specificity ·
+  cta · banned_phrases
+  ▼ verdict: pass | refine
+(Gate A)
+  ▼
+[AFSHIN · SVG draft]
+  ▼ founder review
+[AFSHIN · PNG render]  (paid)
+  ▼ (Gate B)
+3 scheduled_posts rows
+  status='ready_to_post'</pre>
+      <p class="text-xs text-slate-600 mt-2"><strong>Cost:</strong> ~$0.08 per topic (3 LLM calls, all configurable per Settings → Per-agent LLM). <strong>Output:</strong> 3 ready-to-copy IG cards (caption + hashtags + image), each language with proper RTL.</p>
+    </div>
+
+    <div class="bg-white border-2 border-violet-300 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-violet-700 mb-1">B · Per-agent LLM model</div>
+      <p class="text-sm text-slate-700 mb-2">Settings → "Per-agent LLM model" lets you assign Opus 4.7 / Sonnet 4.6 / Sonnet 4.5 / Haiku 4.5 / Opus 4.6 to each of the 23 agents independently. Pricing is read live from a registry in <code class="mono">cowork-proxy/agent-models.js</code>; cost calculations use the resolved model's actual rates (Opus is 5× Sonnet, etc.).</p>
+      <p class="text-sm text-slate-700 mt-2"><strong>Resolution order</strong> at every Anthropic call:</p>
+      <ol class="list-decimal pl-5 text-xs text-slate-700 mt-1 space-y-1">
+        <li><code class="mono">dashboard_settings.agent_models[name]</code> (founder override)</li>
+        <li><code class="mono">ANTHROPIC_MODEL</code> env var (global override)</li>
+        <li>Hardcoded fallback (Sonnet 4.5)</li>
+      </ol>
+      <p class="text-xs text-slate-600 mt-2"><strong>Recommended:</strong> Pooya/Sepehr/Kherad on Opus (quality compounds downstream); compose-ig/Goyesh/Avang on Sonnet (default); Zirak/Paya/Mehrban/Bineh on Haiku (5× cheaper, structured outputs are easy).</p>
+    </div>
+
+    <div class="bg-white border-2 border-emerald-300 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-emerald-700 mb-1">C · Brand profile</div>
+      <p class="text-sm text-slate-700 mb-2">Settings → "Brand profile" is a single jsonb in <code class="mono">dashboard_settings.brand_profile</code>. Fields: name, founder, tagline, audience, primary_color, secondary_colors, typography, voice_rules, always_include, never_include, visual_rules, example_captions.</p>
+      <p class="text-sm text-slate-700 mt-2"><code class="mono">brand-profile.js</code> renders this as a "BRAND CONTEXT" prompt block injected into:</p>
+      <ul class="list-disc pl-5 text-xs text-slate-700 mt-1 space-y-1">
+        <li><code class="mono">compose-ig.py</code> system prompt (via <code class="mono">--brand-block</code> arg)</li>
+        <li><code class="mono">afshin-router.js buildDraftPrompt()</code> (read directly)</li>
+        <li><code class="mono">compose-stages.js runPooyaBrief / runKheradScore</code></li>
+      </ul>
+      <p class="text-xs text-slate-600 mt-2"><strong>The highest-leverage field is <em>example_captions</em>.</strong> Paste 2–3 of your own posts that nail the voice. Anchor-by-example is dramatically more effective than abstract rules.</p>
+    </div>
+
+  </div>
+
+  <h3 class="text-lg font-bold mt-6 mb-3">New modules added in V2.5</h3>
+  <table class="text-sm w-full mb-4">
+    <tr><th>Module</th><th>What</th></tr>
+    <tr><td class="mono">cowork-proxy/agent-models.js</td><td>Model registry (5 Anthropic models with pricing) · per-agent override resolver · cached read · cost calculator</td></tr>
+    <tr><td class="mono">cowork-proxy/brand-profile.js</td><td>get / set / renderAsPromptBlock · 60s in-memory cache</td></tr>
+    <tr><td class="mono">cowork-proxy/compose-stages.js</td><td>runPooyaBrief + runKheradScore — proxy-side Anthropic stage runners with brand injection</td></tr>
+    <tr><td class="mono">agents/compose-ig/compose-ig.py</td><td>The 23rd agent. Single Anthropic call → 3 captions + design plan + cost. Accepts <code class="mono">--model</code> + <code class="mono">--brand-block</code>.</td></tr>
+  </table>
+
+  <h3 class="text-lg font-bold mt-6 mb-3">New routes added in V2.5</h3>
+  <table class="text-sm w-full mb-4">
+    <tr><th>Route</th><th>Purpose</th></tr>
+    <tr><td class="mono">POST /compose/instagram</td><td>SSE stream · runs Pooya → compose-ig → Kherad sequentially with per-stage events (<code class="mono">stage</code>, <code class="mono">brief</code>, <code class="mono">compose-en/fa/ar</code>, <code class="mono">design-plan</code>, <code class="mono">scores</code>, <code class="mono">done</code>)</td></tr>
+    <tr><td class="mono">POST /compose/approve-plan 🔒</td><td>Gate A · saves design_plan + captions to media_library, kicks off Afshin SVG draft</td></tr>
+    <tr><td class="mono">POST /compose/approve-for-posting 🔒</td><td>Gate B · per-language or all-3 · inserts scheduled_posts row(s) with status='ready_to_post'</td></tr>
+    <tr><td class="mono">GET /compose/recent · GET /compose/:id</td><td>Recent runs strip + reload-into-viewer</td></tr>
+    <tr><td class="mono">GET /agent-models</td><td>Registry + current overrides + global default</td></tr>
+    <tr><td class="mono">PATCH /agent-models/defaults 🔒</td><td>Set or clear a per-agent model override</td></tr>
+    <tr><td class="mono">GET /brand-profile</td><td>Current brand profile + DEFAULT_PROFILE for reference</td></tr>
+    <tr><td class="mono">PATCH /brand-profile 🔒</td><td>Update brand profile (one jsonb upsert)</td></tr>
+    <tr><td class="mono">GET /dashboard</td><td>Serves dashboard.html through the proxy (so Drawflow + relative URLs work without file:// limitations)</td></tr>
+    <tr><td class="mono">GET /static/drawflow/*</td><td>Bundled Drawflow library (npm 0.0.61 didn't exist; 0.0.60 served locally so it works on networks that block jsdelivr)</td></tr>
+  </table>
+
+  <h3 class="text-lg font-bold mt-6 mb-3">New schema additions in V2.5</h3>
+  <table class="text-sm w-full mb-4">
+    <tr><th>Migration</th><th>Adds</th></tr>
+    <tr><td class="mono">20260505_compose_ig.sql</td><td>media_library: <code class="mono">design_plan jsonb</code>, <code class="mono">captions jsonb</code>, <code class="mono">plan_approved_at/by</code>, <code class="mono">slide_index</code>, <code class="mono">parent_media_id</code> (forecast for carousels). scheduled_posts: <code class="mono">compose_media_id</code>, <code class="mono">approved_for_posting_at/by</code>, <code class="mono">posted_url</code>, <code class="mono">posted_at</code>, <code class="mono">posting_provider</code>, <code class="mono">posting_error</code> (forecast for auto-post).</td></tr>
+    <tr><td class="mono">20260506_per_agent_models.sql</td><td>dashboard_settings: <code class="mono">agent_models jsonb DEFAULT '{}'</code></td></tr>
+    <tr><td class="mono">20260507_brand_profile.sql</td><td>dashboard_settings: <code class="mono">brand_profile jsonb</code> + RxApply default seed</td></tr>
+  </table>
+
+  <h3 class="text-lg font-bold mt-6 mb-3">Operational improvements applied alongside V2.5</h3>
+  <div class="grid md:grid-cols-2 gap-3 mb-4">
+    <div class="bg-white border-l-4 border-amber-500 rounded p-3">
+      <div class="font-bold text-sm">AUTH_DISABLED dev override</div>
+      <p class="text-xs text-slate-700">Set <code class="mono">AUTH_DISABLED=1</code> in .env to bypass dashboard sign-in. <code class="mono">/auth/status</code> returns <code class="mono">{disabled:true}</code> and the dashboard skips bootstrap + login. Topbar shows "auth: off" pill in amber. Removes the lock when you're testing locally without a remembered password.</p>
+    </div>
+    <div class="bg-white border-l-4 border-amber-500 rounded p-3">
+      <div class="font-bold text-sm">spawnSync UTF-8 fix (Buffer input)</div>
+      <p class="text-xs text-slate-700">Windows mangles multi-byte UTF-8 (Persian / Arabic) when passing strings to <code class="mono">spawnSync</code> with <code class="mono">encoding:'utf-8'</code>. Fix: pass an explicit <code class="mono">Buffer</code> for input. Applied to compose-ig psql writes, agent-models, brand-profile.</p>
+    </div>
+    <div class="bg-white border-l-4 border-amber-500 rounded p-3">
+      <div class="font-bold text-sm">dotenv override:true</div>
+      <p class="text-xs text-slate-700">An empty <code class="mono">ANTHROPIC_API_KEY</code> in the parent shell was blocking every Anthropic call. Fixed by passing <code class="mono">{override: true}</code> to dotenv so .env always wins.</p>
+    </div>
+    <div class="bg-white border-l-4 border-blue-500 rounded p-3">
+      <div class="font-bold text-sm">All 5 n8n workflows now runnable on demand</div>
+      <p class="text-xs text-slate-700">n8n's public API has no execute endpoint. The new <code class="mono">runWorkflow()</code> walks the workflow graph, finds httpRequest nodes pointing at <code class="mono">/run-helper</code>, and calls them sequentially through the proxy itself (<code class="mono">via: 'simulated-cron'</code>). Webhook workflows still POST to the real webhook URL.</p>
+    </div>
+    <div class="bg-white border-l-4 border-blue-500 rounded p-3">
+      <div class="font-bold text-sm">Workflow import field-whitelist</div>
+      <p class="text-xs text-slate-700">n8n rejects read-only fields (active, tags, id, versionId) on POST /workflows. The import now strips them and explicitly notes the workflow is created INACTIVE for safety.</p>
+    </div>
+    <div class="bg-white border-l-4 border-blue-500 rounded p-3">
+      <div class="font-bold text-sm">Mailhog port 8125, services container names</div>
+      <p class="text-xs text-slate-700">Windows reserved range 7932–8031 included 8025; Mailhog moved to <code class="mono">8125</code>. <code class="mono">services.js</code> container names corrected from <code class="mono">n8n / mailhog</code> to <code class="mono">n8n-test / mailhog-test</code> to match what setup2-fixed.bat creates.</p>
+    </div>
+    <div class="bg-white border-l-4 border-blue-500 rounded p-3">
+      <div class="font-bold text-sm">/run-helper sets cwd correctly</div>
+      <p class="text-xs text-slate-700">Helpers spawned by the proxy now have <code class="mono">cwd</code> set to their agent folder. Fixes ravi.py opening <code class="mono">ravi-email.md</code> as a relative path (was looking in cowork-proxy/, now correctly in agents/ravi/).</p>
+    </div>
+    <div class="bg-white border-l-4 border-blue-500 rounded p-3">
+      <div class="font-bold text-sm">Roya schema mismatch fixed</div>
+      <p class="text-xs text-slate-700">Code targeted plan-v3 columns (<code class="mono">leads.country_of_interest</code>, <code class="mono">customers.target_destination</code>, <code class="mono">leads.lead_source</code>) that don't exist in the actual migration. Rewrote <code class="mono">_fetch_signals()</code> to use real columns: <code class="mono">leads.destination_intent</code> (text[], unnest), <code class="mono">leads.source</code>, <code class="mono">customers.products</code> jsonb (extract via jsonb_array_elements).</p>
+    </div>
+    <div class="bg-white border-l-4 border-blue-500 rounded p-3">
+      <div class="font-bold text-sm">Pipelines: Drawflow bundled locally</div>
+      <p class="text-xs text-slate-700">jsdelivr returned 404 for <code class="mono">drawflow@0.0.61</code> — the version literally doesn't exist on npm (latest is 0.0.60). Library now bundled at <code class="mono">cowork-proxy/public/drawflow/</code> and served via <code class="mono">/static/drawflow/*</code>. Conditional nodes now actually branch (only the chosen output port marks downstream as live; the other branch's nodes auto-skip).</p>
+    </div>
+  </div>
+
+  <div class="mt-4 bg-blue-50 border-l-4 border-blue-500 rounded-r-xl p-4 text-sm text-slate-700">
+    <strong>API vs Claude Cowork — settled.</strong> The proxy talks to the Anthropic API directly for backend work (compose-ig, F5 chat, Afshin drafts, Pooya brief, Kherad score). The legacy <code class="mono">/run-agent</code> route still shells out to <code class="mono">claude --print</code> and is available if you want to use your Claude Max subscription for one-off interactive runs — but routing the production backend through it would lose streaming, lose per-call cost tracking, and risk burning the Max weekly cap. At current scale the API spend is &lt;$30/mo; not worth the trade-off.
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     V3 · The AI-employee platform (Phases K1–K6)
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<section id="v3" class="anchor">
+  <div class="text-xs font-bold uppercase tracking-wider text-indigo-700 mb-1">★ V3 · The AI-employee platform (Phases K1–K6)</div>
+  <h2 class="text-2xl font-bold mb-2">From "instrumented agents" to "manageable employees"</h2>
+  <p class="mb-4 text-slate-700">After V2.5 the founder constraint sharpened: <em>"I can't see each agent's output in a way I can understand and measure. Agents reply with nonsense arrays. My goal is for them to behave like human employees — easy to ask, discuss, train, measure, refine, give/restrict access, ask to collaborate or stop, give autonomy or require approval. No coding knowledge needed. Best flagship LLMs. ALL IN MY DASHBOARD, NOWHERE ELSE."</em> V3 is six phases that translate that requirement into shipped surfaces. Every K-phase adds <strong>one founder-visible loop</strong> with no external tool dependencies (no Lindy, no Slack approvals, no Langfuse — everything embedded in <code class="mono">dashboard.html</code>).</p>
+
+  <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+
+    <div class="bg-white border-2 border-indigo-300 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-indigo-700 mb-1">K1 · Outputs + Permissions + Inbox</div>
+      <p class="text-sm text-slate-700 mb-2"><strong>Three changes, one loop:</strong></p>
+      <ul class="list-disc pl-5 text-xs text-slate-700 space-y-1">
+        <li><strong>Output renderers</strong> — every agent's raw JSON is rendered to a one-line narrative ("afshin drafted a 1080×1080 SVG mock for ‹topic› — 4.2KB · $0.0034") via per-agent templates in <code class="mono">dashboard_settings.output_renderers</code>. No more "what does this array mean?"</li>
+        <li><strong>Per-action permission matrix</strong> — three modes: <span class="bg-emerald-50 text-emerald-700 rounded px-1">auto</span> / <span class="bg-amber-50 text-amber-700 rounded px-1">ask</span> / <span class="bg-rose-50 text-rose-700 rounded px-1">blocked</span>, with optional cost threshold. 36 default rows seeded.</li>
+        <li><strong>Inbox</strong> — pending actions queue with sidebar badge (amber count), page-title counter <code class="mono">(N) RxApply Control Plane</code>, and one-click approve/reject. Polled every 10s.</li>
+      </ul>
+      <p class="text-xs text-slate-600 mt-2"><strong>Modules:</strong> <code class="mono">permissions.js</code>, <code class="mono">output-renderers.js</code> · <strong>Migration:</strong> 20260508</p>
+    </div>
+
+    <div class="bg-white border-2 border-indigo-300 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-indigo-700 mb-1">K2 · Per-agent persistent memory</div>
+      <p class="text-sm text-slate-700 mb-2">Each agent now has three memory flavours, scored on retrieval:</p>
+      <ul class="list-disc pl-5 text-xs text-slate-700 space-y-1">
+        <li><strong>episodic</strong> — past runs / chats (auto-written at every Anthropic call site)</li>
+        <li><strong>semantic</strong> — facts the agent should know (founder-authored examples auto-promote here)</li>
+        <li><strong>procedural</strong> — rules / corrections (founder corrections auto-promote here)</li>
+      </ul>
+      <p class="text-sm text-slate-700 mt-2">Retrieval score = <code class="mono">importance × recency_decay + tag_match + keyword_match</code>. Top-K injected as a "MEMORY" prompt block at every call. Use-count + last_used_at bump on retrieval, so heavy-used memories surface and unused ones decay.</p>
+      <p class="text-xs text-slate-600 mt-2"><strong>Surface:</strong> Memory tab in Agents detail (filter, manual add, importance stars, "👁 Preview prompt block") · <strong>Module:</strong> <code class="mono">agent-memory.js</code> · <strong>Migration:</strong> 20260509</p>
+    </div>
+
+    <div class="bg-white border-2 border-indigo-300 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-indigo-700 mb-1">K3 · Training &amp; rating</div>
+      <p class="text-sm text-slate-700 mb-2">Three founder gestures, all auto-promoting:</p>
+      <ul class="list-disc pl-5 text-xs text-slate-700 space-y-1">
+        <li><strong>Rate a run</strong> (1–5 stars on a dimension) → <code class="mono">agent_evals</code> row · feeds the KPI cards</li>
+        <li><strong>Submit a correction</strong> ("you should have done X instead") → auto-writes a <strong>procedural</strong> memory tagged <code class="mono">correction</code></li>
+        <li><strong>Paste an example</strong> ("here's a great X") → auto-writes a <strong>semantic</strong> memory tagged <code class="mono">example</code></li>
+      </ul>
+      <p class="text-sm text-slate-700 mt-2">Training compounds without engineering: the next call sees the new rule/example in its prompt automatically. Train tab shows 4 KPIs (avg rating · count · corrections · examples) + low-scoring runs flagged in amber.</p>
+      <p class="text-xs text-slate-600 mt-2"><strong>Module:</strong> <code class="mono">agent-evals.js</code> · <strong>Migration:</strong> 20260510</p>
+    </div>
+
+    <div class="bg-white border-2 border-indigo-300 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-indigo-700 mb-1">K4 · Agent-to-agent handoffs</div>
+      <p class="text-sm text-slate-700 mb-2">Any agent can emit a <code class="mono">handoff_intent</code> field in its output (or a fenced <code class="mono">```handoff</code> block in chat). The proxy parses it, validates the target against a <code class="mono">KNOWN_AGENTS</code> whitelist, and queues a row in <code class="mono">agent_handoffs</code> — <em>through the founder Inbox, never autonomously</em>.</p>
+      <p class="text-sm text-slate-700 mt-2">Inbox shows handoff cards with an indigo stripe + <span class="bg-indigo-50 text-indigo-700 rounded px-1 text-xs">handoff</span> pill. Founder can <strong>Run</strong> the suggested agent, <strong>Redirect</strong> to a different teammate, or <strong>Reject</strong>. Audit trail preserved (decided_at / decided_by / decision_note · status: pending → approved | rejected | redirected | executed | failed).</p>
+      <p class="text-xs text-slate-600 mt-2"><strong>Module:</strong> <code class="mono">agent-handoffs.js</code> · <strong>Migration:</strong> 20260511 · <strong>Wired into:</strong> Pooya brief, Kherad score, F5 chat (all auto-parse on output)</p>
+    </div>
+
+    <div class="bg-white border-2 border-indigo-300 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-indigo-700 mb-1">K5 · Org chart + Hire</div>
+      <p class="text-sm text-slate-700 mb-2"><strong>Overview</strong> now opens with a 6-division org chart (Content · Engagement · Intel · Decision · Inspection · Operations) showing every employee's card with their model, permission summary, and 7-day quality score. One-glance answer to "is anyone underperforming?"</p>
+      <p class="text-sm text-slate-700 mt-2"><strong>Settings → Hire</strong> creates a new agent without a code edit: <code class="mono">POST /agents/hire {name, role, division, description}</code> writes <code class="mono">agents/&lt;name&gt;/SKILL.md</code> + a stub helper, seeds default permissions (chat: auto, help: auto), and the agent appears on Overview immediately. From there the founder trains it through the K2/K3 surfaces.</p>
+    </div>
+
+    <div class="bg-white border-2 border-emerald-400 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-emerald-700 mb-1">K6 · Knowledge Base + Daneshyar (NEW)</div>
+      <p class="text-sm text-slate-700 mb-2">Per-country source of truth that every agent reads before producing output. Schema: <code class="mono">knowledge_base(country, category, title, content, facts jsonb, source, source_type, status, verified_at/by, superseded_by, tags, importance)</code>.</p>
+      <p class="text-sm text-slate-700 mt-2"><strong>Daneshyar</strong> (agent #23, Persian: <em>knowledge-keeper</em>) owns the lifecycle:</p>
+      <ul class="list-disc pl-5 text-xs text-slate-700 mt-1 space-y-1">
+        <li><strong>Parse</strong> — paste any source text, Daneshyar splits it into discrete entries (one fact each), country-detected and category-tagged</li>
+        <li><strong>Verify</strong> — re-check an entry's freshness/coherence; verdicts: active / stale / superseded / rejected</li>
+        <li><strong>Find more</strong> — given an anchor entry, propose missing related facts (e.g., "you have ORE Part 1 cost; you don't have Part 2 fee or validity window")</li>
+      </ul>
+      <p class="text-sm text-slate-700 mt-2">Founder reads/writes via the new <strong>Knowledge sidebar panel</strong> (key 9). Every other agent gets the KB injected as a <code class="mono">KNOWLEDGE BASE — &lt;country&gt;</code> prompt block alongside Brand + Memory, ranked by importance × recency + keyword match.</p>
+      <p class="text-xs text-slate-600 mt-2"><strong>Module:</strong> <code class="mono">knowledge-base.js</code>, <code class="mono">daneshyar-router.js</code> · <strong>Migration:</strong> 20260512 · <strong>Live test:</strong> 7-fact UK ORE block parsed at $0.0215, recall ranks correctly</p>
+    </div>
+
+  </div>
+
+  <h3 class="text-lg font-bold mt-6 mb-3">The single-source-of-truth pattern (V3's architectural spine)</h3>
+  <p class="mb-3 text-sm text-slate-700">Every Anthropic-calling code path now composes its system prompt from <strong>four</strong> renderable blocks, in this order, sourced from one module each. Edit a block once → next call across the entire stack picks it up. No redeploy, no agent-by-agent fan-out.</p>
+  <pre class="ascii bg-slate-50 rounded p-3 text-xs">SYSTEM_PROMPT (per-agent skill)
+  +
+brandProfile.renderAsPromptBlock()    ← brand-profile.js  (Settings → Brand)
+  +
+KB.renderAsBlock({country, query})    ← knowledge-base.js (Knowledge panel)
+  +
+agentMemory.renderAsBlock(agent, …)   ← agent-memory.js   (Memory tab)
+  =
+final system prompt</pre>
+  <p class="text-xs text-slate-600 mt-2">The four call sites that compose this stack: <code class="mono">anthropic-chat.js</code> (F5 chat), <code class="mono">compose-stages.js</code> (Pooya + Kherad), <code class="mono">afshin-router.js</code> (SVG drafts), <code class="mono">compose-ig.py</code> (3-language captions, via <code class="mono">--brand-block</code> + <code class="mono">--memory-block</code> + <code class="mono">--knowledge-block</code> args).</p>
+
+  <h3 class="text-lg font-bold mt-6 mb-3">New modules added in V3</h3>
+  <table class="text-sm w-full mb-4">
+    <tr><th>Module</th><th>What</th></tr>
+    <tr><td class="mono">cowork-proxy/permissions.js</td><td>K1 · per-agent action matrix · queue / approve / reject · gate wrapper used in <code class="mono">/afshin/draft</code>, <code class="mono">/afshin/render</code>, <code class="mono">/run-helper</code></td></tr>
+    <tr><td class="mono">cowork-proxy/output-renderers.js</td><td>K1 · template substitution: <code class="mono">{path}</code>, <code class="mono">{cost_usd_str}</code>, <code class="mono">{key}_count</code>, <code class="mono">{key}_chars</code>, <code class="mono">{key}_short</code></td></tr>
+    <tr><td class="mono">cowork-proxy/agent-memory.js</td><td>K2 · write / list / recall / renderAsBlock · importance × recency × tag × keyword scoring</td></tr>
+    <tr><td class="mono">cowork-proxy/agent-evals.js</td><td>K3 · rateRun · submitCorrection (→ procedural memory) · submitExample (→ semantic memory) · KPI rollups</td></tr>
+    <tr><td class="mono">cowork-proxy/agent-handoffs.js</td><td>K4 · record / approve / reject / redirect · parseFromOutput (handoff_intent or fenced ```handoff blocks) · KNOWN_AGENTS whitelist</td></tr>
+    <tr><td class="mono">cowork-proxy/knowledge-base.js</td><td>K6 · CRUD · supersede chain · recall (active+verified ranked) · renderAsBlock · detectCountry from free text</td></tr>
+    <tr><td class="mono">cowork-proxy/daneshyar-router.js</td><td>K6 · parse · parseAndSave · verify · findMore — Daneshyar's Anthropic-driven operations</td></tr>
+    <tr><td class="mono">agents/daneshyar/SKILL.md</td><td>K6 · scholar contract: parse / verify / find-more / refine output shapes</td></tr>
+  </table>
+
+  <h3 class="text-lg font-bold mt-6 mb-3">New schema additions in V3</h3>
+  <table class="text-sm w-full mb-4">
+    <tr><th>Migration</th><th>Adds</th></tr>
+    <tr><td class="mono">20260508_permissions_renderers.sql</td><td>K1 · <code class="mono">agent_permissions</code> (mode auto/ask/blocked, cost_threshold) · <code class="mono">agent_actions_pending</code> (Inbox queue) · <code class="mono">dashboard_settings.output_renderers jsonb</code></td></tr>
+    <tr><td class="mono">20260509_agent_memory.sql</td><td>K2 · <code class="mono">agent_memory</code> (type ∈ episodic|semantic|procedural · importance · tags · use_count · last_used_at)</td></tr>
+    <tr><td class="mono">20260510_agent_evals.sql</td><td>K3 · <code class="mono">agent_evals</code> (kind ∈ rating|correction|example · score · dimension · original/corrected_output · memory_ids)</td></tr>
+    <tr><td class="mono">20260511_agent_handoffs.sql</td><td>K4 · <code class="mono">agent_handoffs</code> (status ∈ pending|approved|rejected|redirected|executed|failed)</td></tr>
+    <tr><td class="mono">20260512_knowledge_base.sql</td><td>K6 · <code class="mono">knowledge_base</code> (country · category · facts jsonb · status · superseded_by · 5 indexes) + 6 daneshyar permission seeds</td></tr>
+  </table>
+
+  <h3 class="text-lg font-bold mt-6 mb-3">New routes added in V3</h3>
+  <div class="grid md:grid-cols-2 gap-4 mb-4">
+    <div>
+      <div class="font-bold text-xs uppercase tracking-wider text-slate-500 mb-1">K1 · Permissions + Inbox</div>
+      <table class="text-xs w-full">
+        <tr><td class="mono">GET /permissions · PATCH /permissions/:agent/:action 🔒</td><td>matrix CRUD</td></tr>
+        <tr><td class="mono">GET /inbox · /inbox/count</td><td>pending list + badge</td></tr>
+        <tr><td class="mono">POST /inbox/:id/approve · /reject 🔒</td><td>founder decision</td></tr>
+        <tr><td class="mono">GET /renderers · PATCH /renderers/:agent 🔒</td><td>per-agent narrative templates</td></tr>
+      </table>
+      <div class="font-bold text-xs uppercase tracking-wider text-slate-500 mt-3 mb-1">K2 · Memory</div>
+      <table class="text-xs w-full">
+        <tr><td class="mono">GET /agents/:name/memory</td><td>list (filter by type)</td></tr>
+        <tr><td class="mono">POST /agents/:name/memory 🔒</td><td>add manually</td></tr>
+        <tr><td class="mono">PATCH/DELETE /memory/:id 🔒</td><td>edit / forget one</td></tr>
+        <tr><td class="mono">POST /agents/:name/memory/forget 🔒</td><td>delete by content match</td></tr>
+        <tr><td class="mono">GET /memory/recall</td><td>preview prompt block</td></tr>
+      </table>
+      <div class="font-bold text-xs uppercase tracking-wider text-slate-500 mt-3 mb-1">K3 · Training</div>
+      <table class="text-xs w-full">
+        <tr><td class="mono">POST /evals/run/:id/rate 🔒</td><td>1–5 stars</td></tr>
+        <tr><td class="mono">POST /evals/run/:id/correct 🔒</td><td>→ procedural memory</td></tr>
+        <tr><td class="mono">POST /agents/:name/example 🔒</td><td>→ semantic memory</td></tr>
+        <tr><td class="mono">GET /evals/agent/:name/kpis · /evals/kpis</td><td>KPI cards</td></tr>
+      </table>
+    </div>
+    <div>
+      <div class="font-bold text-xs uppercase tracking-wider text-slate-500 mb-1">K4 · Handoffs</div>
+      <table class="text-xs w-full">
+        <tr><td class="mono">GET /handoffs · /handoffs/count</td><td>pending list + badge</td></tr>
+        <tr><td class="mono">POST /handoffs 🔒</td><td>manual record</td></tr>
+        <tr><td class="mono">POST /handoffs/:id/approve · /reject · /redirect 🔒</td><td>founder decision</td></tr>
+      </table>
+      <div class="font-bold text-xs uppercase tracking-wider text-slate-500 mt-3 mb-1">K5 · Hire</div>
+      <table class="text-xs w-full">
+        <tr><td class="mono">POST /agents/hire 🔒</td><td>scaffold SKILL.md + helper + permissions</td></tr>
+      </table>
+      <div class="font-bold text-xs uppercase tracking-wider text-slate-500 mt-3 mb-1">K6 · Knowledge Base</div>
+      <table class="text-xs w-full">
+        <tr><td class="mono">GET /kb · GET /kb/:id</td><td>list (filter country/category/status/query) · one</td></tr>
+        <tr><td class="mono">POST /kb 🔒 · PATCH /kb/:id 🔒</td><td>create · edit</td></tr>
+        <tr><td class="mono">POST /kb/:id/verify-mark · /stale · /supersede 🔒</td><td>lifecycle</td></tr>
+        <tr><td class="mono">DELETE /kb/:id 🔒</td><td>permanent delete</td></tr>
+        <tr><td class="mono">GET /kb/recall/preview</td><td>debug: see what gets injected</td></tr>
+        <tr><td class="mono">POST /daneshyar/parse 🔒</td><td>preview entries (no save)</td></tr>
+        <tr><td class="mono">POST /daneshyar/parse-and-save 🔒</td><td>parse → INSERT as drafts</td></tr>
+        <tr><td class="mono">POST /daneshyar/verify/:id 🔒</td><td>active/stale/superseded/rejected</td></tr>
+        <tr><td class="mono">POST /daneshyar/find-more/:id 🔒</td><td>propose missing related facts</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <h3 class="text-lg font-bold mt-6 mb-3">New dashboard surfaces in V3</h3>
+  <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
+    <div class="bg-white border-l-4 border-indigo-400 rounded p-3">
+      <div class="font-bold text-sm">📥 Inbox (sidebar item, key not bound)</div>
+      <p class="text-xs text-slate-700">Amber count badge · page-title counter · pending action cards (amber stripe) + handoff cards (indigo stripe) · recent decisions table.</p>
+    </div>
+    <div class="bg-white border-l-4 border-indigo-400 rounded p-3">
+      <div class="font-bold text-sm">Agents → Memory tab</div>
+      <p class="text-xs text-slate-700">Filter by type/query · add manually · importance stars · use_count · 👁 Preview prompt block button.</p>
+    </div>
+    <div class="bg-white border-l-4 border-indigo-400 rounded p-3">
+      <div class="font-bold text-sm">Agents → Train tab</div>
+      <p class="text-xs text-slate-700">4 KPI cards · low-scoring runs flagged · "Show example" + "Add rule" cards · rate-runs list with star buttons + ✎ correction button.</p>
+    </div>
+    <div class="bg-white border-l-4 border-indigo-400 rounded p-3">
+      <div class="font-bold text-sm">Settings → Permissions matrix</div>
+      <p class="text-xs text-slate-700">Per-agent grouped · per-action mode dropdown (auto/ask/blocked) · cost threshold input.</p>
+    </div>
+    <div class="bg-white border-l-4 border-indigo-400 rounded p-3">
+      <div class="font-bold text-sm">Settings → Output renderers</div>
+      <p class="text-xs text-slate-700">Per-agent narrative templates with substitution variables. Preview against sample output.</p>
+    </div>
+    <div class="bg-white border-l-4 border-indigo-400 rounded p-3">
+      <div class="font-bold text-sm">Settings → Hire</div>
+      <p class="text-xs text-slate-700">Form: name · role · division · description → creates SKILL.md + helper + 2 default permissions.</p>
+    </div>
+    <div class="bg-white border-l-4 border-indigo-400 rounded p-3">
+      <div class="font-bold text-sm">Overview → Org chart</div>
+      <p class="text-xs text-slate-700">23 employees grouped into 6 divisions + Knowledge. Per-card model · permissions · 7-day quality.</p>
+    </div>
+    <div class="bg-white border-l-4 border-indigo-400 rounded p-3">
+      <div class="font-bold text-sm">Overview → Team quality strip</div>
+      <p class="text-xs text-slate-700">Last-7-days colored cards per agent with low-scoring flag.</p>
+    </div>
+    <div class="bg-white border-l-4 border-emerald-500 rounded p-3">
+      <div class="font-bold text-sm">📚 Knowledge (sidebar, key 9) — NEW</div>
+      <p class="text-xs text-slate-700">Paste &amp; parse textarea (Daneshyar splits into draft entries) · filter bar (country/category/status/query) · per-entry cards with 🔍 Verify · 💡 Find more · ✎ Edit · ✕ Delete · "+ New entry" modal.</p>
+    </div>
+  </div>
+
+  <h3 class="text-lg font-bold mt-6 mb-3">What V3 deliberately does NOT do</h3>
+  <ul class="list-disc pl-5 text-sm text-slate-700 space-y-1 mb-4">
+    <li><strong>No autonomous agent-to-agent loops.</strong> Handoffs always route through the founder Inbox. The next breaking change is to allow founder-configured "auto-approve handoffs from agent X to agent Y" rules — not a wholesale autonomy flip.</li>
+    <li><strong>No external orchestration tool.</strong> No Lindy, no n8n approval channels (Slack/Telegram), no Langfuse. Founder said "all in my dashboard, nowhere else" — every K-phase honors that.</li>
+    <li><strong>No web-fetch grounding inside agents (yet).</strong> Daneshyar's <code class="mono">find-more</code> proposes <em>titles</em> of missing facts; the founder pastes the source for parse. The <code class="mono">enrich-from-research</code> permission is seeded as <code class="mono">ask</code> for when web fetch lands.</li>
+    <li><strong>No fine-tuning, no embeddings, no RAG vector store.</strong> Memory + KB recall use deterministic SQL ranking (importance × recency × tag/keyword match). When the KB grows past ~500 entries we'll switch to pgvector — but not before, because deterministic ranking is debuggable and 500 entries fits comfortably in a top-K SQL scan.</li>
+  </ul>
+
+  <div class="mt-4 bg-emerald-50 border-l-4 border-emerald-500 rounded-r-xl p-4 text-sm text-slate-700">
+    <strong>The compound effect.</strong> Every K phase looks small in isolation (one table + one module + one panel). The compounding shows up at the call site: a single F5 chat now silently composes <em>brand profile + KB facts (country-detected) + per-agent memory (importance-ranked) + skill spec</em> before the model sees a single user token. The founder edits any one of those four sources in the dashboard once, and every subsequent call across all 23 agents picks it up. That's the human-employee analogy in code: <em>one onboarding doc, one shared knowledge base, one performance review loop, one approval matrix</em>.
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     V4 · Design system + luxury polish
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<section id="v4" class="anchor">
+  <div class="text-xs font-bold uppercase tracking-wider text-teal-700 mb-1">★ V4 · Design system + luxury polish</div>
+  <h2 class="text-2xl font-bold mb-2">From "wired up" to "feels like a product"</h2>
+  <p class="mb-4 text-slate-700">After V3 the dashboard was <em>functionally</em> complete (every K-phase loop in place, all 23 agents reachable, every founder gesture wired). It just didn't <em>look</em> like a product. V4 is six passes that turned the dashboard from a working prototype into a calm, hype-free workspace the founder is happy to leave open all day. No new tables, no new agents — purely UX, design system, and small data improvements that compound visually.</p>
+
+  <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+
+    <div class="bg-white border-2 border-teal-300 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-teal-700 mb-1">P1 · Refinement plan (S1–S9)</div>
+      <p class="text-sm text-slate-700 mb-2">Live audit of every section + 10 standalone bugs (B1–B10) fixed up front:</p>
+      <ul class="list-disc pl-5 text-xs text-slate-700 space-y-1">
+        <li>Sidebar reordered (Run · Inspect · Build · Configure · Reference); every key 1–9 + 0 bound exactly once.</li>
+        <li>Approvals tab killed; legacy <code class="mono">approval_queue</code> folded into Inbox as a third subsection.</li>
+        <li>Settings split into <strong>4 tabs</strong> (General · Brand &amp; Models · Governance · Authoring) — was a 720-row scroll.</li>
+        <li>Hire moved out of Settings into a <code class="mono">+ Hire</code> button on the Agents page header.</li>
+        <li>Agent-detail tab order: <strong>Chat · Memory · Train · History · Skill</strong> (Chat default; Run + Forward dropped).</li>
+        <li>Search box on Agents page; live filter across name + role.</li>
+        <li>Service health card now populates; org chart "23 employees across 7 divisions" dynamic; "ran run" duplicate phrasing fixed; ghost-agent banner on Permissions matrix; SVG parse errors get a friendly placeholder.</li>
+      </ul>
+      <p class="text-xs text-slate-600 mt-2"><strong>Doc:</strong> <code class="mono">REFINEMENT-PLAN.md</code> · audit + execution log</p>
+    </div>
+
+    <div class="bg-white border-2 border-teal-300 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-teal-700 mb-1">P2 · Design system (Claude Design)</div>
+      <p class="text-sm text-slate-700 mb-2">Imported the design system from a Claude Design handoff bundle:</p>
+      <ul class="list-disc pl-5 text-xs text-slate-700 space-y-1">
+        <li><strong>Brand palette</strong>: teal <code class="mono">#009b98</code> + deep navy <code class="mono">#083045</code> + copper <code class="mono">#b07c4c</code> (replacing the V1 indigo).</li>
+        <li><strong>Fonts</strong>: Manrope (EN) + Vazirmatn (FA/AR) + JetBrains Mono. Inter dropped.</li>
+        <li><strong>Tokens</strong>: full surface scale, text scale, semantic colors, radius/shadow/spacing scales — all CSS variables.</li>
+        <li><strong>Light + dark mode</strong>: <code class="mono">[data-theme="dark"]</code> token override; topbar toggle + <kbd>T</kbd> shortcut; localStorage persistence; honors <code class="mono">prefers-color-scheme</code>.</li>
+        <li><strong>Component classes</strong>: <code class="mono">.stripe-card</code>, <code class="mono">.pchip</code>, <code class="mono">.kb-entry</code>, <code class="mono">.fact-pill</code>, <code class="mono">.tag-pill</code>, <code class="mono">.design-card</code>, <code class="mono">.canvas-area</code>, <code class="mono">.feed-row</code>, <code class="mono">.health-card</code>, <code class="mono">.log-table</code>, <code class="mono">.toggle</code>, <code class="mono">.tabs-strip</code>, <code class="mono">.search</code>.</li>
+        <li><strong>Tailwind ↔ token bridge</strong>: legacy <code class="mono">text-indigo-600</code>, <code class="mono">bg-slate-50</code>, <code class="mono">text-slate-800</code>, etc. auto-rebrand to teal in light mode and remap in dark mode — no JS template rewrites needed.</li>
+      </ul>
+    </div>
+
+    <div class="bg-white border-2 border-teal-300 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-teal-700 mb-1">P3 · Luxury polish</div>
+      <p class="text-sm text-slate-700 mb-2">Everything-feels-bespoke pass:</p>
+      <ul class="list-disc pl-5 text-xs text-slate-700 space-y-1">
+        <li><strong>SVG icons replace 14 emojis</strong> in the sidebar (Lucide-style, 16×16, 1.5px stroke). Theme toggle → sun/moon SVG. Refresh, plus, check, x, sparkle, search, more — full utility set.</li>
+        <li><strong>Collapsible sidebar</strong>: 256px → 64px, animates <code class="mono">grid-template-columns</code>, persists in localStorage, <kbd>[</kbd> shortcut, hover tooltip in collapsed mode.</li>
+        <li><strong>Typography tightening</strong>: 14px → 13px body, -0.011em tracking, refined H1 (24px / -0.025em), <code class="mono">text-rendering: optimizeLegibility</code>.</li>
+        <li><strong>Whitespace</strong>: card padding 24 → 32px, main padding 32 → 40px (48px on screens ≥1500px), section-head bottom 24 → 32px.</li>
+        <li><strong>Modal redesign</strong>: backdrop blur (10px + saturate 0.85), 640px max-width, scale-up entrance animation <code class="mono">cubic-bezier(.16,1.2,.3,1)</code>, <kbd>Esc</kbd> closes globally, header / body / footer pattern.</li>
+        <li><strong>Buttons</strong>: subtle hover lift, focus ring (3px teal-tinted), primary has inset highlight + colored shadow that grows on hover.</li>
+        <li><strong>Glass topbar</strong>: <code class="mono">backdrop-filter: blur(12px)</code> on rgba surface in both modes.</li>
+      </ul>
+    </div>
+
+    <div class="bg-white border-2 border-teal-300 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-teal-700 mb-1">P4 · Agent avatars</div>
+      <p class="text-sm text-slate-700 mb-2">Every agent has a face now, everywhere they appear.</p>
+      <ul class="list-disc pl-5 text-xs text-slate-700 space-y-1">
+        <li><strong>Composite portrait</strong>: 5×5 grid of 23 photoreal portraits at <code class="mono">/static/team/team.jpg</code> — generated via the brief in <code class="mono">AGENT-FACES.md</code>.</li>
+        <li><strong>CSS sprite</strong>: one image, 23 avatars, zero new HTTP requests per row. Each <code class="mono">.agent-avatar</code> sets <code class="mono">--ag-row</code> + <code class="mono">--ag-col</code> CSS variables; <code class="mono">background-size: 700% 900%</code> + per-cell percentage math face-only-crops out the name strips.</li>
+        <li><strong>Per-agent custom upload</strong>: hover the 72px portrait on the agent-detail page → teal camera button → upload modal (drag-drop · 5MB cap · jpg/png/webp). Saved to <code class="mono">cowork-proxy/public/team/agents/&lt;name&gt;.&lt;ext&gt;</code>; served via the same <code class="mono">/static/</code> path.</li>
+        <li><strong>Hire-with-avatar</strong>: optional drop zone in the Hire modal sends <code class="mono">avatar_b64</code> + <code class="mono">avatar_ext</code> alongside the create call so a new agent has a face from the moment they exist.</li>
+        <li><strong>Revert</strong>: × button (top-right, on hover) DELETEs the file and reverts to the team-grid sprite face.</li>
+        <li><strong>Fallback chain</strong>: custom URL → team sprite → soft teal initial-letter disc (when sprite is missing or for unmapped agents like <code class="mono">cross-post</code>).</li>
+        <li><strong>Surfaces</strong>: Agents page tiles (40px) · detail header (72px) · org chart (40px) · team-quality strip · Recent activity rows · Inbox handoff cards (28px each side: <code class="mono">[face] pooya → [face] dadbeh</code>) · Logs AGENT column · Top spenders mini-table.</li>
+      </ul>
+      <p class="text-xs text-slate-600 mt-2"><strong>Routes:</strong> <code class="mono">GET /agents/avatars</code> · <code class="mono">POST /agents/:name/avatar</code> 🔒 · <code class="mono">DELETE /agents/:name/avatar</code> 🔒</p>
+    </div>
+
+    <div class="bg-white border-2 border-emerald-400 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-emerald-700 mb-1">P5 · Overview redesign</div>
+      <p class="text-sm text-slate-700 mb-2">From "static report" → "live workspace" with real charts and color hierarchy.</p>
+      <ul class="list-disc pl-5 text-xs text-slate-700 space-y-1">
+        <li><strong>Stats strip</strong>: 4 cards each with a <strong>distinct accent color</strong> (indigo / amber / emerald / copper), tinted icon tile, and a <strong>7-day sparkline</strong> on Runs + Spend. Equal <code class="mono">min-height: 152px</code> so the row aligns.</li>
+        <li><strong>Cost &amp; spend card</strong> — replaces the ugly topbar chips. Two-column layout: left has Today / 30d / All-time + a <strong>30-day daily-spend bar chart</strong> + monthly budget meter (gradient teal → amber at 80% → rose at cap); right has <strong>Top spenders · last 30d</strong> with each agent's portrait + name + call count + spend bar.</li>
+        <li><strong>Service health</strong> rebuilt: pulsing green dots (CSS-only ring animation), bold service name + mono URL/container subtext, status pill on the right.</li>
+        <li><strong>Show / hide insights</strong>: a Customize dropdown on the section header lets the founder toggle every card on/off. Persisted in localStorage. The 3-column row at the bottom auto-spans correctly when one column is hidden.</li>
+        <li><strong>Inline-SVG chart helpers</strong>: <code class="mono">sparkline(values, opts)</code> + <code class="mono">barchart(values, opts)</code> — zero dependencies. Auto-scale, currentColor-aware, dark-mode-safe, work with 1 value or 365.</li>
+        <li><strong>Cost tracking finally works</strong>: new <code class="mono">logApiCall()</code> helper in <code class="mono">log-writer.js</code>, wired into all Daneshyar routes (parse, parse-and-save, verify, find-more, upload-and-parse). Anthropic costs now persist to <code class="mono">agent_runs.cost_usd_actual</code>; <code class="mono">/cost</code> reads them and powers the entire cost surface.</li>
+        <li><strong>/cost extended</strong>: now also returns <code class="mono">daily_trend</code> (last 30 days, one entry per day even when zero) and <code class="mono">by_agent</code> (top 8 spenders in the window).</li>
+      </ul>
+    </div>
+
+    <div class="bg-white border-2 border-emerald-400 rounded-2xl p-5">
+      <div class="text-xs font-bold uppercase tracking-wider text-emerald-700 mb-1">P6 · Inbox / dark-mode fixes</div>
+      <p class="text-sm text-slate-700 mb-2">Targeted polish on three usability complaints from a real session:</p>
+      <ul class="list-disc pl-5 text-xs text-slate-700 space-y-1">
+        <li><strong>Inbox badge / shortcut overlap</strong>: split into two separate DOM elements — <code class="mono">#inbox-key</code> (keyboard chip "4") and <code class="mono">#inbox-badge</code> (amber count pill). Toggling <code class="mono">hidden</code> on each — only one ever shows.</li>
+        <li><strong>Dark-mode placeholder visibility</strong>: explicit <code class="mono">::placeholder</code> rule with the design-token muted color (and a brighter slate-blue in dark mode). Force surface bg + text color on Tailwind-styled inputs/textareas/selects in dark mode.</li>
+        <li><strong>Sidebar key hint footer</strong>: now reads <code class="mono">v3 · K6 (Knowledge Base) · Press 1–9 + 0 + [</code> — the <kbd>[</kbd> shortcut for sidebar collapse is documented inline.</li>
+        <li><strong>Inbox stripe-card pattern</strong>: 4px stripe column on the left of the card grid (not <code class="mono">border-left</code> — corner radius now clips properly). Animated pulse on the action stripe.</li>
+        <li><strong>Compose chips</strong>: animated <code class="mono">.pchip.running</code> with spinning number bubble + <code class="mono">.pchip.done</code> with cost annotation. Replaces the static idle/ok pills.</li>
+        <li><strong>KB + Designs polish</strong>: KB cards now use proper <code class="mono">.kb-entry</code> + <code class="mono">.fact-pill</code> + <code class="mono">.tag-pill</code> + copper stars. Designs cards use <code class="mono">.design-card</code> + <code class="mono">.design-preview</code> with navy → teal gradient placeholder when no image; broken-SVG state shows a rose-tinted "⚠ SVG parse error" message instead of raw XML.</li>
+      </ul>
+    </div>
+
+  </div>
+
+  <h3 class="text-lg font-bold mt-6 mb-3">New backend pieces</h3>
+  <table class="text-sm w-full mb-4">
+    <tr><th>Module / route</th><th>What</th></tr>
+    <tr><td class="mono">cowork-proxy/log-writer.js → logApiCall()</td><td>One-shot recordRunStart + recordRunEnd helper for Anthropic API routes. Persists cost_usd_actual + model + tokens so /cost reflects real spend.</td></tr>
+    <tr><td class="mono">cowork-proxy/cost.js → dailyTrend(), byAgent()</td><td>Per-day spend rollups (last 30 days) and top-N agent spenders. Both used by the Overview Cost card. Uses CTE + generate_series to fill zero days.</td></tr>
+    <tr><td class="mono">GET /agents/avatars</td><td>Returns the per-agent custom-avatar map. Cached on dashboard boot in <code class="mono">window.AGENT_CUSTOM_AVATARS</code>.</td></tr>
+    <tr><td class="mono">POST /agents/:name/avatar 🔒</td><td>Upload a custom face (base64 in JSON · 5MB cap · jpg/png/webp/gif). Replaces any prior file regardless of extension.</td></tr>
+    <tr><td class="mono">DELETE /agents/:name/avatar 🔒</td><td>Remove the custom file; agent reverts to the 5×5 sprite face.</td></tr>
+    <tr><td class="mono">POST /agents/hire 🔒 (extended)</td><td>Now also accepts <code class="mono">avatar_b64</code> + <code class="mono">avatar_ext</code> and saves the avatar before creating the agent dir.</td></tr>
+  </table>
+
+  <h3 class="text-lg font-bold mt-6 mb-3">New dashboard surfaces in V4</h3>
+  <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
+    <div class="bg-white border-l-4 border-teal-500 rounded p-3">
+      <div class="font-bold text-sm">Topbar redesign</div>
+      <p class="text-xs text-slate-700">Glass effect (rgba + backdrop-blur), brandmark with teal R tile, env + sandbox pills, proxy status, theme toggle (sun/moon SVG), sign-in. Spend chips removed (now on Overview Cost card).</p>
+    </div>
+    <div class="bg-white border-l-4 border-teal-500 rounded p-3">
+      <div class="font-bold text-sm">Sidebar (collapsible)</div>
+      <p class="text-xs text-slate-700">Toggle button at top + <kbd>[</kbd> shortcut. Collapses to 64px showing only icons; hover reveals the label as a navy tooltip. State persists in localStorage.</p>
+    </div>
+    <div class="bg-white border-l-4 border-teal-500 rounded p-3">
+      <div class="font-bold text-sm">Modals</div>
+      <p class="text-xs text-slate-700">Backdrop blur · 640px max-width · scale-up animation · Esc closes globally. Hire + KB Edit + Change Avatar all use the same pattern.</p>
+    </div>
+    <div class="bg-white border-l-4 border-emerald-500 rounded p-3">
+      <div class="font-bold text-sm">Overview · Stats strip</div>
+      <p class="text-xs text-slate-700">4 cards in 4 colors (indigo / amber / emerald / copper) with tinted icons + sparklines. Inbox card is clickable with chevron-right hint.</p>
+    </div>
+    <div class="bg-white border-l-4 border-emerald-500 rounded p-3">
+      <div class="font-bold text-sm">Overview · Cost &amp; spend</div>
+      <p class="text-xs text-slate-700">Today / 30d / all-time numbers · 30-day daily-spend bar chart · monthly budget meter (gradient teal/amber/rose) · Top spenders side panel with portraits + spend bars.</p>
+    </div>
+    <div class="bg-white border-l-4 border-emerald-500 rounded p-3">
+      <div class="font-bold text-sm">Overview · Customize</div>
+      <p class="text-xs text-slate-700">Dropdown on the section header with 6 toggles (Stats · Cost · Quality · Org chart · Recent activity · Service health). Persisted; founder picks what's shown.</p>
+    </div>
+    <div class="bg-white border-l-4 border-emerald-500 rounded p-3">
+      <div class="font-bold text-sm">Service health</div>
+      <p class="text-xs text-slate-700">One card per service · pulsing green ring on healthy services · bold name + mono URL/container subtext.</p>
+    </div>
+    <div class="bg-white border-l-4 border-teal-500 rounded p-3">
+      <div class="font-bold text-sm">Avatar editor</div>
+      <p class="text-xs text-slate-700">Hover the 72px detail-page portrait → teal camera button (bottom-right) opens upload modal. Custom avatars also get a × revert button (top-right) on hover.</p>
+    </div>
+    <div class="bg-white border-l-4 border-teal-500 rounded p-3">
+      <div class="font-bold text-sm">Hire form (avatar field)</div>
+      <p class="text-xs text-slate-700">Drag-drop zone in the Hire modal. Optional — skip and the agent gets a teal initial-letter disc until you upload one later.</p>
+    </div>
+  </div>
+
+  <h3 class="text-lg font-bold mt-6 mb-3">Operational impact</h3>
+  <ul class="list-disc pl-5 text-sm text-slate-700 space-y-1 mb-4">
+    <li><strong>Page-title counter</strong> still works (<code class="mono">(N) RxApply · Control Plane</code>) and matches the sidebar badge + Overview Inbox stat — three sources, one number.</li>
+    <li><strong>Keyboard shortcuts</strong> total: 1–9 + 0 (sections) · <kbd>T</kbd> (theme) · <kbd>[</kbd> (sidebar) · <kbd>Esc</kbd> (close modal). Listed in the sidebar footer.</li>
+    <li><strong>No new tables, no new agents.</strong> The only schema change since V3 is implicit: <code class="mono">agent_runs.cost_usd_actual</code> finally gets written from Daneshyar/compose paths.</li>
+    <li><strong>Files added</strong>: <code class="mono">cowork-proxy/public/team/team.jpg</code> (5×5 portrait grid) + <code class="mono">cowork-proxy/public/team/agents/*.{jpg,png,webp}</code> (per-agent custom uploads, written on demand).</li>
+    <li><strong>Documents added</strong>: <code class="mono">DESIGN-BRIEF.md</code> (handoff for Claude Design) · <code class="mono">REFINEMENT-PLAN.md</code> (S1–S9 audit + execution log) · <code class="mono">AGENT-FACES.md</code> (per-agent portrait briefs).</li>
+  </ul>
+
+  <div class="mt-4 bg-teal-50 border-l-4 border-teal-500 rounded-r-xl p-4 text-sm text-slate-700">
+    <strong>Why this matters.</strong> V3 made the dashboard <em>functionally</em> right; V4 made it <em>visually</em> right. The founder uses this surface 1–2 hours every day — small frictions compound. Calm typography, real charts, distinct color hierarchy, sidebar collapse, dark mode, agent faces — together these turn the dashboard from "a tool I have to look at" into "a place I'm comfortable working in." The agents stopped feeling like scripts and started feeling like a team you manage.
+  </div>
+</section>
+
+<section class="bg-slate-900 text-white rounded-2xl p-6 mt-12">
+  <div class="text-xs font-bold uppercase tracking-wider text-violet-300 mb-2">end of map</div>
+  <h2 class="text-xl font-bold mb-2">If you read only one thing in this doc, read these seven</h2>
+  <ol class="list-decimal pl-6 text-sm space-y-1">
+    <li><strong>The skill pattern</strong> (section 4) — every agent is the same shape.</li>
+    <li><strong>The data flow chains</strong> (section 3) — seven chains, one diagram each.</li>
+    <li><strong>The 28 tables</strong> (section 6 + V3 migrations 20260508–20260512) — knowing which table owns what unlocks everything else.</li>
+    <li><strong>V2 / Phase F</strong> (★ section) — the 9-feature consolidation that turned this from "wired up" into a real local control plane.</li>
+    <li><strong>V2.5 Compose + Brand</strong> (★ section) — the "type a topic, ship a post" track.</li>
+    <li><strong>V3 · The AI-employee platform</strong> (★ section) — Outputs + Permissions + Inbox (K1) · Memory (K2) · Training (K3) · Handoffs (K4) · Org chart + Hire (K5) · Knowledge Base + Daneshyar (K6). This is the layer that turned 23 agents from "scripts that run" into "employees you manage."</li>
+    <li><strong>V4 · Design system + luxury polish</strong> (★ section) — Refinement plan (S1–S9) · Claude Design tokens (teal/navy/copper · Manrope/Vazirmatn · light + dark mode) · luxury polish (SVG icons · collapsible sidebar · backdrop-blur modals · keyboard shortcuts <kbd>T</kbd> <kbd>[</kbd> <kbd>Esc</kbd>) · agent avatars (5×5 sprite + per-agent custom uploads · Hire-with-avatar) · Overview redesign (multi-color stats · sparklines · 30-day cost chart · top-spenders panel · Customize toggles) · cost tracking that actually persists.</li>
+    <li><strong>V5 · Tools framework + Cloud migration</strong> (★ section) — Tools framework (T1: registry · per-agent permission matrix · cost-capped runtime · pgcrypto-encrypted credentials · adapters for REST + hosted MCP + stdio MCP · 5 free/cheap REST adapters wired: Tavily · Perplexity · Exa · Firecrawl · Instagram Graph) · Cloud migration to Railway (rxapply.com · Supabase Cloud Postgres · Cloudflare R2 storage · direct Anthropic API replacing the <code>claude</code> CLI · push-to-deploy from GitHub) · "Easy to Start" wizard (8-step first-run setup · TOTP 2FA · save-and-resume · re-runnable from Settings).</li>
+  </ol>
+  <p class="text-sm mt-3 text-slate-300">Test phase scorecard: <strong>12 of 12 PASS</strong>. Phase A→E plan: <strong>28 of 28 closed</strong>. <strong>V2 / Phase F shipped</strong> (F2–F9 + F8b). <strong>V2.5 shipped</strong> (Compose · per-agent LLM · Brand profile). <strong>V3 shipped</strong> (K1–K6 · employee management platform). <strong>V4 shipped</strong> (refinement plan + Claude Design system + luxury polish + per-agent custom avatars + Overview redesign with real charts and persistent cost tracking). All 5 n8n workflows still run end-to-end. The dashboard is now what it needs to be: a calm, hype-free workspace the founder is happy to leave open all day. The next decision is still product, not engineering: which dry-run channel gets promoted to a real sender, and which K6 country gets its KB filled out first.</p>
+  <p class="text-xs mt-2 text-slate-400">Last updated: V5 · Tools framework + Cloud migration plan. See <a href="STATUS.md" class="text-violet-300 underline">STATUS.md</a> for the cold-start brief, <a href="CLOUD-MIGRATION-PLAN.md" class="text-violet-300 underline">CLOUD-MIGRATION-PLAN.md</a> for the live migration plan + tracker, <a href="MIGRATION-LOG.md" class="text-violet-300 underline">MIGRATION-LOG.md</a> for the per-commit ledger, <a href="REFINEMENT-PLAN.md" class="text-violet-300 underline">REFINEMENT-PLAN.md</a> for the V4 audit log, and <a href="DESIGN-BRIEF.md" class="text-violet-300 underline">DESIGN-BRIEF.md</a> for the design handoff.</p>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- V5 · Tools framework + Cloud migration                                -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<section class="bg-gradient-to-br from-emerald-900/30 to-teal-900/30 border border-emerald-500/30 rounded-lg p-6 mb-8 mt-8">
+  <h2 class="text-2xl font-bold mb-2">V5 · Tools framework + Cloud migration <span class="text-sm font-normal text-emerald-300">★ in progress</span></h2>
+  <p class="text-sm text-slate-300 mb-4">From local sandbox to live <code>rxapply.com</code>. Two tracks running together: a <em>Tools</em> framework that lets agents call third-party APIs and MCP servers under per-agent permission, and a <em>Cloud</em> migration that hosts the whole thing on Railway with a one-time setup wizard.</p>
+
+  <h3 class="text-lg font-semibold mt-4 mb-2">T1 · Tools framework (shipped Phase 1 + 2 locally)</h3>
+  <ul class="text-sm space-y-1 list-disc pl-5 text-slate-300">
+    <li><strong>Registry</strong> (<code>cowork-proxy/tools/registry.js</code>) — declarative catalog of 15 tools across <em>research</em>, <em>analytics</em>, <em>publish</em>, <em>action</em> kinds.</li>
+    <li><strong>Runtime</strong> (<code>cowork-proxy/tools/runtime.js</code>) — single entry point: validates op → checks per-agent permission (<code>off / ask / auto / policy</code>) → enforces per-tool + global cost cap → dispatches to adapter → logs to <code>tool_calls</code>.</li>
+    <li><strong>Encryption</strong> (<code>cowork-proxy/tools/crypto.js</code>) — Postgres <code>pgcrypto</code> with a 32-byte <code>SECRETS_KEY</code> env var. Credentials never leave the DB in plaintext.</li>
+    <li><strong>Permission matrix</strong> — per-(agent, tool) row. Inbox-queue integration: <code>ask</code> mode posts an approval card that resolves the queued call when the founder clicks Approve.</li>
+    <li><strong>Adapters shipped</strong> — REST: Tavily search · Perplexity · Exa · Firecrawl · Instagram Graph (read + write with belt-and-suspenders <code>_allow_write</code> flag).</li>
+    <li><strong>Adapters in flight</strong> — Hosted MCP (Buffer · Ayrshare · PostPlanify · Xpoz · CreatorCrawl) · stdio MCP supervisor (TikTok · Reddit) · dynamic policy evaluator (Haiku-3 evaluates per call, decision cached for 1h).</li>
+    <li><strong>UI</strong> — Tools tab in dashboard sidebar (under Configure). Per-tool drawer with 4 tabs: Connection · Agents matrix · Policy · Activity.</li>
+  </ul>
+
+  <h3 class="text-lg font-semibold mt-5 mb-2">Cloud migration · stack</h3>
+  <table class="text-sm w-full">
+    <thead><tr class="text-left text-slate-400 border-b border-emerald-500/20"><th class="py-1">Concern</th><th>Choice</th></tr></thead>
+    <tbody class="text-slate-300">
+      <tr><td class="py-1 pr-4">Domain</td><td><code>rxapply.com</code> (apex = dashboard, <code>api.rxapply.com</code> reserved)</td></tr>
+      <tr><td class="py-1 pr-4">Host</td><td><strong>Railway</strong> · push-to-deploy from GitHub</td></tr>
+      <tr><td class="py-1 pr-4">Database</td><td><strong>Supabase Cloud</strong> · managed Postgres · free tier to start</td></tr>
+      <tr><td class="py-1 pr-4">Storage</td><td><strong>Cloudflare R2</strong> · S3-compatible · 10 GB free</td></tr>
+      <tr><td class="py-1 pr-4">DNS / TLS</td><td>Cloudflare DNS in front of Railway · auto TLS</td></tr>
+      <tr><td class="py-1 pr-4">LLM transport</td><td><strong>Direct Anthropic API</strong> · drop the <code>claude</code> CLI subprocess</td></tr>
+      <tr><td class="py-1 pr-4">Auth</td><td>bcrypt + <strong>TOTP 2FA</strong> + login rate-limit + HTTPS-only cookie</td></tr>
+      <tr><td class="py-1 pr-4">Repo</td><td><a class="text-emerald-300 underline" href="https://github.com/Hojatam/rxapply-cloud">github.com/Hojatam/rxapply-cloud</a> · private</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="text-lg font-semibold mt-5 mb-2">Cloud migration · 9 deployable steps</h3>
+  <ol class="text-sm space-y-1 list-decimal pl-5 text-slate-300">
+    <li><code>docker exec psql</code> → <code>pg</code> (node-postgres) client. Single <code>cowork-proxy/db.js</code>; refactor every <code>_psql()</code> caller to async/await. <em>Largest single change.</em></li>
+    <li>Local-disk file writes → Cloudflare R2 (avatars · KB uploads · Afshin renders). New <code>storage.js</code>.</li>
+    <li><code>spawn('claude', …)</code> → <code>fetch('https://api.anthropic.com/v1/messages', …)</code> in <code>compose-stages.js</code> + <code>pipeline-runner.js</code>.</li>
+    <li>Secrets out of <code>start-proxy.bat</code> into Railway env vars.</li>
+    <li>Add <code>Dockerfile</code> + <code>railway.json</code> + <code>Procfile</code>. Includes Python 3 (for KB <code>extract.py</code>).</li>
+    <li>Auth hardening · rate-limit · CSRF · HTTPS-only cookie · TOTP 2FA.</li>
+    <li>First-run middleware · redirect to <code>/setup</code> while <code>first_run_done = false</code>.</li>
+    <li>Migration runner · idempotent SQL apply · tracks applied versions in <code>schema_migrations</code> · hooked into Railway's release command.</li>
+    <li>DNS cutover · <code>rxapply.com</code> → Railway · TLS auto-issues.</li>
+  </ol>
+
+  <h3 class="text-lg font-semibold mt-5 mb-2">"Easy to Start" wizard · 8 steps + 2FA</h3>
+  <p class="text-sm text-slate-300 mb-2">Founder lands on a fresh deploy and reaches a working dashboard in <strong>&lt;10 minutes</strong>, <strong>zero terminal use</strong>. Save-and-resume between steps; re-runnable from Settings.</p>
+  <ol class="text-sm space-y-1 list-decimal pl-5 text-slate-300">
+    <li>Welcome · preflight checks (env vars · DB · R2 reachability)</li>
+    <li>Founder credentials · email + password (bcrypt + strength meter)</li>
+    <li class="ml-4 list-[lower-alpha]">2FA via TOTP · QR code · 6-digit verify · recovery codes printed once</li>
+    <li>Anthropic API key · "Test" button validates inline</li>
+    <li>Database choice · Supabase Cloud or Railway PG · "Run setup migrations" with per-migration progress bar</li>
+    <li>Brand profile · name · languages · colors · logo upload</li>
+    <li>Team avatars · sprite upload (auto-compressed) · optional per-agent custom avatars</li>
+    <li>Connect tools · Tavily / Perplexity / IG / Buffer cards (skippable)</li>
+    <li>Ready · "Open dashboard" → <code>/#/overview</code></li>
+  </ol>
+  <p class="text-xs mt-2 text-slate-400">Sample data: <strong>off</strong> (per founder decision).</p>
+
+  <p class="text-sm mt-4 text-emerald-200"><strong>Done = ?</strong> rxapply.com loads with valid TLS · login + 2FA works · Daneshyar answers a Tavily-grounded question · Afshin produces a render stored in R2 · cost cap enforced · <code>pg_dump</code> succeeds · wizard timed under 10 minutes.</p>
+</section>
+
+</main>
+</body>
+</html>

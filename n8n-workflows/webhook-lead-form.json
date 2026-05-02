@@ -1,0 +1,68 @@
+{
+  "name": "webhook-lead-form",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-form",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-lead-form-trigger",
+      "name": "POST /webhook/lead-form",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "webhookId": "rxapply-lead-form"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:7777/run-helper",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"agent\": \"rahbar\",\n  \"command\": \"enroll-all\",\n  \"args\": [\"--trigger\", \"webhook\"],\n  \"stdin\": {{ JSON.stringify($json.body || $json) }}\n}",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "webhook-call-rahbar",
+      "name": "POST /run-helper rahbar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 202,
+        "responseBody": "={\n  \"ok\": true,\n  \"received\": true,\n  \"forwarded_to\": \"rahbar enroll-all\",\n  \"proxy_response\": {{ JSON.stringify($json) }}\n}"
+      },
+      "id": "webhook-respond",
+      "name": "Respond 202",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [760, 300]
+    }
+  ],
+  "connections": {
+    "POST /webhook/lead-form": {
+      "main": [[{"node": "POST /run-helper rahbar", "type": "main", "index": 0}]]
+    },
+    "POST /run-helper rahbar": {
+      "main": [[{"node": "Respond 202", "type": "main", "index": 0}]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true
+  },
+  "tags": []
+}

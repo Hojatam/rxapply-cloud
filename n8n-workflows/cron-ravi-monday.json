@@ -1,0 +1,81 @@
+{
+  "name": "cron-ravi-monday",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1"
+            }
+          ]
+        }
+      },
+      "id": "cron-ravi-trigger",
+      "name": "Schedule (Mon 09:00)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:7777/run-helper",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"agent\": \"ravi\",\n  \"command\": \"fetch\",\n  \"args\": [\"--trigger\", \"cron\"]\n}",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "ravi-fetch",
+      "name": "Ravi fetch (compose)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:7777/run-helper",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"agent\": \"ravi\",\n  \"command\": \"send\",\n  \"args\": [\n    \"--to\", \"hojat@rxapply.local\",\n    \"--subject\", \"RxApply · Monday narrative\",\n    \"--file\", \"ravi-email.md\"\n  ]\n}",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "ravi-send",
+      "name": "Ravi send (mailhog)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [800, 300]
+    }
+  ],
+  "connections": {
+    "Schedule (Mon 09:00)": {
+      "main": [[{"node": "Ravi fetch (compose)", "type": "main", "index": 0}]]
+    },
+    "Ravi fetch (compose)": {
+      "main": [[{"node": "Ravi send (mailhog)", "type": "main", "index": 0}]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true
+  },
+  "tags": []
+}

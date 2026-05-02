@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RxApply · Phase F → I plan</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+:root { color-scheme: light; }
+body { font-family: ui-sans-serif, system-ui, Inter, "Segoe UI", sans-serif; }
+.mono { font-family: ui-monospace, "JetBrains Mono", Consolas, monospace; }
+.ascii { font-family: ui-monospace, Consolas, monospace; white-space: pre; line-height: 1.45; font-size: 12px; }
+.anchor { scroll-margin-top: 80px; }
+.pill { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:9999px; font-size:11px; font-weight:600; }
+.card { transition: transform .18s, box-shadow .18s; }
+.card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(15,23,42,0.06); }
+.dot { width:10px; height:10px; border-radius:9999px; display:inline-block; }
+.todo-row { transition: background .12s; }
+.todo-row:hover { background:#f8fafc; }
+.todo-row.done .label { text-decoration: line-through; color:#94a3b8; }
+.todo-row.done .meta { color:#cbd5e1; }
+details > summary { cursor: pointer; list-style: none; }
+details > summary::-webkit-details-marker { display: none; }
+details > summary::before { content:"▶ "; color:#94a3b8; transition: transform .15s; display:inline-block; }
+details[open] > summary::before { content:"▼ "; }
+.code { background:#0f172a; color:#e2e8f0; border-radius:0.5rem; padding:0.6rem 0.8rem; font-family:ui-monospace,Consolas,monospace; font-size:11px; line-height:1.5; overflow-x:auto; white-space:pre; }
+nav.toc a { display:block; padding:6px 10px; border-radius:6px; font-size:13px; color:#475569; }
+nav.toc a:hover { background:#f1f5f9; color:#0f172a; }
+nav.toc a.active { background:#7c3aed; color:white; font-weight:600; }
+.phase-F { background:#fef2f2; border-color:#fca5a5; color:#9f1239; }
+.phase-G { background:#f0f9ff; border-color:#7dd3fc; color:#0c4a6e; }
+.phase-H { background:#fffbeb; border-color:#fcd34d; color:#92400e; }
+.phase-I { background:#ecfdf5; border-color:#6ee7b7; color:#065f46; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+
+<header class="bg-gradient-to-br from-violet-700 via-indigo-700 to-slate-900 text-white py-10 px-6">
+  <div class="max-w-7xl mx-auto">
+    <div class="flex items-center gap-2 text-xs text-violet-200 mb-2">
+      <a href="dashboard.html" class="hover:text-white">← test-phase dashboard</a>
+      <span>·</span>
+      <a href="admin-dashboard.html" class="hover:text-white">← admin dashboard</a>
+      <span>·</span>
+      <a href="architecture.html" class="hover:text-white">← architecture</a>
+      <span>·</span>
+      <span class="font-mono">next-steps.html</span>
+    </div>
+    <h1 class="text-3xl md:text-4xl font-black mb-3">Phase F → I → M1 · the path from here</h1>
+    <p class="max-w-3xl text-violet-100">Phases A–E shipped. <strong>Phase F (V2) shipped</strong> with 9 features (F2–F9 + F8b). <strong>Report v.1 hardening</strong> applied — 21 audit fixes. <strong>V2.5 shipped</strong> — Compose flow, per-agent LLM, Brand profile. The internal stack is now usable for daily content creation. <strong>What remains is customer-facing</strong> — the public site, Destination Advisor quiz, real intel sources, real social-platform posting.</p>
+    <div class="mt-3 inline-flex items-center gap-2 text-xs bg-emerald-500/20 border border-emerald-300/40 rounded px-3 py-1">
+      <span class="w-2 h-2 rounded-full bg-emerald-300"></span>
+      <span class="font-bold">V2.5 shipped · 23 agents · Compose live · Brand profile + per-agent LLM operational</span>
+    </div>
+    <div class="mt-5 grid sm:grid-cols-4 gap-3 text-sm">
+      <div class="bg-emerald-500/20 rounded-xl p-3 line-through opacity-70"><div class="text-[10px] uppercase tracking-wider text-emerald-200">Phase F · ✓ DONE (V2)</div><div class="font-bold mt-1">F2–F9 + F8b shipped</div></div>
+      <div class="bg-amber-500/20 rounded-xl p-3"><div class="text-[10px] uppercase tracking-wider text-amber-200">Phases G–I · superseded</div><div class="font-bold mt-1">see banner below</div></div>
+      <div class="bg-white/10 rounded-xl p-3"><div class="text-[10px] uppercase tracking-wider text-violet-200">M1 · public surface</div><div class="font-bold mt-1">site + advisor + reactivation</div></div>
+      <div class="bg-white/10 rounded-xl p-3"><div class="text-[10px] uppercase tracking-wider text-violet-200">M3 · first revenue</div><div class="font-bold mt-1">UK Guide · Stripe · Thinkific</div></div>
+    </div>
+  </div>
+</header>
+
+<!-- ★ Status banner — V2.5 supersedes the F-I plan below -->
+<section class="max-w-7xl mx-auto px-6 mt-6">
+  <div class="bg-gradient-to-r from-amber-50 to-emerald-50 border-l-4 border-amber-500 rounded-r-xl p-5 shadow-sm">
+    <div class="flex items-start gap-3">
+      <div class="text-2xl">⚠️</div>
+      <div class="flex-1">
+        <div class="text-xs uppercase tracking-wider text-amber-700 font-bold mb-1">Status update — read before any of the F–I phases below</div>
+        <h3 class="text-lg font-bold mb-2">The F–I roadmap below is superseded as of V2.5.</h3>
+        <p class="text-sm text-slate-700 mb-3">When this plan was written (end of Phase E), the next steps were "selective LLM upgrades, real data, pre-prod gates, going live." Most of <strong>Phase F is now complete</strong> — and went much further than originally scoped — through V2 (F2–F9), Report v.1 hardening, and V2.5 (Compose + per-agent LLM + Brand profile).</p>
+        <p class="text-sm text-slate-700 mb-3"><strong>What's actually next isn't on this page</strong> — it's customer-facing surfaces (M1 in plan-v3): a public Next.js site, the Destination Advisor quiz UI, the 3,000-list reactivation, real social platform posting via Meta Graph or Publer, and Stripe/Cal.com webhook integration. See the new "Phase J · Real launch" section below.</p>
+        <div class="text-xs text-slate-600 grid md:grid-cols-2 gap-2 mt-3">
+          <div class="bg-white border border-emerald-200 rounded p-2"><strong>Already done (was on this plan or close to it):</strong> 16-table schema · 21 plan-v3 agents · 5 n8n workflows · cost cap · prompt versioning · service control · per-agent LLM · brand profile · all 5 workflows runnable</div>
+          <div class="bg-white border border-amber-200 rounded p-2"><strong>Still relevant from this plan:</strong> real intel sources (G), Stripe-test webhook (H1), Cal.com webhook (H2), promote Telegram dry-run to real (I1), Plausible (I2), DataForSEO (I3)</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="max-w-7xl mx-auto px-6 py-8">
+<div class="grid lg:grid-cols-[220px_1fr] gap-8">
+
+<aside class="hidden lg:block">
+  <nav class="toc sticky top-4 space-y-0.5 text-sm">
+    <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2 px-2">Plan</div>
+    <a href="#summary">1 · TL;DR</a>
+    <a href="#delivered">2 · What landed in A→E</a>
+    <a href="#patterns">3 · Patterns to preserve</a>
+    <a href="#suggestions">4 · Improvements</a>
+    <a href="#phase-f">5 · Phase F · Quality</a>
+    <a href="#phase-g">6 · Phase G · Real data</a>
+    <a href="#phase-h">7 · Phase H · Pre-prod</a>
+    <a href="#phase-i">8 · Phase I · Live</a>
+    <a href="#phase-j" class="bg-violet-100 text-violet-700 font-bold">★ Phase J · M1 launch (post-V2.5)</a>
+    <a href="#decisions">9 · Decisions to flag</a>
+    <a href="#progress">10 · Progress tracker</a>
+    <a href="#risks">11 · Risks</a>
+  </nav>
+</aside>
+
+<main class="space-y-12">
+
+<!-- 1 · SUMMARY -->
+<section id="summary" class="anchor">
+  <div class="text-xs font-bold uppercase tracking-wider text-violet-700 mb-1">1 · TL;DR</div>
+  <h2 class="text-2xl font-bold mb-4">Where the project stands and what each phase adds</h2>
+  <div class="bg-white border border-slate-200 rounded-2xl p-5 space-y-3 text-sm">
+    <p><strong>Today (end of Phase E).</strong> The full 21-agent stack runs locally on Cowork. The admin dashboard controls everything from one screen. n8n cron triggers are configured but inactive (toggle on after sanity-checking). Every agent journals to <code class="mono">agent_journal</code>; every intel agent funnels through <code class="mono">paya.py</code> for schema validation. Quality is structural-only — 12/12 test scenarios pass, no real audience yet.</p>
+    <p><strong>The big architectural finding from Phase C.</strong> All 10 added agents shipped as <em>no-LLM Python</em>. Deterministic, fast, idempotent where it matters, $0 incremental cost. The trade-off: prose-quality outputs (Payvand outreach emails, Kherad quality scores, Mehmandar nudges) are template-shaped today. Some need an LLM pass before going live; some don't.</p>
+    <p><strong>What this plan delivers.</strong></p>
+    <ul class="list-disc pl-6 space-y-1 text-slate-700">
+      <li><strong>Phase F</strong> — quality + robustness while staying local. Selective LLM upgrades, idempotency, backups, real auth on the dashboard.</li>
+      <li><strong>Phase G</strong> — replace one intel source with real data; wire one inbound channel to a real sandbox account; document the local→cloud migration.</li>
+      <li><strong>Phase H</strong> — close the pre-prod gates: hard send-real-emails approval, Stripe-test webhook to customers, Cal.com test webhook to consultations.</li>
+      <li><strong>Phase I</strong> — first paid commitments. Promote one dry-run channel (recommend Telegram). Resend for nurture. Plausible. Stripe live. DataForSEO. Total: ~$50/mo to start.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 2 · DELIVERED -->
+<section id="delivered" class="anchor">
+  <div class="text-xs font-bold uppercase tracking-wider text-violet-700 mb-1">2 · Delivered</div>
+  <h2 class="text-2xl font-bold mb-4">What landed in Phases A → E</h2>
+  <p class="text-sm text-slate-600 mb-4">Confirmed against the rxapply-test workspace: 23 agent folders, 5 n8n workflow JSONs, 6 smoke harnesses, 2 dashboards.</p>
+  <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-3" id="deliveredCards"></div>
+</section>
+
+<!-- 3 · PATTERNS -->
+<section id="patterns" class="anchor">
+  <div class="text-xs font-bold uppercase tracking-wider text-violet-700 mb-1">3 · Patterns</div>
+  <h2 class="text-2xl font-bold mb-4">Architectural patterns to preserve as we move toward production</h2>
+  <p class="text-sm text-slate-600 mb-4">These weren't in the original plan. They emerged during Phase C and they're worth keeping.</p>
+  <div class="space-y-3" id="patternsList"></div>
+</section>
+
+<!-- 4 · SUGGESTIONS -->
+<section id="suggestions" class="anchor">
+  <div class="text-xs font-bold uppercase tracking-wider text-violet-700 mb-1">4 · Suggestions</div>
+  <h2 class="text-2xl font-bold mb-4">Things worth adding that weren't in any earlier plan</h2>
+  <div class="space-y-3" id="suggestionsList"></div>
+</section>
+
+<!-- 5 · PHASE F -->
+<section id="phase-f" class="anchor">
+  <div class="text-xs font-bold uppercase tracking-wider text-rose-700 mb-1">5 · Phase F</div>
+  <h2 class="text-2xl font-bold mb-2">Quality + robustness · still local, still $0</h2>
+  <p class="text-sm text-slate-600 mb-4">8 items. ~1–2 days. Closes the gap between "structural correctness" and "founder would actually use this."</p>
+  <div class="space-y-3" id="phaseFList"></div>
+</section>
+
+<!-- 6 · PHASE G -->
+<section id="phase-g" class="anchor">
+  <div class="text-xs font-bold uppercase tracking-wider text-sky-700 mb-1">6 · Phase G</div>
+  <h2 class="text-2xl font-bold mb-2">Real data · prove the system on signals you don't fabricate</h2>
+  <p class="text-sm text-slate-600 mb-4">4 items. ~2–3 days. Picks <strong>one</strong> of each type to graduate from synthetic to real — not all at once. Establishes the migration playbook.</p>
+  <div class="space-y-3" id="phaseGList"></div>
+</section>
+
+<!-- 7 · PHASE H -->
+<section id="phase-h" class="anchor">
+  <div class="text-xs font-bold uppercase tracking-wider text-amber-700 mb-1">7 · Phase H</div>
+  <h2 class="text-2xl font-bold mb-2">Pre-production gates · still $0</h2>
+  <p class="text-sm text-slate-600 mb-4">5 items. ~1–2 days. Things that must be true before a single dollar is spent or a single real recipient gets an email.</p>
+  <div class="space-y-3" id="phaseHList"></div>
+</section>
+
+<!-- 8 · PHASE I -->
+<section id="phase-i" class="anchor">
+  <div class="text-xs font-bold uppercase tracking-wider text-emerald-700 mb-1">8 · Phase I</div>
+  <h2 class="text-2xl font-bold mb-2">Going live · first real spend</h2>
+  <p class="text-sm text-slate-600 mb-4">6 items. ~$50/mo to start, $250–500/mo at full scale (per build-guide). Sequenced so each commitment validates before the next one fires.</p>
+  <div class="space-y-3" id="phaseIList"></div>
+</section>
+
+<!-- ★ NEW · Phase J · the actual next phase as of V2.5 -->
+<section id="phase-j" class="anchor">
+  <div class="text-xs font-bold uppercase tracking-wider text-violet-700 mb-1">★ Phase J · post-V2.5</div>
+  <h2 class="text-2xl font-bold mb-2">M1 launch · the customer-facing half</h2>
+  <p class="text-sm text-slate-600 mb-4">After V2.5 the internal stack is complete. What's missing is everything a customer touches: a public site, the Destination Advisor quiz, real social posting, real payment + booking. Sequenced for fastest path to first paying customer (M3 in plan-v3 = UK Guide launch).</p>
+
+  <div class="space-y-4">
+
+    <div class="bg-white border-2 border-violet-300 rounded-2xl p-5">
+      <div class="flex items-start justify-between mb-2">
+        <div>
+          <div class="text-xs font-bold uppercase tracking-wider text-violet-700">J1 · Public site shell</div>
+          <h3 class="text-lg font-bold">Next.js site, 3 locales (en/fa/ar), RTL aware</h3>
+        </div>
+        <div class="text-right">
+          <div class="pill bg-violet-100 text-violet-700">~3 days</div>
+          <div class="text-xs text-slate-500 mt-1">$0 in dev, ~$0 hosted (Vercel free tier)</div>
+        </div>
+      </div>
+      <p class="text-sm text-slate-700 mb-2">A new <code class="mono">rxapply-web/</code> sibling folder with Next.js App Router. Three routes only at MVP: <code class="mono">/</code> (homepage), <code class="mono">/advisor</code> (the quiz), <code class="mono">/blog</code> (Sepehr articles when they land). next-intl for routing locales; Vazirmatn font for fa/ar; <code class="mono">dir="rtl"</code> wired automatically on locale switch.</p>
+      <p class="text-xs text-slate-500"><strong>Why now:</strong> blocker for everything customer-facing in plan-v3. Without it, no email signups can happen, no quiz can run, no posts can deep-link.</p>
+    </div>
+
+    <div class="bg-white border-2 border-violet-300 rounded-2xl p-5">
+      <div class="flex items-start justify-between mb-2">
+        <div>
+          <div class="text-xs font-bold uppercase tracking-wider text-violet-700">J2 · Destination Advisor quiz UI</div>
+          <h3 class="text-lg font-bold">Wire Rahnama's scoring to a public 15-question form</h3>
+        </div>
+        <div class="text-right">
+          <div class="pill bg-violet-100 text-violet-700">~1 day</div>
+          <div class="text-xs text-slate-500 mt-1">existing Rahnama agent · adds POST /advisor/score route</div>
+        </div>
+      </div>
+      <p class="text-sm text-slate-700 mb-2">15-question form per plan-v3 §02. Submission posts to a new proxy route <code class="mono">POST /advisor/score</code> which spawns Rahnama with the answers, gets back the top-3 destinations + per-dimension scoring, persists a <code class="mono">leads</code> row (email-gated). The agent already exists; this is the missing UI half.</p>
+      <p class="text-xs text-slate-500"><strong>Why now:</strong> primary lead magnet. Plan-v3 §1 calls for "Advisor completions/mo: 50 → 2,500" as a Year-1 KPI. Today it's 0 because there's no UI.</p>
+    </div>
+
+    <div class="bg-white border-2 border-violet-300 rounded-2xl p-5">
+      <div class="flex items-start justify-between mb-2">
+        <div>
+          <div class="text-xs font-bold uppercase tracking-wider text-violet-700">J3 · 3,000-list reactivation</div>
+          <h3 class="text-lg font-bold">One-time bilingual EN+FA campaign · MailerLite or Resend</h3>
+        </div>
+        <div class="text-right">
+          <div class="pill bg-violet-100 text-violet-700">~2 days incl. content</div>
+          <div class="text-xs text-slate-500 mt-1">$10/mo MailerLite + content time</div>
+        </div>
+      </div>
+      <p class="text-sm text-slate-700 mb-2">The 3,000 dormant Iranian-dentist contacts the founder already has. Use Compose to draft the reactivation message; Goyesh has FA-native voice. Drop into MailerLite or Resend, segment by language, send at off-hours Tehran time. <strong>Lowest-cost real audience signal you'll ever get.</strong></p>
+      <p class="text-xs text-slate-500"><strong>Output:</strong> first real engagement_events rows. Bineh starts scoring real leads. Roya's heatmap stops being synthetic.</p>
+    </div>
+
+    <div class="bg-white border-2 border-emerald-300 rounded-2xl p-5">
+      <div class="flex items-start justify-between mb-2">
+        <div>
+          <div class="text-xs font-bold uppercase tracking-wider text-emerald-700">J4 · Promote ONE channel from dry-run to live</div>
+          <h3 class="text-lg font-bold">Telegram first (Bot API is the easiest social to integrate)</h3>
+        </div>
+        <div class="text-right">
+          <div class="pill bg-emerald-100 text-emerald-700">~0.5 day</div>
+          <div class="text-xs text-slate-500 mt-1">$0 — Telegram Bot API is free</div>
+        </div>
+      </div>
+      <p class="text-sm text-slate-700 mb-2">Schema is already forecast-ready (<code class="mono">posted_url, posting_provider, posted_at</code> columns added in V2.5). Replace the <code class="mono">cross-post DRY_RUN</code> step's "log" with a real <code class="mono">sendMessage</code> call to the Telegram Bot API. One file change in <code class="mono">agents/cross-post/dryrun.py</code>. Caption + image URL → posted to your channel.</p>
+      <p class="text-xs text-slate-500"><strong>Why Telegram first:</strong> simplest auth (bot token), no Meta App Review queue, ~50% of plan-v3's FA audience is on Telegram, low downside if it goes wrong (no algorithmic distribution to worry about).</p>
+    </div>
+
+    <div class="bg-white border-2 border-emerald-300 rounded-2xl p-5">
+      <div class="flex items-start justify-between mb-2">
+        <div>
+          <div class="text-xs font-bold uppercase tracking-wider text-emerald-700">J5 · Stripe-test + Cal.com webhooks</div>
+          <h3 class="text-lg font-bold">Edge functions populating customers + consultations</h3>
+        </div>
+        <div class="text-right">
+          <div class="pill bg-emerald-100 text-emerald-700">~1 day each</div>
+          <div class="text-xs text-slate-500 mt-1">test mode = $0 · production keys later</div>
+        </div>
+      </div>
+      <p class="text-sm text-slate-700 mb-2">Two Supabase Edge Functions. <code class="mono">/functions/stripe-webhook</code> with signature verification → upserts <code class="mono">customers</code> on first paid event, fires Resend confirmation. <code class="mono">/functions/cal-webhook</code> on Cal.com booking → inserts <code class="mono">consultations</code>, syncs to Mehmandar's pipeline.</p>
+      <p class="text-xs text-slate-500"><strong>Pre-req for J6:</strong> can't take payment without J5.</p>
+    </div>
+
+    <div class="bg-white border-2 border-emerald-300 rounded-2xl p-5">
+      <div class="flex items-start justify-between mb-2">
+        <div>
+          <div class="text-xs font-bold uppercase tracking-wider text-emerald-700">J6 · UK Guide launch (M3 in plan-v3)</div>
+          <h3 class="text-lg font-bold">First paid product · break-even month</h3>
+        </div>
+        <div class="text-right">
+          <div class="pill bg-emerald-100 text-emerald-700">~2 weeks of content + setup</div>
+          <div class="text-xs text-slate-500 mt-1">$79 launch price · ~10 sales goal in first month</div>
+        </div>
+      </div>
+      <p class="text-sm text-slate-700 mb-2">The first L3 product in plan-v3. Sepehr writes the master article (deep mode now exists in Pipelines), Goyesh translates to FA, Avang fans out across all platforms. Thinkific course holds the actual content, Stripe takes the payment, Resend confirms enrollment. Compose handles the launch IG post in 3 languages.</p>
+      <p class="text-xs text-slate-500"><strong>Why this matters:</strong> M3 in plan-v3 is the break-even month. Every internal feature we've built is in service of this moment. After J6, the rest is iteration.</p>
+    </div>
+
+  </div>
+
+  <div class="mt-5 bg-blue-50 border-l-4 border-blue-500 rounded-r p-4 text-sm">
+    <strong>Sequencing.</strong> J1 + J2 unblock everything. J3 in parallel (it's content work, doesn't depend on J1/J2 being live). J4 small enough to slip in any week. J5 is a 2-day sprint when you're a week from J6. J6 is the goal.
+    <br><br>
+    <strong>Phases F–I above are partially superseded:</strong> F is shipped (V2). G's "real intel sources" still relevant — but lower priority than J1–J3 for revenue. H's gates and I's social platforms map onto J5 + J4. Read F–I for the historical thinking, but plan from Phase J.
+  </div>
+</section>
+
+<!-- 9 · DECISIONS -->
+<section id="decisions" class="anchor">
+  <div class="text-xs font-bold uppercase tracking-wider text-violet-700 mb-1">9 · Decisions</div>
+  <h2 class="text-2xl font-bold mb-4">Calls to make before Phase G</h2>
+  <p class="text-sm text-slate-600 mb-4">Each of these is a small fork. Picking now lets the rest of the plan flow without revisiting.</p>
+  <div class="space-y-3" id="decisionsList"></div>
+</section>
+
+<!-- 10 · PROGRESS -->
+<section id="progress" class="anchor">
+  <div class="text-xs font-bold uppercase tracking-wider text-violet-700 mb-1">10 · Progress tracker</div>
+  <h2 class="text-2xl font-bold mb-4">Tick items as you go · saved in browser</h2>
+  <div class="bg-white border border-slate-200 rounded-2xl p-5">
+    <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+      <div>
+        <div class="text-[10px] uppercase tracking-wider text-slate-500">Overall progress (Phase F→I, 23 items)</div>
+        <div class="font-mono text-2xl font-black"><span id="doneCount">0</span> / <span id="totalCount">0</span></div>
+      </div>
+      <button id="resetProg" class="text-xs bg-rose-100 hover:bg-rose-200 text-rose-700 px-3 py-1.5 rounded font-semibold">Reset all ticks</button>
+    </div>
+    <div class="h-3 bg-slate-100 rounded-full overflow-hidden mb-2"><div id="progBar" class="h-full bg-gradient-to-r from-rose-500 via-sky-500 via-amber-500 to-emerald-500 transition-all duration-500" style="width:0%"></div></div>
+    <div class="grid grid-cols-4 gap-1 mb-4 text-[10px] font-mono text-slate-500">
+      <div>F · <span id="fDone">0</span>/8</div>
+      <div>G · <span id="gDone">0</span>/4</div>
+      <div>H · <span id="hDone">0</span>/5</div>
+      <div>I · <span id="iDone">0</span>/6</div>
+    </div>
+    <div id="todoList" class="divide-y divide-slate-100"></div>
+  </div>
+</section>
+
+<!-- 11 · RISKS -->
+<section id="risks" class="anchor">
+  <div class="text-xs font-bold uppercase tracking-wider text-violet-700 mb-1">11 · Risks</div>
+  <h2 class="text-2xl font-bold mb-4">What could go wrong · how we mitigate</h2>
+  <div class="grid md:grid-cols-2 gap-3" id="risksList"></div>
+</section>
+
+<footer class="pt-12 pb-6 text-xs text-slate-400">
+  Plan v2 (post-Phase-E) for <code class="mono">rxapply-test/</code>. Open alongside <a href="admin-dashboard.html" class="underline">admin-dashboard.html</a> + <a href="architecture.html" class="underline">architecture.html</a>. State persisted at <code class="mono">localStorage["rxapply-next-steps-v2"]</code>.
+</footer>
+
+</main>
+</div>
+</div>
+
+<script>
+// ============================================================
+// DATA
+// ============================================================
+const DELIVERED = [
+  { phase:'A', label:'agent_journal table + migration', detail:'17th table; the only sanctioned writer is Zirak. Applied via apply-migration-agent-journal.bat (no db reset needed).' },
+  { phase:'A', label:'cowork-proxy expanded to 6 routes', detail:'/health, /run-agent, /run-agents-parallel, /run-helper, /prompts/:agent (GET+PUT), /agents. Now load-bearing for the dashboard and n8n.' },
+  { phase:'B', label:'admin-dashboard.html', detail:'Approval queue · journal feed · trigger panel · prompts editor · cost widget · agent health strip (21 dots). Reads via Supabase REST + the proxy.' },
+  { phase:'C', label:'Zirak — agent_journal writer', detail:'No-LLM Python. Subcommands: log, start/finish, tail, for-agent, failures. Every other agent shells out to it.' },
+  { phase:'C', label:'Paya — intel_snapshots writer + schema validator', detail:'No-LLM. Per-kind schemas centralized; intel agents drift without breaking Pooya.' },
+  { phase:'C', label:'Roya — market_heatmap', detail:'No-LLM. Samples leads.country_of_interest + customers.target_destination, weights customers 3× leads.' },
+  { phase:'C', label:'Shahed — competitor_diff', detail:'No-LLM. Diffs competitor_fixtures.json against last snapshot per competitor.' },
+  { phase:'C', label:'Dadbeh — regulatory_change', detail:'No-LLM. Built-in seed of 6 plausible 2026 events; window [today-7d, today+90d]; dedupes against last 14d.' },
+  { phase:'C', label:'Nasim — trend_spike', detail:'No-LLM. Tokenises engagement_events.payload->\'text\', last-3d vs 14d baseline, ≥2× ratio + ≥3 mentions.' },
+  { phase:'C', label:'Ramin — keyword_candidates', detail:'No-LLM. Reads last-7d intel from the four agents above, cross-products destinations × regulatory hooks × trend topics.' },
+  { phase:'C', label:'Kherad — quality scorer (G2 gate)', detail:'No-LLM. 4 rules: citation density, banned-word filler, keyword coverage, factual anchoring. ≥0.7 → g2_ready, below → needs_refine + N corrections rows.' },
+  { phase:'C', label:'Payvand — partnership outreach drafter', detail:'No-LLM. Templates per type × country. Drafts as JSONB awaiting human review. Never sends.' },
+  { phase:'C', label:'Mehmandar — guest pipeline curator', detail:'No-LLM. Per-stage SLAs, weekly digest, per-overdue nudges to MailHog.' },
+  { phase:'D', label:'5 n8n workflows imported', detail:'cron-bidar-nightly · cron-ravi-monday · cron-intel-daily · cron-cross-post-5min · webhook-lead-form. All call /run-helper via host.docker.internal:7777.' },
+  { phase:'D', label:'import-n8n-workflows.bat', detail:'docker-cp + n8n CLI import; idempotent up to existing-workflow detection.' },
+  { phase:'E', label:'smoke-everything.bat (30+ checks)', detail:'Services HTTP 200 · proxy routes return valid JSON · ≥17 tables · agent_journal exists · all 21 SKILL.md present · all 5 workflows valid.' },
+  { phase:'E', label:'5 more smoke harnesses', detail:'smoke-phase-c · smoke-intel-pipeline · smoke-prompts-put · smoke-proxy-routes · smoke-webhook-lead-form. Each validates a specific surface.' },
+];
+
+const PATTERNS = [
+  {
+    title: 'Two foundation agents (Zirak + Paya) own the data layer',
+    body: 'Zirak is the only sanctioned writer for agent_journal. Paya is the only sanctioned writer for intel_snapshots and centralizes per-kind schema validation. Every intel agent shells out to paya for the insert and zirak for the journal entry. <strong>Preserve this.</strong> When we add new write-heavy concerns (e.g. a content_versions table), follow the same pattern: one helper owns the writes, all callers go through it.',
+  },
+  {
+    title: 'No-LLM by default; LLM only when prose quality matters',
+    body: 'All 10 Phase C agents shipped as deterministic Python. This is faster, cheaper, idempotent, and easy to test. The cost: prose-shaped outputs (Payvand outreach emails, Kherad scoring rationale) are template-driven. Phase F adds selective LLM passes only where the founder will read the output. <strong>Default stays no-LLM</strong> — LLM is opt-in.',
+  },
+  {
+    title: 'n8n is for triggers, never for thinking',
+    body: 'Each of the 5 workflows is a thin <em>Trigger → POST /run-helper</em> chain. Logic lives in Python. This makes "what does the system do" answerable from one folder (agents/) instead of clicking around 100 n8n nodes. <strong>Resist the urge</strong> to put per-workflow business logic in n8n. If a step is too complex for "POST to a helper," add a helper command instead.',
+  },
+  {
+    title: 'Smoke harnesses ≠ unit tests; structural validation is enough at this stage',
+    body: 'smoke-everything checks 30+ structural invariants (services up, files present, tables exist, JSON valid). It doesn\'t assert output quality. That\'s correct for now — quality is the founder\'s job at the G1/G2/G3 gates. <strong>Keep this discipline</strong>: smoke harnesses prove the wiring works; gates prove the output is good.',
+  },
+  {
+    title: 'The proxy is the integration surface',
+    body: '6 routes — /health, /run-agent, /run-agents-parallel, /run-helper, /prompts/:agent, /agents. Anything new that wants to touch the agents goes through these. <strong>Do not</strong> let the dashboard or n8n write its own DB code; everything routes through the helper layer via the proxy.',
+  },
+];
+
+const SUGGESTIONS = [
+  {
+    title: 'Add a global "kill switch" row',
+    detail: 'Single-row table <code class="mono">system_state</code> with column <code class="mono">paused boolean</code>. Every helper checks it at start; if true, exits 0 with "system paused". One big red button on the admin dashboard flips it. Recoverable, observable, instant.',
+  },
+  {
+    title: 'Add <code class="mono">--preview</code> uniformly across all helpers',
+    detail: 'Some helpers already support it (Roya); make it universal. Print exactly what would persist without persisting. Wire the dashboard\'s trigger panel "Preview only" checkbox to pass <code class="mono">--preview</code>.',
+  },
+  {
+    title: 'Replace 6 individual smoke .bats with one composable runner',
+    detail: '<code class="mono">smoke.bat &lt;suite&gt;</code> with subcommands <code class="mono">all</code>, <code class="mono">phase-c</code>, <code class="mono">intel</code>, <code class="mono">proxy</code>, <code class="mono">prompts</code>, <code class="mono">webhook</code>. Internally calls the same logic but presents one entry point + one consistent PASS/FAIL summary line.',
+  },
+  {
+    title: 'Add a "Replay" button on the journal feed',
+    detail: 'Each agent_journal row has agent name + the row id it touched. Replay = re-run that agent against the same input. Useful for prompt iteration: edit SKILL.md, click Replay, see the new output side-by-side with the old.',
+  },
+  {
+    title: 'Add a "Promote channel" wizard',
+    detail: 'Single guided flow on the admin dashboard: pick a dry-run channel (telegram/ig/fb/linkedin/youtube), confirm credentials are present, run a "send to a private/test target only" smoke, flip the channel status to live. The plan from build-guide already has the OAuth setup; this surfaces it in one place.',
+  },
+];
+
+const PHASE_F = [
+  { id:'F1', label:'LLM-driven quality pass on Kherad (currently structural only)',
+    detail:'Today Kherad scores 4 rules deterministically. Add a 5th rule: "voice consistency with brand". This one needs Claude. Wire a /run-agent fallback inside kherad.py: if voice_score is the lowest of the 5 rules, ask Claude (sonnet) to read the asset and re-score voice 0–1. Store the LLM verdict in corrections.notes. Don\'t replace the deterministic 4 — extend.', model:'sonnet (only when voice fails)', est:'~3 hr', deps:'cowork-proxy /run-agent already exists' },
+  { id:'F2', label:'LLM-driven outreach drafts on Payvand',
+    detail:'Today Payvand emits a template-shaped email. Real outreach to RCICs/exam-prep/universities needs a 120-word personalized draft. Wire payvand.py to call /run-agent (sonnet) with target context + a draft brief. Store under partnerships.outreach_drafts as before. Status flips targeted → draft_ready unchanged.', model:'sonnet', est:'~2 hr', deps:'partnerships table seed (~10 real targets to test against)' },
+  { id:'F3', label:'Cron sender for nurture_schedule',
+    detail:'Rahbar populates rows with send_at; nothing pulls from them. Build a 50-line Python helper <code class="mono">agents/courier/courier.py send-due</code> that: SELECT id, html, subject, lead_id FROM nurture_schedule WHERE status=\'queued\' AND send_at &lt;= NOW() ORDER BY send_at LIMIT 20; SMTP-send each to MailHog; UPDATE status=\'sent\'. Add cron-courier-15min.json n8n workflow. journal each send via Zirak.', model:'no-LLM', est:'~2 hr', deps:'MailHog (already up)' },
+  { id:'F4', label:'Approval gate UI for Payvand/Mehmandar drafts',
+    detail:'admin-dashboard already has an approval queue panel. Extend it: drafts in partnerships.outreach_drafts (status=pending_human_review) and any Mehmandar nudge with confidence&lt;0.7 surface as queue rows. Approve flips status to ready_to_send (still goes to MailHog only — H2 adds the real-send gate).', model:'no-LLM', est:'~3 hr', deps:'F2 (Payvand drafts) for content' },
+  { id:'F5', label:'Idempotency hardening',
+    detail:'Pooya/Sepehr/Goyesh/Avang re-runs create dupes. Add content-hash-based dedupe: each helper computes <code class="mono">sha256(input)</code>, stores in a new <code class="mono">content_hash</code> column, ON CONFLICT DO NOTHING. Bidar already uses ON CONFLICT (agent, date) DO UPDATE — extend to all writers. Migration: 20260501000000_content_hash.sql.', model:'no-LLM', est:'~3 hr', deps:'one new SQL migration' },
+  { id:'F6', label:'Replay button on journal feed',
+    detail:'Adds <code class="mono">action_command + action_input_json</code> columns to agent_journal so a row knows how to re-run itself. Dashboard journal renders a Replay button per row → POST /run-helper with the captured args. Saves prompt-iteration time enormously.', model:'no-LLM', est:'~2 hr', deps:'small zirak.py extension + one migration' },
+  { id:'F7', label:'Daily pg_dump backup',
+    detail:'<code class="mono">backup-pg.bat</code> runs pg_dump inside the container, writes to <code class="mono">%TEMP%\\rxapply-backups\\YYYY-MM-DD.sql.gz</code>, retains last 7. New cron-backup-daily.json n8n workflow at 01:00. Validates with pg_restore --list. Preserves test state across <code class="mono">supabase db reset</code> mishaps.', model:'no-LLM', est:'~1 hr', deps:'none' },
+  { id:'F8', label:'Real auth on admin-dashboard',
+    detail:'Today the SUPABASE_SECRET_KEY is embedded in the dashboard JS. For local-only that\'s fine; for OneDrive-synced files it\'s a leak risk. Wrap the dashboard in a local password gate via the proxy: <code class="mono">POST /auth/login</code> with a salted hash; sets a session cookie; the dashboard\'s fetch calls include it; proxy validates before forwarding to Supabase. ~80 lines of code.', model:'no-LLM', est:'~3 hr', deps:'two new proxy routes (/auth/login, /auth/logout)' },
+];
+
+const PHASE_G = [
+  { id:'G1', label:'Pick ONE intel source to make real — recommend Dadbeh',
+    detail:'Dadbeh\'s built-in seed of 6 events is the biggest credibility gap. Real source: NDEB/CDA/AHPRA/GDC RSS feeds + a few selective scrapes. <strong>Cost: $0</strong> (RSS is free). New helper command <code class="mono">dadbeh fetch-real</code>; falls back to seed if a feed fetch fails. Keeps the existing <code class="mono">dadbeh fetch</code> for offline testing. Document the swap pattern for Roya/Shahed/Nasim/Ramin.', est:'~6 hr', cost:'$0', why:'Easiest of the 5 to make real; most credibility gain.' },
+  { id:'G2', label:'Real test lead-form on a public URL',
+    detail:'Static HTML form on Cloudflare Pages free tier. POST to a public-facing endpoint that proxies to <code class="mono">localhost:5678/webhook/lead-form</code> via ngrok or Cloudflare Tunnel (both free). One real friend submits → Rahbar enrolls → 5 emails land in MailHog. Validates the n8n webhook chain on a real network. Tunnel has to be running while testing; not always-on.', est:'~3 hr', cost:'$0', why:'Validates the lead-ingress chain end-to-end without prod commitments.' },
+  { id:'G3', label:'Sandbox IG account → Mehrban',
+    detail:'Meta has free dev accounts. Create one IG account, register as a Meta App test user, hit it with one real DM, prove Mehrban can read it via the Graph API + draft a reply. Don\'t auto-send yet. <strong>Output goes to admin dashboard\'s approval queue</strong>, founder reviews, founder copies the reply by hand. This is the "real inbound + dry outbound" pattern.', est:'~4 hr', cost:'$0', why:'Validates Mehrban on real DM shape and language detection without putting a real reply on a real public account.' },
+  { id:'G4', label:'Document local→Supabase Cloud migration',
+    detail:'Not actually migrating yet — just writing the runbook. Capture: which env vars change, what RLS becomes load-bearing, which secrets move where, the data-export step (<code class="mono">supabase db dump</code>), the import step. Test on a free-tier cloud project (no agents pointed at it yet). Means production go-live becomes a 30-min env swap, not a 2-day discovery.', est:'~3 hr', cost:'$0', why:'De-risks the biggest infra step on the path to live.' },
+];
+
+const PHASE_H = [
+  { id:'H1', label:'Replace embedded secret key with auth cookie + RLS-aware queries',
+    detail:'Today\'s admin-dashboard uses sb_secret_… directly — fine for localhost, fatal for any deployed surface. Move to: dashboard requests a Supabase auth session (founder login), Supabase issues a JWT, RLS policies on leads/customers/consultations check <code class="mono">auth.uid() = founder_id</code>. RLS is already enabled on those 3 tables; the JWT just changes which key is used to query.', est:'~4 hr', cost:'$0' },
+  { id:'H2', label:'Hard send-real-emails approval gate',
+    detail:'New table <code class="mono">send_authorization</code> with one row per (channel, day): inserted by founder click, expires 24h. <strong>Every</strong> helper that wants to SMTP-send to a non-MailHog target checks for an active row first; absence = exits with "no authorization for today". Cannot be flipped from outside the dashboard. Forces a deliberate human action per send-day.', est:'~2 hr', cost:'$0' },
+  { id:'H3', label:'Stripe test webhook → customers table',
+    detail:'Stripe CLI <code class="mono">stripe listen --forward-to localhost:5678/webhook/stripe-test</code>. New n8n webhook workflow + new helper <code class="mono">stripe-listener.py upsert-from-event</code>. Test charge fires; customers row appears with stripe_customer_id, ltv_usd, target_destination from metadata. <strong>Test mode only</strong> — no real cards yet.', est:'~3 hr', cost:'$0' },
+  { id:'H4', label:'Cal.com test webhook → consultations table',
+    detail:'Cal.com cloud free tier or self-host. New webhook workflow + helper. Booking → consultations row populates. Test by booking a fake slot.', est:'~2 hr', cost:'$0' },
+  { id:'H5', label:'Final smoke harness for production-promoted parts',
+    detail:'<code class="mono">smoke-prod-promoted.bat</code> — for each promoted part (real Dadbeh feed, real lead form, real Mehrban DM, Stripe-test webhook, Cal.com webhook): assert end-to-end one trip, expected row in expected table. Run before flipping to live.', est:'~2 hr', cost:'$0' },
+];
+
+const PHASE_I = [
+  { id:'I1', label:'Promote ONE dry-run channel — recommend Telegram',
+    detail:'Cheapest setup, narrowest blast radius. Create one private Telegram channel; bot has Admin rights only there. New helper <code class="mono">cross-post send-telegram</code> replaces the DRY_RUN logger for telegram-tagged scheduled_posts. Posts go live; published_url stored. <strong>Verify with founder approval per post for the first 7 days</strong>, then drop to per-batch approval.', est:'~3 hr', cost:'$0', why:'Lowest risk first real channel.' },
+  { id:'I2', label:'Resend account · MailHog → real inboxes',
+    detail:'Sign up for Resend free tier (3k/mo). Update <code class="mono">.env</code>: <code class="mono">SMTP_HOST=smtp.resend.com</code>, add SMTP_USER + SMTP_PASS. <strong>Don\'t flip yet</strong> — first send goes to founder\'s own email only, gated by the Phase-H send_authorization row. After 1 week of clean sends, expand to 1 real lead.', est:'~2 hr', cost:'$0/$20 once over free tier' },
+  { id:'I3', label:'Plausible · public-site analytics',
+    detail:'Sign up ($9/mo). Add the script tag to the public site (the future Cloudflare Pages deploy). Roya graduates from "leads + customers in DB only" to "Plausible session counts + paths". Wire Roya helper to query Plausible REST API.', est:'~1 hr', cost:'$9/mo' },
+  { id:'I4', label:'Stripe live mode',
+    detail:'Identity verification on Stripe (free, takes 1–2 days for review). Swap test → live keys in <code class="mono">.env</code>. <strong>Keep Stripe test webhook hooked too</strong> — useful for ongoing development. First real charge requires founder to manually create the first Payment Link for the UK Guide $79 — no Buy buttons on the public site yet.', est:'~2 hr Stripe + waiting 1–2 days', cost:'2.9% + 30¢ per charge' },
+  { id:'I5', label:'First real charge · UK Guide $79',
+    detail:'Stripe Payment Link, share with one friend / one warm lead. Charge succeeds → webhook → customers row → Rahbar enrolls in post-purchase nurture. End-to-end first revenue. Time from $0 → $79 is the most important single metric in the whole project.', est:'30 min once Stripe is verified', cost:'+$79 (incoming, technically)' },
+  { id:'I6', label:'DataForSEO · Ramin gets real data',
+    detail:'Sign up ($20/mo cap recommended). Update Ramin: replace heuristic volume with real <code class="mono">/serp/google/organic/live</code> calls. Cache responses in Postgres (we don\'t have a cache table — add <code class="mono">api_cache</code>). Cap the budget hard at $5/run.', est:'~3 hr', cost:'$20/mo cap' },
+];
+
+const DECISIONS = [
+  {
+    title: 'Which dry-run channel goes live first?',
+    options: [
+      { label: 'Telegram', pros: 'Free, private channel = controlled audience, instant feedback', cons: 'Smallest reach' },
+      { label: 'Instagram', pros: 'Largest target audience for dental-migration', cons: 'Meta App verification + business account setup' },
+      { label: 'YouTube', pros: 'Best for SEO long-term', cons: 'Need actual videos first; Avang only does scripts' },
+    ],
+    recommendation: 'Telegram. Smallest blast radius for the first real send. Founder can monitor and pull the plug fast.'
+  },
+  {
+    title: 'Which intel source goes real first?',
+    options: [
+      { label: 'Dadbeh — regulatory RSS', pros: 'Free; biggest credibility gap; clear truth source', cons: 'RSS feeds drift; need parsing per regulator' },
+      { label: 'Roya — Plausible session counts', pros: 'Real signal of audience interest', cons: 'Requires public site live first (chicken-egg)' },
+      { label: 'Nasim — real Telegram/Reddit', pros: 'Shows trending topics audience cares about', cons: 'Reddit API + Telegram channel scraping; rate limits' },
+    ],
+    recommendation: 'Dadbeh. Free RSS, no chicken-egg, biggest founder-confidence boost. Sets the swap pattern for the others.'
+  },
+  {
+    title: 'Resend free tier or paid from day 1?',
+    options: [
+      { label: 'Free 3k/mo', pros: 'No spend until validated', cons: '100/day cap can bite during reactivation campaign' },
+      { label: 'Paid $20/mo from day 1', pros: 'Buys peace of mind', cons: 'Wasted $40 if validation fails month 1' },
+    ],
+    recommendation: 'Free tier. Keep the fail-cheap discipline that got us this far. Upgrade only after one full week of clean sends to founder + 1 real lead.'
+  },
+  {
+    title: 'Move workspace out of OneDrive now or later?',
+    options: [
+      { label: 'Now — to C:\\dev\\rxapply-test', pros: 'No more file-locking surprises during writes', cons: '15-min move + path updates everywhere' },
+      { label: 'Later — only if it bites', pros: 'No work', cons: 'OneDrive lock corruptions are random and expensive' },
+    ],
+    recommendation: 'Now. Phases F–I add cron writes, sender writes, backup writes. Each is a chance for OneDrive to grab a lock at the wrong moment. Cheap to move once.'
+  },
+];
+
+const RISKS = [
+  { r:'Adding LLM calls to Phase C agents (F1, F2) reintroduces nondeterminism', m:'Keep the no-LLM path as fallback; LLM only fires on specific conditions (Kherad voice fails, Payvand has a real target). Determine "does the no-LLM path produce equivalent output for our seed test cases?" before flipping.' },
+  { r:'Embedding a public tunnel (G2) leaks the local stack', m:'ngrok/Cloudflare Tunnel both have request-allowlist + basic-auth options. Use both. Tear down the tunnel after each test session — never leave running.' },
+  { r:'Real auth (F8 + H1) breaks the existing dashboard JS', m:'Implement F8 first (local password) so the migration to H1 (Supabase auth) is a shape change, not a structure change. Keep the secret-key path behind a "dev mode" flag for one week.' },
+  { r:'Idempotency hardening (F5) requires a content_hash column we don\'t have', m:'It\'s one nullable column with a UNIQUE constraint per relevant table. Roll out one table at a time; if a hash collision happens, just don\'t insert. Worst case = silent skip, never corruption.' },
+  { r:'Stripe identity verification (I4) takes longer than expected', m:'Start the application on day 1 of Phase H. By the time the rest of H is done, Stripe has cleared. Don\'t wait until I4 to start.' },
+  { r:'Phase F LLM upgrades inflate the Anthropic spend on Claude\'s side', m:'Cowork is paid; LLM calls during test phase go through Cowork at $0 incremental. Move to API-key Anthropic only at Phase H/I when n8n needs to autonomously trigger Sonnet without a Cowork chat. Budget: $80/mo for first 3 months.' },
+  { r:'Telegram-first promotion (I1) misses the larger IG audience', m:'Telegram is the FIRST channel, not the only one. After 14 days of clean Telegram sends, promote IG. Sequencing limits blast radius without limiting eventual reach.' },
+  { r:'OneDrive corrupts a backup mid-write (F7)', m:'Backups go to %TEMP%, not the workspace. Already mitigated by the gotcha pattern. Re-confirm in F7 implementation.' },
+];
+
+// ============================================================
+// RENDER
+// ============================================================
+
+const PHASE_COLOR = {
+  A:['#a855f7','#ede9fe'], B:['#f43f5e','#fee2e2'], C:['#10b981','#d1fae5'],
+  D:['#3b82f6','#dbeafe'], E:['#f59e0b','#fef3c7'],
+  F:['#f43f5e','#fee2e2'], G:['#0ea5e9','#e0f2fe'], H:['#f59e0b','#fef3c7'], I:['#10b981','#d1fae5'],
+};
+
+function renderDelivered() {
+  document.getElementById('deliveredCards').innerHTML = DELIVERED.map(d => {
+    const c = PHASE_COLOR[d.phase] || ['#475569','#f1f5f9'];
+    return `<div class="card bg-white border rounded-lg p-3" style="border-color:${c[0]}40">
+      <div class="flex items-center gap-2 mb-1">
+        <span class="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded" style="background:${c[1]};color:${c[0]}">Phase ${d.phase}</span>
+      </div>
+      <div class="text-sm font-bold mb-1">${d.label}</div>
+      <div class="text-xs text-slate-600">${d.detail}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderPatterns() {
+  document.getElementById('patternsList').innerHTML = PATTERNS.map((p,i) => `
+    <div class="card bg-white border-l-4 border-violet-400 border-t border-r border-b rounded-r-lg p-4">
+      <div class="flex items-baseline gap-2 mb-1"><span class="font-mono text-[10px] bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded">P${i+1}</span><strong class="text-base">${p.title}</strong></div>
+      <p class="text-sm text-slate-700 mt-1">${p.body}</p>
+    </div>
+  `).join('');
+}
+
+function renderSuggestions() {
+  document.getElementById('suggestionsList').innerHTML = SUGGESTIONS.map((s,i) => `
+    <div class="card bg-white border rounded-lg p-4">
+      <div class="flex items-baseline gap-2 mb-1"><span class="font-mono text-[10px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded">S${i+1}</span><strong class="text-base">${s.title}</strong></div>
+      <p class="text-sm text-slate-700 mt-1">${s.detail}</p>
+    </div>
+  `).join('');
+}
+
+function renderPhase(items, listId, phase) {
+  const c = PHASE_COLOR[phase];
+  document.getElementById(listId).innerHTML = items.map(it => `
+    <details class="card bg-white border rounded-lg p-4" style="border-color:${c[0]}40">
+      <summary class="font-semibold flex items-baseline gap-2 flex-wrap">
+        <span class="font-mono text-[10px] px-1.5 py-0.5 rounded font-bold" style="background:${c[1]};color:${c[0]}">${it.id}</span>
+        <span class="flex-1">${it.label}</span>
+        ${it.model ? `<span class="pill" style="background:${c[1]};color:${c[0]}">${it.model}</span>` : ''}
+        ${it.est ? `<span class="text-[10px] mono text-slate-500">${it.est}</span>` : ''}
+      </summary>
+      <div class="mt-3 text-sm text-slate-700">
+        <p>${it.detail}</p>
+        ${it.deps ? `<div class="mt-2 text-xs"><strong>Depends on:</strong> ${it.deps}</div>` : ''}
+        ${it.cost ? `<div class="mt-1 text-xs"><strong>Cost:</strong> ${it.cost}</div>` : ''}
+        ${it.why ? `<div class="mt-1 text-xs"><strong>Why:</strong> ${it.why}</div>` : ''}
+      </div>
+    </details>
+  `).join('');
+}
+
+function renderDecisions() {
+  document.getElementById('decisionsList').innerHTML = DECISIONS.map((d,i) => `
+    <details class="card bg-white border rounded-lg p-4">
+      <summary class="font-semibold flex items-baseline gap-2"><span class="font-mono text-[10px] bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded">D${i+1}</span><span>${d.title}</span></summary>
+      <div class="mt-3 space-y-2 text-sm">
+        ${d.options.map(o => `<div class="bg-slate-50 rounded p-3"><strong>${o.label}</strong><div class="text-xs mt-1"><span class="text-emerald-700">+ ${o.pros}</span></div><div class="text-xs"><span class="text-rose-700">− ${o.cons}</span></div></div>`).join('')}
+        <div class="bg-amber-50 border-l-4 border-amber-500 rounded-r p-3 text-sm"><strong>Recommendation:</strong> ${d.recommendation}</div>
+      </div>
+    </details>
+  `).join('');
+}
+
+function renderRisks() {
+  document.getElementById('risksList').innerHTML = RISKS.map((r,i) => `
+    <div class="card bg-white border-l-4 border-amber-400 border-t border-r border-b rounded-r-lg p-4">
+      <div class="text-xs font-bold uppercase tracking-wider text-amber-700 mb-1">Risk ${i+1}</div>
+      <div class="text-sm font-semibold mb-1">${r.r}</div>
+      <div class="text-xs text-slate-600"><strong>Mitigation:</strong> ${r.m}</div>
+    </div>
+  `).join('');
+}
+
+// Progress tracker
+const STATE_KEY = 'rxapply-next-steps-v2';
+const ALL_TODOS = [
+  ...PHASE_F.map(x=>({...x,phase:'F'})),
+  ...PHASE_G.map(x=>({...x,phase:'G'})),
+  ...PHASE_H.map(x=>({...x,phase:'H'})),
+  ...PHASE_I.map(x=>({...x,phase:'I'})),
+];
+
+function loadState(){ try{return JSON.parse(localStorage.getItem(STATE_KEY)||'{}')}catch{return{}} }
+function saveState(s){ localStorage.setItem(STATE_KEY, JSON.stringify(s)); }
+
+function renderTodos() {
+  const state = loadState();
+  let phase = '', html = '';
+  let total = ALL_TODOS.length, done = 0;
+  let perPhase = {F:0,G:0,H:0,I:0};
+  ALL_TODOS.forEach(t => {
+    if (t.phase !== phase) {
+      phase = t.phase;
+      const c = PHASE_COLOR[phase];
+      const phaseLabels = {F:'F · Quality + robustness',G:'G · Real data',H:'H · Pre-prod gates',I:'I · Going live'};
+      html += `<div class="text-[11px] font-bold uppercase tracking-wider pt-3 pb-1" style="color:${c[0]}">${phaseLabels[phase]}</div>`;
+    }
+    const isDone = !!state[t.id];
+    if (isDone) { done++; perPhase[t.phase]++; }
+    html += `<label class="todo-row ${isDone?'done':''} flex items-center gap-3 px-1 py-2 rounded cursor-pointer">
+      <input type="checkbox" data-id="${t.id}" ${isDone?'checked':''} class="w-4 h-4 accent-violet-600">
+      <span class="font-mono text-[10px] w-8 text-slate-500">${t.id}</span>
+      <span class="label text-sm flex-1">${t.label}</span>
+      <span class="meta text-[10px] mono text-slate-400">${t.est||''}</span>
+    </label>`;
+  });
+  document.getElementById('todoList').innerHTML = html;
+  document.getElementById('doneCount').textContent = done;
+  document.getElementById('totalCount').textContent = total;
+  document.getElementById('progBar').style.width = ((done/total)*100)+'%';
+  document.getElementById('fDone').textContent = perPhase.F;
+  document.getElementById('gDone').textContent = perPhase.G;
+  document.getElementById('hDone').textContent = perPhase.H;
+  document.getElementById('iDone').textContent = perPhase.I;
+}
+
+document.addEventListener('change', e => {
+  if (e.target.matches('#todoList input[type=checkbox]')) {
+    const state = loadState();
+    state[e.target.dataset.id] = e.target.checked;
+    saveState(state);
+    renderTodos();
+  }
+});
+document.getElementById('resetProg').addEventListener('click', ()=>{
+  if (confirm('Reset all progress ticks?')) { localStorage.removeItem(STATE_KEY); renderTodos(); }
+});
+
+// TOC active link
+const sections = ['summary','delivered','patterns','suggestions','phase-f','phase-g','phase-h','phase-i','decisions','progress','risks'];
+function updateTOC(){
+  const y = window.scrollY + 120;
+  for (let i=sections.length-1; i>=0; i--) {
+    const el = document.getElementById(sections[i]);
+    if (el && el.offsetTop <= y) {
+      document.querySelectorAll('nav.toc a').forEach(a => a.classList.toggle('active', a.getAttribute('href')==='#'+sections[i]));
+      return;
+    }
+  }
+}
+window.addEventListener('scroll', updateTOC, {passive:true});
+
+renderDelivered();
+renderPatterns();
+renderSuggestions();
+renderPhase(PHASE_F, 'phaseFList', 'F');
+renderPhase(PHASE_G, 'phaseGList', 'G');
+renderPhase(PHASE_H, 'phaseHList', 'H');
+renderPhase(PHASE_I, 'phaseIList', 'I');
+renderDecisions();
+renderRisks();
+renderTodos();
+updateTOC();
+</script>
+</body>
+</html>

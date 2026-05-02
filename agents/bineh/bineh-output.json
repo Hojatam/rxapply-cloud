@@ -1,0 +1,30 @@
+{
+  "_meta": {
+    "agent": "bineh",
+    "scenario": "T9",
+    "lead_email": "saeed.tehrani@example.com",
+    "lead_id": "d6e4be83-8f84-43ab-ba08-59e029e5cd27"
+  },
+  "engagement_score": 0.80,
+  "top_signals": [
+    "Completed the Destination Advisor 8 days ago with Canada as the top match (score 78) — the strongest single behavioural signal we have for FA leads, and it lines up with the NDEB AFK monthly news that's currently moving the fa-canada cell.",
+    "420 seconds on /guide/canada plus a click-through from the fa-canada-v1 nurture email to /guide/ndeb-afk-monthly — sustained content engagement, not glance-and-leave; the click specifically targets the most timely article in our inventory.",
+    "210 seconds on /pricing — the strongest commercial-intent signal short of an actual purchase. Combined with the 2 inbound Instagram DMs about AFK exam timing, this is a lead actively shopping the decision."
+  ],
+  "_scoring_trace": {
+    "components": [
+      {"signal": "advisor_completion", "weight": 0.30, "evidence": "score=78, top_destination=canada, completed 2026-04-22"},
+      {"signal": "guide_page_view ≥120s", "weight": 0.10, "evidence": "/guide/canada, 420s on page"},
+      {"signal": "long_page_time ≥300s", "weight": 0.05, "evidence": "420s on /guide/canada"},
+      {"signal": "pricing_page_view", "weight": 0.15, "evidence": "/pricing, 210s on page"},
+      {"signal": "email_click", "weight": 0.10, "evidence": "click on /guide/ndeb-afk-monthly from fa-canada-v1 step 2"},
+      {"signal": "email_open", "weight": 0.02, "evidence": "same sequence/step as the click — marginal additional credit"},
+      {"signal": "inbound_dm", "weight": 0.10, "evidence": "@saeed_dent asking about AFK timing — 2 DMs in DB but identical text, counted as 1"}
+    ],
+    "raw_sum": 0.82,
+    "downward_adjustment": -0.02,
+    "adjustment_reason": "All behavioural events are concentrated in a single day window — burst pattern; conservative haircut on 0.82 → 0.80",
+    "final_score": 0.80
+  },
+  "scorecard_t9": "PASS"
+}

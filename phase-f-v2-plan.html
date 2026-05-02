@@ -1,0 +1,528 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phase F · Dashboard V2 · RxApply</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root { --accent: #4f46e5; }
+  html, body { font-family: 'Inter', system-ui, sans-serif; }
+  code, pre, .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+  .toc-link.active { color: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .phase-pill { font-size: 11px; padding: 2px 8px; border-radius: 9999px; font-weight: 600; }
+  .pf { background: #fee2e2; color: #991b1b; }
+  .pg { background: #dbeafe; color: #1e40af; }
+  .ph { background: #fef3c7; color: #92400e; }
+  .pi { background: #d1fae5; color: #065f46; }
+  details summary { cursor: pointer; }
+  details[open] summary .chev { transform: rotate(90deg); }
+  .chev { transition: transform .15s; display: inline-block; }
+  .check { width: 16px; height: 16px; border: 1.5px solid #cbd5e1; border-radius: 4px; display: inline-block; cursor: pointer; vertical-align: middle; margin-right: 8px; flex-shrink: 0; }
+  .check.done { background: #10b981; border-color: #10b981; position: relative; }
+  .check.done::after { content: ''; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px; border: solid white; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+  .item.done .item-title { text-decoration: line-through; color: #94a3b8; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+
+<header class="border-b border-slate-200 bg-white">
+  <div class="max-w-7xl mx-auto px-6 py-5 flex items-center justify-between">
+    <div>
+      <div class="text-xs uppercase tracking-wider text-slate-500 mb-1">RxApply · second pass</div>
+      <h1 class="text-xl font-semibold">Phase F · Dashboard V2 + Afshin + L2 Logs</h1>
+    </div>
+    <div class="text-right text-xs text-slate-500">
+      <div>Plan locked · 2026-04-30</div>
+      <div class="mono">~32h build · 10 deliverables</div>
+    </div>
+  </div>
+</header>
+
+<div class="max-w-7xl mx-auto px-6 py-10 grid grid-cols-12 gap-8">
+
+<!-- ── Sticky TOC ──────────────────────────────────────────────── -->
+<aside class="col-span-3 hidden lg:block">
+  <nav class="sticky top-6 text-sm">
+    <div class="text-xs uppercase tracking-wider text-slate-500 mb-3">Sections</div>
+    <ul class="space-y-1 border-l border-slate-200">
+      <li><a class="toc-link block pl-4 py-1.5 border-l-2 border-transparent text-slate-600 hover:text-slate-900" href="#why">Why V2</a></li>
+      <li><a class="toc-link block pl-4 py-1.5 border-l-2 border-transparent text-slate-600 hover:text-slate-900" href="#decisions">Locked decisions</a></li>
+      <li><a class="toc-link block pl-4 py-1.5 border-l-2 border-transparent text-slate-600 hover:text-slate-900" href="#deliverables">10 deliverables</a></li>
+      <li><a class="toc-link block pl-4 py-1.5 border-l-2 border-transparent text-slate-600 hover:text-slate-900" href="#sequence">Sequencing</a></li>
+      <li><a class="toc-link block pl-4 py-1.5 border-l-2 border-transparent text-slate-600 hover:text-slate-900" href="#tracker">Progress tracker</a></li>
+      <li><a class="toc-link block pl-4 py-1.5 border-l-2 border-transparent text-slate-600 hover:text-slate-900" href="#routes">New proxy routes</a></li>
+      <li><a class="toc-link block pl-4 py-1.5 border-l-2 border-transparent text-slate-600 hover:text-slate-900" href="#schema">Schema additions</a></li>
+      <li><a class="toc-link block pl-4 py-1.5 border-l-2 border-transparent text-slate-600 hover:text-slate-900" href="#risks">Risks</a></li>
+      <li><a class="toc-link block pl-4 py-1.5 border-l-2 border-transparent text-slate-600 hover:text-slate-900" href="#open">Open follow-ups</a></li>
+    </ul>
+  </nav>
+</aside>
+
+<!-- ── Main column ──────────────────────────────────────────────── -->
+<main class="col-span-12 lg:col-span-9 space-y-12">
+
+<!-- WHY ───────────────────────────────────────────────────────── -->
+<section id="why">
+  <h2 class="text-2xl font-semibold mb-4">Why V2 before going online</h2>
+  <p class="text-slate-700 leading-relaxed">Phase A→E proved the architecture. The local stack runs, 21 agents ship, smoke harness is green. What's <em>missing</em> is the operator surface: a single dashboard that lets you toggle services, drive any agent, ask follow-up questions, see full I/O, train prompts, and chain agents — without dropping into a terminal. That's what V2 builds. Going live without it means flying blind once n8n is hitting real platforms.</p>
+
+  <div class="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+    <div class="rounded-lg border border-slate-200 bg-white p-4">
+      <div class="text-xs uppercase tracking-wider text-slate-500">Today</div>
+      <div class="mt-1 font-semibold">Two dashboards, fragmented</div>
+      <p class="text-sm text-slate-600 mt-2">read-only test scorecard + ops dashboard. No service control. No agent chat. Logs are headlines only.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-white p-4">
+      <div class="text-xs uppercase tracking-wider text-slate-500">After F</div>
+      <div class="mt-1 font-semibold">One control plane</div>
+      <p class="text-sm text-slate-600 mt-2">single dashboard with 9 sections, full I/O logs, chat with any agent, visual pipeline editor, design pipeline via Afshin.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-white p-4">
+      <div class="text-xs uppercase tracking-wider text-slate-500">After G/H/I</div>
+      <div class="mt-1 font-semibold">Real data → live</div>
+      <p class="text-sm text-slate-600 mt-2">Phase F unlocks G (real signals), H (auth + send-auth gates), I (Telegram → Stripe → first $79).</p>
+    </div>
+  </div>
+</section>
+
+<!-- DECISIONS ──────────────────────────────────────────────────── -->
+<section id="decisions">
+  <h2 class="text-2xl font-semibold mb-4">Locked decisions</h2>
+  <div class="overflow-hidden rounded-lg border border-slate-200 bg-white">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-xs uppercase tracking-wider text-slate-500">
+        <tr><th class="text-left px-4 py-2.5">Q</th><th class="text-left px-4 py-2.5">Choice</th><th class="text-left px-4 py-2.5">Implication</th></tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        <tr><td class="px-4 py-3 mono text-xs text-slate-500">Q1</td><td class="px-4 py-3"><strong>Anthropic API</strong> ✅ &nbsp;·&nbsp; OpenAI ⏸ later</td><td class="px-4 py-3 text-slate-600">Agent chat live. Afshin ships <em>draft-only</em> until OpenAI key arrives.</td></tr>
+        <tr><td class="px-4 py-3 mono text-xs text-slate-500">Q2</td><td class="px-4 py-3"><strong>Password in <code>.env</code></strong>, session cookie, 4h expiry</td><td class="px-4 py-3 text-slate-600">Single-user auth on Settings + Prompts.</td></tr>
+        <tr><td class="px-4 py-3 mono text-xs text-slate-500">Q3</td><td class="px-4 py-3"><strong>Visual pipeline editor</strong></td><td class="px-4 py-3 text-slate-600">Drawflow.js — node graph, save/load JSON, execute end-to-end.</td></tr>
+        <tr><td class="px-4 py-3 mono text-xs text-slate-500">Q4</td><td class="px-4 py-3"><strong>L2 logs</strong> (full I/O)</td><td class="px-4 py-3 text-slate-600">New <code class="mono text-xs">agent_actions</code> table + <code class="mono text-xs">logs/</code> folder + downloadable bundles.</td></tr>
+        <tr><td class="px-4 py-3 mono text-xs text-slate-500">Q5</td><td class="px-4 py-3"><strong>All</strong> Afshin deliverables</td><td class="px-4 py-3 text-slate-600">IG carousel · Telegram cover · YT thumb · web banner · Ravi email header.</td></tr>
+        <tr><td class="px-4 py-3 mono text-xs text-slate-500">Q6</td><td class="px-4 py-3"><strong><code class="mono text-xs">assets/generated/</code></strong></td><td class="px-4 py-3 text-slate-600">Tracked via <code class="mono text-xs">media_library</code> table.</td></tr>
+        <tr><td class="px-4 py-3 mono text-xs text-slate-500">Q7</td><td class="px-4 py-3"><strong>Persisted</strong> chats</td><td class="px-4 py-3 text-slate-600">New <code class="mono text-xs">agent_chats</code> table.</td></tr>
+        <tr><td class="px-4 py-3 mono text-xs text-slate-500">Q8</td><td class="px-4 py-3">Move to <code class="mono text-xs">C:\dev\rxapply-test\</code></td><td class="px-4 py-3 text-slate-600">Run <code class="mono text-xs">move-to-c-dev.bat</code> when ready.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- DELIVERABLES ───────────────────────────────────────────────── -->
+<section id="deliverables">
+  <h2 class="text-2xl font-semibold mb-4">10 deliverables</h2>
+  <p class="text-slate-600 text-sm mb-6">Each is a self-contained chunk. The dashboard skeleton (F1) lands first; everything else fills in sections of it.</p>
+
+  <div class="space-y-3">
+
+    <details class="rounded-lg border border-slate-200 bg-white p-4">
+      <summary class="flex items-center gap-3 list-none">
+        <span class="chev text-slate-400">▶</span>
+        <span class="phase-pill pf">F1</span>
+        <span class="font-semibold">Workspace move + dashboard skeleton</span>
+        <span class="ml-auto text-xs text-slate-500 mono">~2h</span>
+      </summary>
+      <div class="mt-4 pl-7 text-sm text-slate-700 space-y-2">
+        <p>Single-page <code class="mono text-xs">dashboard.html</code> with sidebar + topbar layout. 9 sections wired empty (Overview · Services · Workflows · Agents · Pipelines · Logs · Approvals · Designs · Settings 🔒). Old dashboards moved to <code class="mono text-xs">legacy/</code>.</p>
+        <p><code class="mono text-xs">move-to-c-dev.bat</code> handles workspace move: pre-flight checks · stop services · pg_dump · robocopy · update paths · restart · post-flight checks.</p>
+      </div>
+    </details>
+
+    <details class="rounded-lg border border-slate-200 bg-white p-4">
+      <summary class="flex items-center gap-3 list-none">
+        <span class="chev text-slate-400">▶</span>
+        <span class="phase-pill pf">F2</span>
+        <span class="font-semibold">Logs L2 — full I/O capture</span>
+        <span class="ml-auto text-xs text-slate-500 mono">~3h</span>
+      </summary>
+      <div class="mt-4 pl-7 text-sm text-slate-700 space-y-2">
+        <p>Migration <code class="mono text-xs">20260501000000_logs_l2.sql</code>: adds <code class="mono text-xs">input_payload</code>, <code class="mono text-xs">output_payload</code>, <code class="mono text-xs">error_payload</code>, <code class="mono text-xs">log_file_path</code>, <code class="mono text-xs">cost_usd_actual</code> to <code class="mono text-xs">agent_runs</code>; creates <code class="mono text-xs">agent_actions</code> table.</p>
+        <p>Helper module <code class="mono text-xs">cowork-proxy/log-writer.js</code>: every <code class="mono text-xs">/run-helper</code> invocation auto-writes <code class="mono text-xs">logs/YYYY-MM-DD/&lt;agent&gt;-&lt;runid&gt;.{json,stdout,stderr}</code>. 30-day retention, gzip after 7 days.</p>
+        <p>Routes: <code class="mono text-xs">GET /logs?filter=…</code> · <code class="mono text-xs">GET /logs/:runid</code> · <code class="mono text-xs">GET /logs/:runid/download</code>.</p>
+        <p>Dashboard "Logs" section: searchable table, expand row → tabs (Input · Actions · Output · Errors), download zip button.</p>
+      </div>
+    </details>
+
+    <details class="rounded-lg border border-slate-200 bg-white p-4">
+      <summary class="flex items-center gap-3 list-none">
+        <span class="chev text-slate-400">▶</span>
+        <span class="phase-pill pf">F7</span>
+        <span class="font-semibold">Settings + prompt versioning (built early)</span>
+        <span class="ml-auto text-xs text-slate-500 mono">~3h</span>
+      </summary>
+      <div class="mt-4 pl-7 text-sm text-slate-700 space-y-2">
+        <p>Migration: <code class="mono text-xs">prompt_versions(agent, version, body, edited_at, edited_by, diff)</code> + <code class="mono text-xs">agent_chats</code>.</p>
+        <p>Auth middleware on <code class="mono text-xs">/settings/*</code> + <code class="mono text-xs">/prompts/*</code>: bcrypt hash in env, session cookie, 4h expiry.</p>
+        <p>Settings panel: prompt editor with version history · side-by-side diff · rollback · sandbox toggle · API keys (masked) · monthly cap input.</p>
+        <p>Built before F5/F8 because both need API keys + the auth gate.</p>
+      </div>
+    </details>
+
+    <details class="rounded-lg border border-slate-200 bg-white p-4">
+      <summary class="flex items-center gap-3 list-none">
+        <span class="chev text-slate-400">▶</span>
+        <span class="phase-pill pf">F3</span>
+        <span class="font-semibold">Service control panel</span>
+        <span class="ml-auto text-xs text-slate-500 mono">~2h</span>
+      </summary>
+      <div class="mt-4 pl-7 text-sm text-slate-700 space-y-2">
+        <p>Routes: <code class="mono text-xs">GET /services</code> · <code class="mono text-xs">POST /services/:name/{start,stop,restart}</code>. <code class="mono text-xs">docker stop/start</code> for Supabase/n8n/MailHog. Cowork-proxy uses <code class="mono text-xs">proxy-watchdog.bat</code> as parent watcher (it can't stop itself mid-request, so the watchdog handles it).</p>
+        <p>Dashboard: 4 cards — toggle, status (green/red/amber), uptime, last action log.</p>
+        <p>Confirms before stopping anything that has in-flight requests.</p>
+      </div>
+    </details>
+
+    <details class="rounded-lg border border-slate-200 bg-white p-4">
+      <summary class="flex items-center gap-3 list-none">
+        <span class="chev text-slate-400">▶</span>
+        <span class="phase-pill pf">F4</span>
+        <span class="font-semibold">Workflow control via n8n REST API</span>
+        <span class="ml-auto text-xs text-slate-500 mono">~2h</span>
+      </summary>
+      <div class="mt-4 pl-7 text-sm text-slate-700 space-y-2">
+        <p>Routes: <code class="mono text-xs">GET /n8n/workflows</code> · <code class="mono text-xs">PATCH /n8n/workflows/:id/active</code> · <code class="mono text-xs">POST /n8n/workflows/:id/run</code> · <code class="mono text-xs">POST /n8n/workflows/import</code>. Library = the 5 JSONs in <code class="mono text-xs">n8n-workflows/</code>.</p>
+        <p>Dashboard: list with toggle / run-now / import-from-library buttons + last-execution status pill.</p>
+      </div>
+    </details>
+
+    <details class="rounded-lg border border-slate-200 bg-white p-4">
+      <summary class="flex items-center gap-3 list-none">
+        <span class="chev text-slate-400">▶</span>
+        <span class="phase-pill pf">F5</span>
+        <span class="font-semibold">Agent run + chat (Anthropic streaming)</span>
+        <span class="ml-auto text-xs text-slate-500 mono">~4h</span>
+      </summary>
+      <div class="mt-4 pl-7 text-sm text-slate-700 space-y-2">
+        <p>22-agent grid in "Agents" section grouped by division (Content · Engagement · Intel · Ops · Inspection · Design). Click → tabbed pane:</p>
+        <ul class="list-disc pl-6 space-y-1">
+          <li><strong>Skill</strong> — read SKILL.md (RO from this tab; edit lives in protected Settings)</li>
+          <li><strong>Run</strong> — form-driven helper invocation (existing <code class="mono text-xs">/run-helper</code>)</li>
+          <li><strong>Chat</strong> — streaming Claude conversation. Sends <em>SKILL.md + last 10 agent_runs + your question</em> as system+context. SSE.</li>
+          <li><strong>History</strong> — last 50 invocations + chats</li>
+          <li><strong>Forward</strong> — hand result to next agent (linear hand-off pairs)</li>
+        </ul>
+        <p>New routes: <code class="mono text-xs">POST /agent/:name/chat</code> (SSE) · <code class="mono text-xs">GET /agent/:name/chats</code> · <code class="mono text-xs">POST /agent/:name/forward</code>. Persisted to <code class="mono text-xs">agent_chats</code>.</p>
+      </div>
+    </details>
+
+    <details class="rounded-lg border border-slate-200 bg-white p-4">
+      <summary class="flex items-center gap-3 list-none">
+        <span class="chev text-slate-400">▶</span>
+        <span class="phase-pill pf">F9</span>
+        <span class="font-semibold">Cost telemetry + monthly cap</span>
+        <span class="ml-auto text-xs text-slate-500 mono">~2h</span>
+      </summary>
+      <div class="mt-4 pl-7 text-sm text-slate-700 space-y-2">
+        <p>Proxy intercepts every paid API call (Anthropic + OpenAI), records token counts and dollar cost into <code class="mono text-xs">agent_runs.cost_usd_actual</code>.</p>
+        <p>Top-strip widget: today / 7d / 30d running totals. Hard cap (default $25/mo, configurable in Settings): <strong>warns at 80%</strong>, <strong>blocks at 100%</strong>. Reset on first of month.</p>
+      </div>
+    </details>
+
+    <details class="rounded-lg border border-slate-200 bg-white p-4">
+      <summary class="flex items-center gap-3 list-none">
+        <span class="chev text-slate-400">▶</span>
+        <span class="phase-pill pf">F8</span>
+        <span class="font-semibold">Afshin — design agent</span>
+        <span class="ml-auto text-xs text-slate-500 mono">~5h</span>
+      </summary>
+      <div class="mt-4 pl-7 text-sm text-slate-700 space-y-2">
+        <p>New agent <code class="mono text-xs">agents/afshin/{SKILL.md, afshin.py, drafts/, renders/}</code>. Migration: <code class="mono text-xs">media_library</code> table.</p>
+        <p>5 deliverable kinds: <code class="mono text-xs">ig_carousel_slide</code> · <code class="mono text-xs">telegram_cover</code> · <code class="mono text-xs">youtube_thumb</code> · <code class="mono text-xs">web_banner</code> · <code class="mono text-xs">email_header_ravi</code>.</p>
+        <p>Two routes:</p>
+        <ul class="list-disc pl-6 space-y-1">
+          <li><strong>Draft</strong> (<code class="mono text-xs">POST /afshin/draft</code>) — Claude generates SVG/HTML mock. ~$0.005/draft. Shipped now.</li>
+          <li><strong>Render</strong> (<code class="mono text-xs">POST /afshin/render/:draft_id</code>) — gpt-image-1 produces final raster. ~$0.05/render. Greyed-out until <code class="mono text-xs">OPENAI_API_KEY</code> set.</li>
+        </ul>
+        <p>Dashboard "Designs" section: gallery + draft preview + "Approve & Render" button + "Used by" chip showing which agents pulled the asset via <code class="mono text-xs">media_library</code>.</p>
+        <p>Other agents pull via <code class="mono text-xs">SELECT * FROM media_library WHERE kind=$1 AND approved=true ORDER BY created_at DESC LIMIT 1</code>.</p>
+      </div>
+    </details>
+
+    <details class="rounded-lg border border-slate-200 bg-white p-4">
+      <summary class="flex items-center gap-3 list-none">
+        <span class="chev text-slate-400">▶</span>
+        <span class="phase-pill pf">F6</span>
+        <span class="font-semibold">Visual pipeline editor (Drawflow)</span>
+        <span class="ml-auto text-xs text-slate-500 mono">~7h</span>
+      </summary>
+      <div class="mt-4 pl-7 text-sm text-slate-700 space-y-2">
+        <p>Drawflow.js (vanilla, ~10KB MIT, CDN-loaded). Full canvas in "Pipelines" section. Node types:</p>
+        <ul class="list-disc pl-6 space-y-1">
+          <li><strong>Agent</strong> — 22 instances, ports based on helper signature</li>
+          <li><strong>Conditional</strong> — if-then-else on output value (stretch)</li>
+          <li><strong>Transform</strong> — small JS expression, e.g. <code class="mono text-xs">$prev.brief_id</code></li>
+          <li><strong>Output</strong> — write to journal / file / forward to webhook</li>
+        </ul>
+        <p>Save/load: <code class="mono text-xs">pipelines/&lt;name&gt;.json</code>. Run pipeline = topological execution with streaming results, full run logged with <code class="mono text-xs">pipeline_id</code>.</p>
+      </div>
+    </details>
+
+    <details class="rounded-lg border border-slate-200 bg-white p-4">
+      <summary class="flex items-center gap-3 list-none">
+        <span class="chev text-slate-400">▶</span>
+        <span class="phase-pill pf">F10</span>
+        <span class="font-semibold">smoke-v2.bat</span>
+        <span class="ml-auto text-xs text-slate-500 mono">~2h</span>
+      </summary>
+      <div class="mt-4 pl-7 text-sm text-slate-700 space-y-2">
+        <p>End-to-end PASS/FAIL across:</p>
+        <ul class="list-disc pl-6 space-y-1">
+          <li>4 services controllable from proxy</li>
+          <li>Log L2 roundtrip — agent run → log file → API → downloadable zip</li>
+          <li>Prompt edit → version saved → rollback works</li>
+          <li>Anthropic chat returns stream</li>
+          <li>Afshin draft generates valid SVG</li>
+          <li>(if OPENAI key) Afshin render generates valid PNG</li>
+          <li>Cost cap blocks call when exceeded (test mode forces over-cap)</li>
+          <li>Pipeline runs 3-node chain end-to-end</li>
+        </ul>
+      </div>
+    </details>
+
+  </div>
+</section>
+
+<!-- SEQUENCE ───────────────────────────────────────────────────── -->
+<section id="sequence">
+  <h2 class="text-2xl font-semibold mb-4">Sequencing</h2>
+  <pre class="bg-slate-900 text-slate-100 rounded-lg p-5 text-xs overflow-x-auto mono">F1 ─┐
+    ├─► F2 ─┐
+    │      ├─► F3 ─┐
+    │      │      ├─► F5 ─┐
+    │      │      │      ├─► F8 ─┐
+    │      │      │      │      ├─► F6 ─┐
+    │      └─► F4 ─┘      │      │      │
+    │                     │      │      │
+    └─► F7 ───────────────┘      │      │
+                                 │      │
+              F9 (woven across F5+F8)   │
+                                        ▼
+                                       F10</pre>
+  <p class="mt-4 text-sm text-slate-600">F1+F2+F7 form Block 1 (foundation). F3+F4 are independent controls. F5 unlocks F8 + F9. F6 last because it composes everything else. F10 verifies.</p>
+</section>
+
+<!-- PROGRESS TRACKER ───────────────────────────────────────────── -->
+<section id="tracker">
+  <h2 class="text-2xl font-semibold mb-4">Progress tracker</h2>
+  <p class="text-sm text-slate-600 mb-6">Click checkboxes to mark items done. State saved to <code class="mono text-xs">localStorage['rxapply-phase-f']</code>.</p>
+  <div id="tracker" class="rounded-lg border border-slate-200 bg-white divide-y divide-slate-100"></div>
+</section>
+
+<!-- ROUTES ─────────────────────────────────────────────────────── -->
+<section id="routes">
+  <h2 class="text-2xl font-semibold mb-4">New proxy routes</h2>
+  <div class="overflow-hidden rounded-lg border border-slate-200 bg-white">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-xs uppercase tracking-wider text-slate-500">
+        <tr><th class="text-left px-4 py-2.5">Method</th><th class="text-left px-4 py-2.5">Path</th><th class="text-left px-4 py-2.5">Phase</th><th class="text-left px-4 py-2.5">Purpose</th></tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100 mono text-xs">
+        <tr><td class="px-4 py-2 font-semibold text-emerald-700">GET</td><td class="px-4 py-2">/logs</td><td class="px-4 py-2"><span class="phase-pill pf">F2</span></td><td class="px-4 py-2 font-sans">Search runs by agent / status / date</td></tr>
+        <tr><td class="px-4 py-2 font-semibold text-emerald-700">GET</td><td class="px-4 py-2">/logs/:runid</td><td class="px-4 py-2"><span class="phase-pill pf">F2</span></td><td class="px-4 py-2 font-sans">Full I/O bundle for one run</td></tr>
+        <tr><td class="px-4 py-2 font-semibold text-emerald-700">GET</td><td class="px-4 py-2">/logs/:runid/download</td><td class="px-4 py-2"><span class="phase-pill pf">F2</span></td><td class="px-4 py-2 font-sans">Download zip</td></tr>
+        <tr><td class="px-4 py-2 font-semibold text-amber-700">POST</td><td class="px-4 py-2">/auth/login</td><td class="px-4 py-2"><span class="phase-pill pf">F7</span></td><td class="px-4 py-2 font-sans">Password → 4h session cookie</td></tr>
+        <tr><td class="px-4 py-2 font-semibold text-amber-700">POST</td><td class="px-4 py-2">/auth/logout</td><td class="px-4 py-2"><span class="phase-pill pf">F7</span></td><td class="px-4 py-2 font-sans">Clear session</td></tr>
+        <tr><td class="px-4 py-2 font-semibold text-emerald-700">GET</td><td class="px-4 py-2">/prompts/:agent/versions</td><td class="px-4 py-2"><span class="phase-pill pf">F7</span></td><td class="px-4 py-2 font-sans">List versions of a SKILL.md</td></tr>
+        <tr><td class="px-4 py-2 font-semibold text-amber-700">POST</td><td class="px-4 py-2">/prompts/:agent/rollback</td><td class="px-4 py-2"><span class="phase-pill pf">F7</span></td><td class="px-4 py-2 font-sans">Restore a previous version</td></tr>
+        <tr><td class="px-4 py-2 font-semibold text-emerald-700">GET</td><td class="px-4 py-2">/services</td><td class="px-4 py-2"><span class="phase-pill pf">F3</span></td><td class="px-4 py-2 font-sans">Status of 4 services</td></tr>
+        <tr><td class="px-4 py-2 font-semibold text-amber-700">POST</td><td class="px-4 py-2">/services/:name/:action</td><td class="px-4 py-2"><span class="phase-pill pf">F3</span></td><td class="px-4 py-2 font-sans">start / stop / restart</td></tr>
+        <tr><td class="px-4 py-2 font-semibold text-emerald-700">GET</td><td class="px-4 py-2">/n8n/workflows</td><td class="px-4 py-2"><span class="phase-pill pf">F4</span></td><td class="px-4 py-2 font-sans">List + status</td></tr>
+        <tr><td class="px-4 py-2 font-semibold text-sky-700">PATCH</td><td class="px-4 py-2">/n8n/workflows/:id/active</td><td class="px-4 py-2"><span class="phase-pill pf">F4</span></td><td class="px-4 py-2 font-sans">Activate / deactivate</td></tr>
+        <tr><td class="px-4 py-2 font-semibold text-amber-700">POST</td><td class="px-4 py-2">/n8n/workflows/:id/run</td><td class="px-4 py-2"><span class="phase-pill pf">F4</span></td><td class="px-4 py-2 font-sans">Manual trigger</td></tr>
+        <tr><td class="px-4 py-2 font-semibold text-amber-700">POST</td><td class="px-4 py-2">/agent/:name/chat</td><td class="px-4 py-2"><span class="phase-pill pf">F5</span></td><td class="px-4 py-2 font-sans">SSE chat stream</td></tr>
+        <tr><td class="px-4 py-2 font-semibold text-emerald-700">GET</td><td class="px-4 py-2">/agent/:name/chats</td><td class="px-4 py-2"><span class="phase-pill pf">F5</span></td><td class="px-4 py-2 font-sans">Persisted history</td></tr>
+        <tr><td class="px-4 py-2 font-semibold text-amber-700">POST</td><td class="px-4 py-2">/agent/:name/forward</td><td class="px-4 py-2"><span class="phase-pill pf">F5</span></td><td class="px-4 py-2 font-sans">Hand off to next agent</td></tr>
+        <tr><td class="px-4 py-2 font-semibold text-amber-700">POST</td><td class="px-4 py-2">/afshin/draft</td><td class="px-4 py-2"><span class="phase-pill pf">F8</span></td><td class="px-4 py-2 font-sans">Claude SVG mock</td></tr>
+        <tr><td class="px-4 py-2 font-semibold text-amber-700">POST</td><td class="px-4 py-2">/afshin/render/:draft_id</td><td class="px-4 py-2"><span class="phase-pill pf">F8</span></td><td class="px-4 py-2 font-sans">gpt-image-1 final</td></tr>
+        <tr><td class="px-4 py-2 font-semibold text-emerald-700">GET</td><td class="px-4 py-2">/cost</td><td class="px-4 py-2"><span class="phase-pill pf">F9</span></td><td class="px-4 py-2 font-sans">today / 7d / 30d / cap</td></tr>
+        <tr><td class="px-4 py-2 font-semibold text-amber-700">POST</td><td class="px-4 py-2">/pipelines/:name/run</td><td class="px-4 py-2"><span class="phase-pill pf">F6</span></td><td class="px-4 py-2 font-sans">Execute saved pipeline</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- SCHEMA ─────────────────────────────────────────────────────── -->
+<section id="schema">
+  <h2 class="text-2xl font-semibold mb-4">Schema additions</h2>
+  <p class="text-sm text-slate-600 mb-4">Three new migrations on top of the 17-table baseline.</p>
+
+  <div class="space-y-4">
+    <div class="rounded-lg border border-slate-200 bg-white p-5">
+      <div class="flex items-center gap-3 mb-2">
+        <span class="phase-pill pf">F2</span>
+        <span class="mono text-xs">20260501000000_logs_l2.sql</span>
+      </div>
+      <pre class="text-xs bg-slate-50 rounded p-3 overflow-x-auto mono">ALTER TABLE agent_runs
+  ADD COLUMN input_payload   jsonb,
+  ADD COLUMN output_payload  jsonb,
+  ADD COLUMN error_payload   jsonb,
+  ADD COLUMN log_file_path   text,
+  ADD COLUMN cost_usd_actual numeric(10,4) DEFAULT 0;
+
+CREATE TABLE agent_actions (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  run_id       uuid REFERENCES agent_runs(id) ON DELETE CASCADE,
+  step_index   int NOT NULL,
+  action_kind  text NOT NULL,   -- 'sql' | 'http' | 'file_write' | 'subprocess' | 'llm_call'
+  action_data  jsonb,           -- {sql:"…"} or {url:"…", method:"POST", status:200} etc.
+  duration_ms  int,
+  created_at   timestamptz DEFAULT now()
+);
+CREATE INDEX idx_agent_actions_run ON agent_actions(run_id, step_index);</pre>
+    </div>
+
+    <div class="rounded-lg border border-slate-200 bg-white p-5">
+      <div class="flex items-center gap-3 mb-2">
+        <span class="phase-pill pf">F7</span>
+        <span class="mono text-xs">20260502000000_prompts_chats.sql</span>
+      </div>
+      <pre class="text-xs bg-slate-50 rounded p-3 overflow-x-auto mono">CREATE TABLE prompt_versions (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  agent       text NOT NULL,
+  version     int NOT NULL,
+  body        text NOT NULL,
+  edited_by   text DEFAULT 'founder',
+  edited_at   timestamptz DEFAULT now(),
+  diff_chars  int,
+  UNIQUE (agent, version)
+);
+CREATE INDEX idx_prompt_versions_agent ON prompt_versions(agent, version DESC);
+
+CREATE TABLE agent_chats (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  agent         text NOT NULL,
+  started_at    timestamptz DEFAULT now(),
+  last_msg_at   timestamptz DEFAULT now(),
+  messages      jsonb DEFAULT '[]'::jsonb,
+  run_context   uuid REFERENCES agent_runs(id),
+  total_tokens  int DEFAULT 0,
+  total_cost    numeric(10,4) DEFAULT 0
+);
+CREATE INDEX idx_agent_chats_agent ON agent_chats(agent, last_msg_at DESC);</pre>
+    </div>
+
+    <div class="rounded-lg border border-slate-200 bg-white p-5">
+      <div class="flex items-center gap-3 mb-2">
+        <span class="phase-pill pf">F8</span>
+        <span class="mono text-xs">20260503000000_media_library.sql</span>
+      </div>
+      <pre class="text-xs bg-slate-50 rounded p-3 overflow-x-auto mono">CREATE TABLE media_library (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  kind            text NOT NULL,    -- 'ig_carousel_slide' | 'telegram_cover' | …
+  prompt          text NOT NULL,
+  draft_path      text,             -- assets/generated/drafts/<id>.svg
+  render_path     text,             -- assets/generated/renders/<id>.png
+  dimensions      text,             -- "1080x1080"
+  owner_agent     text DEFAULT 'afshin',
+  approved        boolean DEFAULT false,
+  used_by         text[] DEFAULT '{}',
+  metadata        jsonb DEFAULT '{}',
+  created_at      timestamptz DEFAULT now()
+);
+CREATE INDEX idx_media_library_kind ON media_library(kind, approved, created_at DESC);</pre>
+    </div>
+  </div>
+</section>
+
+<!-- RISKS ──────────────────────────────────────────────────────── -->
+<section id="risks">
+  <h2 class="text-2xl font-semibold mb-4">Risks</h2>
+  <div class="space-y-3">
+    <div class="rounded-lg border border-slate-200 bg-white p-4">
+      <div class="font-semibold text-rose-700 text-sm">Anthropic SSE breaks through Express → fetch → browser</div>
+      <p class="text-sm text-slate-600 mt-1">Mitigation: F5 starts with a 30-min spike to verify SSE survives the proxy. Fallback = polling-based pseudo-stream.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-white p-4">
+      <div class="font-semibold text-rose-700 text-sm">Drawflow conditional support is thin</div>
+      <p class="text-sm text-slate-600 mt-1">Mitigation: F6 starts linear-only; conditional node is stretch and may slip to G.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-white p-4">
+      <div class="font-semibold text-rose-700 text-sm">Workspace move breaks docker volumes</div>
+      <p class="text-sm text-slate-600 mt-1">Mitigation: <code class="mono text-xs">move-to-c-dev.bat</code> does pre-flight pg_dump, stops services in order, robocopy /MIR, restart, post-flight smoke check.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-white p-4">
+      <div class="font-semibold text-rose-700 text-sm">22-node grid feels cluttered</div>
+      <p class="text-sm text-slate-600 mt-1">Mitigation: F1 dashboard groups agents by division (collapsible), default-collapsed except active.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-white p-4">
+      <div class="font-semibold text-rose-700 text-sm">Afshin draft-only ships, render added later → UI inconsistency</div>
+      <p class="text-sm text-slate-600 mt-1">Mitigation: F8 builds "Approve &amp; Render" button greyed-out with tooltip "OPENAI_API_KEY missing." Drop key, button activates.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-white p-4">
+      <div class="font-semibold text-rose-700 text-sm">logs/ folder grows unbounded</div>
+      <p class="text-sm text-slate-600 mt-1">Mitigation: F2 includes 30-day retention, gzip after 7 days. Cleanup runs on proxy startup.</p>
+    </div>
+  </div>
+</section>
+
+<!-- OPEN ───────────────────────────────────────────────────────── -->
+<section id="open">
+  <h2 class="text-2xl font-semibold mb-4">Open follow-ups</h2>
+  <ol class="list-decimal pl-6 space-y-2 text-sm text-slate-700">
+    <li><strong>OpenAI key decision.</strong> F8 ships draft-only without it. When you're ready to add raster output, drop <code class="mono text-xs">OPENAI_API_KEY=…</code> in <code class="mono text-xs">.env</code>, restart proxy — the "Render" button activates with no other changes.</li>
+    <li><strong>Workspace move timing.</strong> Run <code class="mono text-xs">move-to-c-dev.bat</code> at any natural pause; the script handles stop → move → restart. Build-in-place works fine on OneDrive in the meantime.</li>
+    <li><strong>Phase G/H/I unchanged.</strong> Original sequencing holds — real RSS for Dadbeh, Cloudflare Tunnel for lead-form, RLS auth, send-auth gates, Telegram first promotion. Will re-confirm after F10 lands.</li>
+  </ol>
+</section>
+
+</main>
+</div>
+
+<footer class="border-t border-slate-200 mt-16">
+  <div class="max-w-7xl mx-auto px-6 py-6 flex justify-between text-xs text-slate-500">
+    <div>RxApply test phase · v2 plan</div>
+    <div class="mono">phase-f-v2-plan.html</div>
+  </div>
+</footer>
+
+<script>
+// Sticky TOC active link
+const links = document.querySelectorAll('.toc-link');
+const sections = [...document.querySelectorAll('section[id]')];
+const onScroll = () => {
+  const y = window.scrollY + 100;
+  let active = sections[0]?.id;
+  for (const s of sections) if (s.offsetTop <= y) active = s.id;
+  links.forEach(l => l.classList.toggle('active', l.getAttribute('href') === '#' + active));
+};
+window.addEventListener('scroll', onScroll);
+onScroll();
+
+// Progress tracker
+const ITEMS = [
+  ['F1', 'Workspace move + dashboard skeleton', 'pf'],
+  ['F2', 'Logs L2 schema + helper + panel', 'pf'],
+  ['F7', 'Settings auth + prompt versioning', 'pf'],
+  ['F3', 'Service control (4 cards)', 'pf'],
+  ['F4', 'n8n workflow control', 'pf'],
+  ['F5', 'Agent chat (Anthropic SSE)', 'pf'],
+  ['F9', 'Cost telemetry + cap', 'pf'],
+  ['F8', 'Afshin draft mode', 'pf'],
+  ['F8r', 'Afshin render mode (needs OpenAI key)', 'pf'],
+  ['F6', 'Drawflow pipeline editor', 'pf'],
+  ['F10', 'smoke-v2.bat green', 'pf'],
+];
+const KEY = 'rxapply-phase-f';
+const state = JSON.parse(localStorage.getItem(KEY) || '{}');
+const root = document.getElementById('tracker');
+ITEMS.forEach(([id, label, cls]) => {
+  const row = document.createElement('div');
+  row.className = 'item flex items-center gap-3 px-4 py-3 hover:bg-slate-50 cursor-pointer' + (state[id] ? ' done' : '');
+  row.innerHTML = `<span class="check${state[id] ? ' done' : ''}"></span>
+    <span class="phase-pill ${cls}">${id}</span>
+    <span class="item-title flex-1 text-sm">${label}</span>`;
+  row.addEventListener('click', () => {
+    state[id] = !state[id];
+    localStorage.setItem(KEY, JSON.stringify(state));
+    row.classList.toggle('done');
+    row.querySelector('.check').classList.toggle('done');
+  });
+  root.appendChild(row);
+});
+</script>
+
+</body>
+</html>

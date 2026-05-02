@@ -1,0 +1,42 @@
+<svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" dir="rtl">
+  <defs>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;700&amp;display=swap');
+    </style>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="1280" height="720" fill="#f8fafc"/>
+  
+  <!-- Decorative geometric elements -->
+  <circle cx="1100" cy="150" r="180" fill="#4f46e5" opacity="0.05"/>
+  <circle cx="200" cy="580" r="140" fill="#4f46e5" opacity="0.08"/>
+  
+  <!-- Abstract geometric motif - minimalist tooth-like shape -->
+  <path d="M 320 280 Q 320 240 340 220 Q 360 200 380 220 Q 400 240 400 280 Q 400 320 380 350 Q 360 370 340 350 Q 320 320 320 280 Z" fill="#4f46e5" opacity="0.1"/>
+  
+  <!-- Accent lines -->
+  <line x1="900" y1="200" x2="1150" y2="200" stroke="#4f46e5" stroke-width="3" opacity="0.3"/>
+  <line x1="130" y1="520" x2="380" y2="520" stroke="#4f46e5" stroke-width="3" opacity="0.3"/>
+  
+  <!-- Main content -->
+  <text x="640" y="280" font-family="Vazirmatn, sans-serif" font-size="72" font-weight="700" fill="#0f172a" text-anchor="middle">
+    دندانپزشکی در لندن
+  </text>
+  
+  <text x="640" y="360" font-family="Vazirmatn, sans-serif" font-size="32" font-weight="400" fill="#0f172a" text-anchor="middle" opacity="0.7">
+    فرصت‌های تحصیلی و کاری
+  </text>
+  
+  <!-- Brand -->
+  <text x="640" y="520" font-family="Vazirmatn, sans-serif" font-size="28" font-weight="600" fill="#4f46e5" text-anchor="middle">
+    RxApply
+  </text>
+  
+  <!-- Decorative dots -->
+  <circle cx="520" cy="510" r="4" fill="#4f46e5"/>
+  <circle cx="760" cy="510" r="4" fill="#4f46e5"/>
+  
+  <!-- Bottom accent shape -->
+  <rect x="580" y="580" width="120" height="4" fill="#4f46e5" opacity="0.3" rx="2"/>
+</svg>

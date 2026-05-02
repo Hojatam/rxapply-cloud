@@ -1,0 +1,182 @@
+{
+  "_meta": {
+    "agent": "rahnama",
+    "scenario": "T6",
+    "generated_at": "2026-04-29T22:00:00Z",
+    "personas": 3
+  },
+  "saeed.tehrani@example.com": {
+    "lead_id": "00000000-0000-0000-0000-000000000001",
+    "input": {
+      "origin": "IR",
+      "years_exp": 6,
+      "target_languages": ["fa", "en"],
+      "destination_intent_from_form": ["canada", "germany"],
+      "family_status": "married_with_kids",
+      "budget": "med",
+      "priorities": ["speed", "income", "family"]
+    },
+    "output": [
+      {
+        "destination": "canada",
+        "total_score": 86,
+        "dimension_breakdown": {
+          "speed": 80,
+          "income": 84,
+          "family": 92,
+          "prestige": 82,
+          "lifestyle": 85,
+          "language_fit": 88
+        },
+        "rationale": "The recent NDEB shift to monthly AFK cohorts removes the biggest scheduling bottleneck for Iranian-trained dentists, and Toronto/Vancouver have strong Persian-speaking diasporas plus schools and healthcare that score well for a married candidate with kids. The friction is upfront cost and the OSCE seat queue, which can still stretch the practical timeline to 18-24 months even when the AFK side moves fast."
+      },
+      {
+        "destination": "germany",
+        "total_score": 75,
+        "dimension_breakdown": {
+          "speed": 62,
+          "income": 76,
+          "family": 88,
+          "prestige": 82,
+          "lifestyle": 80,
+          "language_fit": 55
+        },
+        "rationale": "The Approbation pathway is well-defined for Iranian DDS holders with documented training, and Germany's family-supporting infrastructure (schools, healthcare, parental leave) is exceptional for a married candidate with kids. The blocker is German B2 certification, which the candidate's profile doesn't yet show; without it the 'speed' advantage of the regulated route disappears."
+      },
+      {
+        "destination": "uk",
+        "total_score": 71,
+        "dimension_breakdown": {
+          "speed": 52,
+          "income": 76,
+          "family": 78,
+          "prestige": 88,
+          "lifestyle": 78,
+          "language_fit": 90
+        },
+        "rationale": "The UK has a clear ORE pathway and the highest 'prestige' score of the three for an Iranian-trained candidate, plus full English-language fit. Roya's intel shows the en-UK cell down 9% specifically because of GDC processing backlogs, which makes 'speed' the weakest dimension and the main reason this falls behind Canada and Germany for a candidate prioritizing speed."
+      }
+    ],
+    "expected_top3_per_plan": ["canada", "germany", "uk"],
+    "actual_top3": ["canada", "germany", "uk"],
+    "matches_plan": true
+  },
+  "amira.hassan@example.com": {
+    "lead_id": "00000000-0000-0000-0000-000000000002",
+    "input": {
+      "origin": "EG",
+      "years_exp": 4,
+      "target_languages": ["ar", "en"],
+      "destination_intent_from_form": ["uae", "saudi"],
+      "family_status": "married_no_kids",
+      "budget": "low",
+      "priorities": ["income", "speed", "family"]
+    },
+    "output": [
+      {
+        "destination": "uae",
+        "total_score": 87,
+        "dimension_breakdown": {
+          "speed": 90,
+          "income": 86,
+          "family": 76,
+          "prestige": 78,
+          "lifestyle": 80,
+          "language_fit": 95
+        },
+        "rationale": "The recent DHA fee reduction (Roya's #2 mover, +14% on the ar-uae cell) lands directly on this candidate's lowest-budget, fastest-route requirements, and the assessment-only DHA pathway means a working dentist within months rather than years. The honest friction is dependant residency: spousal sponsorship works but full PR doesn't exist in the UAE in the way it does in Canada or the UK, so 'family' scores lower despite excellent day-to-day quality of life."
+      },
+      {
+        "destination": "uk",
+        "total_score": 73,
+        "dimension_breakdown": {
+          "speed": 55,
+          "income": 76,
+          "family": 80,
+          "prestige": 86,
+          "lifestyle": 78,
+          "language_fit": 88
+        },
+        "rationale": "The UK ORE pathway is well-suited to graduates of Egypt's strong public dental schools, and the established Arab community in greater London makes integration easier than most Western options. The speed dimension is the catch: GDC backlogs add real months to the timeline, which directly contradicts the candidate's #2 priority."
+      },
+      {
+        "destination": "canada",
+        "total_score": 71,
+        "dimension_breakdown": {
+          "speed": 60,
+          "income": 84,
+          "family": 88,
+          "prestige": 80,
+          "lifestyle": 80,
+          "language_fit": 78
+        },
+        "rationale": "Canada offers the strongest long-term income trajectory of the three and superior family infrastructure once licensed, and the new monthly AFK cadence helps somewhat on speed. Cost is the binding constraint for a low-budget candidate — full bridging or qualifying programs in Canada run well above this candidate's budget tier, and language_fit is weaker because Canada is EN-only at the practice level."
+      }
+    ],
+    "expected_top3_per_plan": ["uae", "uk", "canada"],
+    "actual_top3": ["uae", "uk", "canada"],
+    "matches_plan": true
+  },
+  "james.brown@example.com": {
+    "lead_id": "00000000-0000-0000-0000-000000000003",
+    "input": {
+      "origin": "GB",
+      "years_exp": 10,
+      "target_languages": ["en"],
+      "destination_intent_from_form": ["canada", "australia"],
+      "family_status": "single",
+      "budget": "high",
+      "priorities": ["lifestyle", "prestige", "income"]
+    },
+    "output": [
+      {
+        "destination": "australia",
+        "total_score": 90,
+        "dimension_breakdown": {
+          "speed": 85,
+          "income": 88,
+          "family": 80,
+          "prestige": 86,
+          "lifestyle": 96,
+          "language_fit": 100
+        },
+        "rationale": "Recognition of British DDS by the Australian Dental Council via competency-based pathways is the fastest formal route the candidate has, and the lifestyle dimension — coastal cities, climate, dining, professional networks — is exceptionally well-matched to a single, high-budget, lifestyle-prioritising profile. The realistic friction is a 12-18 month visa-and-recognition window that's faster than the US but still slower than the candidate may assume from social media."
+      },
+      {
+        "destination": "new_zealand",
+        "total_score": 84,
+        "dimension_breakdown": {
+          "speed": 82,
+          "income": 76,
+          "family": 84,
+          "prestige": 78,
+          "lifestyle": 95,
+          "language_fit": 100
+        },
+        "rationale": "New Zealand's Dental Council has a clean pathway for UK-trained dentists with 5+ years' experience, and the lifestyle dimension scores almost as well as Australia for someone who values outdoors and small-city living over big-city density. The trade-off is a smaller, more saturated market that caps the income ceiling notably below what Australia or the US offer."
+      },
+      {
+        "destination": "usa",
+        "total_score": 79,
+        "dimension_breakdown": {
+          "speed": 42,
+          "income": 95,
+          "family": 72,
+          "prestige": 92,
+          "lifestyle": 82,
+          "language_fit": 100
+        },
+        "rationale": "Income and prestige are the highest of any destination, and the candidate's high budget and lack of family dependants make the slow, expensive Advanced Standing Program route financially feasible. Speed is the dominant downside: most US states require a 2+ year ASP regardless of UK experience, which directly contradicts how British dentists usually picture the move."
+      }
+    ],
+    "expected_top3_per_plan": ["australia", "new_zealand", "usa"],
+    "actual_top3": ["australia", "new_zealand", "usa"],
+    "matches_plan": true
+  },
+  "_summary": {
+    "personas_scored": 3,
+    "matches_plan_count": 3,
+    "all_have_rationales": true,
+    "scorecard_t6": "PASS"
+  }
+}

@@ -1,0 +1,314 @@
+{
+  "_meta": {
+    "agent": "bidar",
+    "scenario": "T11a",
+    "rolled_up_agents": 23,
+    "recommendation_counts": {
+      "rewrite": 3,
+      "demote": 0,
+      "keep": 20,
+      "promote": 0
+    }
+  },
+  "ranking": [
+    {
+      "agent": "pooya",
+      "action": "rewrite",
+      "rationale": "fail_rate 50% — majority of runs failed",
+      "evidence": {
+        "runs": 2,
+        "fail_rate": 0.5,
+        "approval_ratio": 0.5,
+        "avg_cost_usd": 0.0,
+        "avg_duration_ms": 91,
+        "quality_score": 0.5
+      }
+    },
+    {
+      "agent": "paya",
+      "action": "rewrite",
+      "rationale": "fail_rate 50% — majority of runs failed",
+      "evidence": {
+        "runs": 2,
+        "fail_rate": 0.5,
+        "approval_ratio": 0.5,
+        "avg_cost_usd": 0.0,
+        "avg_duration_ms": 187,
+        "quality_score": 0.5
+      }
+    },
+    {
+      "agent": "sepehr",
+      "action": "rewrite",
+      "rationale": "fail_rate 67% — majority of runs failed",
+      "evidence": {
+        "runs": 3,
+        "fail_rate": 0.667,
+        "approval_ratio": 0.333,
+        "avg_cost_usd": 0.0,
+        "avg_duration_ms": 201,
+        "quality_score": 0.333
+      }
+    },
+    {
+      "agent": "payvand",
+      "action": "keep",
+      "rationale": "strong (approval 100%) but needs ≥30d clean record before promote",
+      "evidence": {
+        "runs": 1,
+        "fail_rate": 0,
+        "approval_ratio": 1,
+        "avg_cost_usd": 0.0,
+        "avg_duration_ms": 92,
+        "quality_score": 1.0
+      }
+    },
+    {
+      "agent": "rahnama",
+      "action": "keep",
+      "rationale": "strong (approval 100%) but needs ≥30d clean record before promote",
+      "evidence": {
+        "runs": 1,
+        "fail_rate": 0,
+        "approval_ratio": 1,
+        "avg_cost_usd": 0.0,
+        "avg_duration_ms": 270,
+        "quality_score": 1.0
+      }
+    },
+    {
+      "agent": "bineh",
+      "action": "keep",
+      "rationale": "strong (approval 100%) but needs ≥30d clean record before promote",
+      "evidence": {
+        "runs": 1,
+        "fail_rate": 0,
+        "approval_ratio": 1,
+        "avg_cost_usd": 0.0,
+        "avg_duration_ms": 75,
+        "quality_score": 1.0
+      }
+    },
+    {
+      "agent": "nasim",
+      "action": "keep",
+      "rationale": "strong (approval 100%) but needs ≥30d clean record before promote",
+      "evidence": {
+        "runs": 4,
+        "fail_rate": 0,
+        "approval_ratio": 1,
+        "avg_cost_usd": 0.0,
+        "avg_duration_ms": 871,
+        "quality_score": 1.0
+      }
+    },
+    {
+      "agent": "avang",
+      "action": "keep",
+      "rationale": "strong (approval 100%) but needs ≥30d clean record before promote",
+      "evidence": {
+        "runs": 1,
+        "fail_rate": 0,
+        "approval_ratio": 1,
+        "avg_cost_usd": 0.0,
+        "avg_duration_ms": 93,
+        "quality_score": 1.0
+      }
+    },
+    {
+      "agent": "rahbar",
+      "action": "keep",
+      "rationale": "strong (approval 100%) but needs ≥30d clean record before promote",
+      "evidence": {
+        "runs": 6,
+        "fail_rate": 0,
+        "approval_ratio": 1,
+        "avg_cost_usd": 0.0,
+        "avg_duration_ms": 1669,
+        "quality_score": 1.0
+      }
+    },
+    {
+      "agent": "mehmandar",
+      "action": "keep",
+      "rationale": "strong (approval 100%) but needs ≥30d clean record before promote",
+      "evidence": {
+        "runs": 1,
+        "fail_rate": 0,
+        "approval_ratio": 1,
+        "avg_cost_usd": 0.0,
+        "avg_duration_ms": 159,
+        "quality_score": 1.0
+      }
+    },
+    {
+      "agent": "mehrban",
+      "action": "keep",
+      "rationale": "strong (approval 100%) but needs ≥30d clean record before promote",
+      "evidence": {
+        "runs": 1,
+        "fail_rate": 0,
+        "approval_ratio": 1,
+        "avg_cost_usd": 0.0,
+        "avg_duration_ms": 99,
+        "quality_score": 1.0
+      }
+    },
+    {
+      "agent": "zirak",
+      "action": "keep",
+      "rationale": "strong (approval 100%) but needs ≥30d clean record before promote",
+      "evidence": {
+        "runs": 4,
+        "fail_rate": 0,
+        "approval_ratio": 1,
+        "avg_cost_usd": 0.0,
+        "avg_duration_ms": 84,
+        "quality_score": 1.0
+      }
+    },
+    {
+      "agent": "ramin",
+      "action": "keep",
+      "rationale": "strong (approval 100%) but needs ≥30d clean record before promote",
+      "evidence": {
+        "runs": 4,
+        "fail_rate": 0,
+        "approval_ratio": 1,
+        "avg_cost_usd": 0.0,
+        "avg_duration_ms": 963,
+        "quality_score": 1.0
+      }
+    },
+    {
+      "agent": "afshin",
+      "action": "keep",
+      "rationale": "strong (approval 100%) but needs ≥30d clean record before promote",
+      "evidence": {
+        "runs": 1,
+        "fail_rate": 0,
+        "approval_ratio": 1,
+        "avg_cost_usd": 0.0,
+        "avg_duration_ms": 293,
+        "quality_score": 1.0
+      }
+    },
+    {
+      "agent": "goyesh",
+      "action": "keep",
+      "rationale": "strong (approval 100%) but needs ≥30d clean record before promote",
+      "evidence": {
+        "runs": 1,
+        "fail_rate": 0,
+        "approval_ratio": 1,
+        "avg_cost_usd": 0.0,
+        "avg_duration_ms": 94,
+        "quality_score": 1.0
+      }
+    },
+    {
+      "agent": "kherad",
+      "action": "keep",
+      "rationale": "strong (approval 100%) but needs ≥30d clean record before promote",
+      "evidence": {
+        "runs": 1,
+        "fail_rate": 0,
+        "approval_ratio": 1,
+        "avg_cost_usd": 0.0,
+        "avg_duration_ms": 95,
+        "quality_score": 1.0
+      }
+    },
+    {
+      "agent": "shahed",
+      "action": "keep",
+      "rationale": "strong (approval 100%) but needs ≥30d clean record before promote",
+      "evidence": {
+        "runs": 4,
+        "fail_rate": 0,
+        "approval_ratio": 1,
+        "avg_cost_usd": 0.0,
+        "avg_duration_ms": 732,
+        "quality_score": 1.0
+      }
+    },
+    {
+      "agent": "dadbeh",
+      "action": "keep",
+      "rationale": "strong (approval 100%) but needs ≥30d clean record before promote",
+      "evidence": {
+        "runs": 5,
+        "fail_rate": 0,
+        "approval_ratio": 1,
+        "avg_cost_usd": 0.0,
+        "avg_duration_ms": 724,
+        "quality_score": 1.0
+      }
+    },
+    {
+      "agent": "davari",
+      "action": "keep",
+      "rationale": "strong (approval 100%) but needs ≥30d clean record before promote",
+      "evidence": {
+        "runs": 1,
+        "fail_rate": 0,
+        "approval_ratio": 1,
+        "avg_cost_usd": 0.0,
+        "avg_duration_ms": 83,
+        "quality_score": 1.0
+      }
+    },
+    {
+      "agent": "cross-post",
+      "action": "keep",
+      "rationale": "strong (approval 97%) but needs ≥30d clean record before promote",
+      "evidence": {
+        "runs": 33,
+        "fail_rate": 0,
+        "approval_ratio": 0.97,
+        "avg_cost_usd": 0.0,
+        "avg_duration_ms": 343,
+        "quality_score": 0.982
+      }
+    },
+    {
+      "agent": "bidar",
+      "action": "keep",
+      "rationale": "steady at approval 80%, cost $0.0000",
+      "evidence": {
+        "runs": 5,
+        "fail_rate": 0,
+        "approval_ratio": 0.8,
+        "avg_cost_usd": 0.0,
+        "avg_duration_ms": 456,
+        "quality_score": 0.88
+      }
+    },
+    {
+      "agent": "ravi",
+      "action": "keep",
+      "rationale": "strong (approval 86%) but needs ≥30d clean record before promote",
+      "evidence": {
+        "runs": 7,
+        "fail_rate": 0.143,
+        "approval_ratio": 0.857,
+        "avg_cost_usd": 0.0,
+        "avg_duration_ms": 251,
+        "quality_score": 0.857
+      }
+    },
+    {
+      "agent": "roya",
+      "action": "keep",
+      "rationale": "steady at approval 75%, cost $0.0000",
+      "evidence": {
+        "runs": 4,
+        "fail_rate": 0.25,
+        "approval_ratio": 0.75,
+        "avg_cost_usd": 0.0,
+        "avg_duration_ms": 1033,
+        "quality_score": 0.75
+      }
+    }
+  ]
+}

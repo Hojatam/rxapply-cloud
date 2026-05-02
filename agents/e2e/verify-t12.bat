@@ -1,0 +1,14 @@
+@echo off
+echo ===========================================================
+echo  T12 — End-to-end pipeline verification
+echo ===========================================================
+echo.
+
+echo === The full chain in one query ===
+docker exec supabase_db_rxapply-test psql -U postgres -d postgres -c "WITH counts AS ( SELECT 'briefs (any status)' AS layer, COUNT(*) AS n FROM content_briefs UNION ALL SELECT 'briefs from pooya', COUNT(*) FROM content_briefs WHERE source='pooya' UNION ALL SELECT 'masters (en)', COUNT(*) FROM content_assets WHERE kind='master' AND language='en' UNION ALL SELECT 'masters (fa)', COUNT(*) FROM content_assets WHERE kind='master' AND language='fa' UNION ALL SELECT 'masters (ar)', COUNT(*) FROM content_assets WHERE kind='master' AND language='ar' UNION ALL SELECT 'scheduled_posts (total)', COUNT(*) FROM scheduled_posts UNION ALL SELECT 'scheduled_posts (dry_run_logged)', COUNT(*) FROM scheduled_posts WHERE status='dry_run_logged' UNION ALL SELECT 'agent_runs (last 24h)', COUNT(*) FROM agent_runs WHERE created_at >= NOW() - INTERVAL '24 hours' UNION ALL SELECT 'agent_efficiency (today)', COUNT(*) FROM agent_efficiency WHERE date = CURRENT_DATE UNION ALL SELECT 'engagement_events', COUNT(*) FROM engagement_events UNION ALL SELECT 'leads with engagement_score > 0', COUNT(*) FROM leads WHERE engagement_score > 0 UNION ALL SELECT 'nurture_schedule rows', COUNT(*) FROM nurture_schedule UNION ALL SELECT 'nurture_schedule sequences', COUNT(DISTINCT sequence_id) FROM nurture_schedule UNION ALL SELECT 'n8n_executions', COUNT(*) FROM n8n_executions ) SELECT layer, n FROM counts;"
+echo.
+
+echo === T12 invariants ===
+docker exec supabase_db_rxapply-test psql -U postgres -d postgres -c "WITH chk AS (SELECT (SELECT COUNT(*) FROM content_briefs WHERE source='pooya') >= 3 AS briefs_ge_3, (SELECT COUNT(*) FROM content_assets WHERE kind='master' AND language='en') >= 1 AS en_master_present, (SELECT COUNT(*) FROM content_assets WHERE kind='master' AND language='fa') >= 1 AS fa_master_present, (SELECT COUNT(*) FROM content_assets WHERE kind='master' AND language='ar') >= 1 AS ar_master_present, (SELECT COUNT(*) FROM scheduled_posts WHERE status='dry_run_logged') >= 11 AS dryrun_ge_11, (SELECT COUNT(*) FROM agent_runs WHERE created_at >= NOW() - INTERVAL '24 hours') >= 21 AS agent_runs_ge_21, (SELECT COUNT(*) FROM agent_efficiency WHERE date = CURRENT_DATE) >= 21 AS efficiency_ge_21, (SELECT COUNT(*) FROM nurture_schedule) >= 15 AS nurture_ge_15) SELECT briefs_ge_3, en_master_present, fa_master_present, ar_master_present, dryrun_ge_11, agent_runs_ge_21, efficiency_ge_21, nurture_ge_15, CASE WHEN briefs_ge_3 AND en_master_present AND fa_master_present AND ar_master_present AND dryrun_ge_11 AND agent_runs_ge_21 AND efficiency_ge_21 AND nurture_ge_15 THEN 'PASS' ELSE 'FAIL' END AS scorecard_t12 FROM chk;"
+echo.
+pause

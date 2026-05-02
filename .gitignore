@@ -1,0 +1,32 @@
+.env
+.env.*
+!.env.example
+node_modules/
+*.log
+*.log.gz
+proxy.log
+proxy.err
+proxy.out
+proxy.err.log
+proxy.out.log
+proxy-restart.log
+proxy-restart.err
+.DS_Store
+.next/
+dist/
+build/
+.turbo/
+
+# Pre-compression backup of team sprite (kept locally, not in git)
+cowork-proxy/public/team/team-original.jpg
+
+# Per-run logs (rotated to disk, large; not in git)
+cowork-proxy/runs/
+
+# Docker volumes / data
+supabase/.branches/
+supabase/.temp/
+
+# OS
+Thumbs.db
+desktop.ini

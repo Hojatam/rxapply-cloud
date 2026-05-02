@@ -1,0 +1,57 @@
+{
+  "_meta": {
+    "agent": "davari",
+    "scenario": "T11b",
+    "executions_seen": 5,
+    "workflows_seen": 3,
+    "status_counts": {
+      "green": 1,
+      "amber": 1,
+      "red": 1
+    }
+  },
+  "flow_health": [
+    {
+      "workflow": "wf:01-content-distribute",
+      "status": "red",
+      "executions": 3,
+      "slow_nodes": [
+        {
+          "node": "http_run_agent",
+          "worst_ms": 21000,
+          "threshold_ms": 7400,
+          "mode": "median×2"
+        }
+      ],
+      "retry_storms": [
+        {
+          "node": "http_run_agent",
+          "retries": 2
+        }
+      ]
+    },
+    {
+      "workflow": "wf:04-weekly-metrics",
+      "status": "amber",
+      "executions": 1,
+      "slow_nodes": [],
+      "retry_storms": [
+        {
+          "node": "http_run_agent",
+          "retries": 1
+        }
+      ]
+    },
+    {
+      "workflow": "wf:08-cross-post-dryrun",
+      "status": "green",
+      "executions": 1,
+      "slow_nodes": [],
+      "retry_storms": []
+    }
+  ],
+  "suggested_fixes": [
+    "wf:04-weekly-metrics: retry rate 100% above 5% threshold. Investigate transient errors.",
+    "wf:01-content-distribute: http_run_agent hit 21000ms (threshold 7400ms, median×2) AND retry rate 67% (2 retries / 3 runs). Inspect the slowest run's full node trace; check cowork-proxy load if http_run_agent is involved."
+  ]
+}

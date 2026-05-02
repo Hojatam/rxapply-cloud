@@ -1,0 +1,58 @@
+{
+  "name": "audit-test",
+  "description": "auto",
+  "graphData": {
+    "drawflow": {
+      "Home": {
+        "data": {
+          "1": {
+            "id": 1,
+            "data": {
+              "args": "help",
+              "agent": "zirak"
+            },
+            "inputs": {},
+            "pos_y": 100,
+            "pos_x": 100,
+            "outputs": {
+              "output_1": {
+                "connections": [
+                  {
+                    "node": "2",
+                    "output": "input_1"
+                  }
+                ]
+              }
+            },
+            "html": "<div>agent</div>",
+            "name": "agent",
+            "typenode": false,
+            "class": "agent-node"
+          },
+          "2": {
+            "id": 2,
+            "data": {},
+            "inputs": {
+              "input_1": {
+                "connections": [
+                  {
+                    "input": "output_1",
+                    "node": "1"
+                  }
+                ]
+              }
+            },
+            "pos_y": 100,
+            "pos_x": 400,
+            "outputs": {},
+            "html": "<div>output</div>",
+            "name": "output",
+            "typenode": false,
+            "class": "output-node"
+          }
+        }
+      }
+    }
+  },
+  "savedAt": "2026-05-01T01:40:44.275Z"
+}

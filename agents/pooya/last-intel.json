@@ -1,0 +1,87 @@
+[
+  {
+    "id": "d3ebec77-4338-4061-85b1-98f9163e391a",
+    "agent": "roya",
+    "kind": "market_heatmap",
+    "payload": {
+      "cells": [
+        {
+          "language": "en",
+          "destination": "canada",
+          "priority_score": 0.82
+        },
+        {
+          "language": "fa",
+          "destination": "canada",
+          "priority_score": 0.71
+        },
+        {
+          "language": "ar",
+          "destination": "uae",
+          "priority_score": 0.68
+        }
+      ],
+      "top_3_movers": [
+        {
+          "why": "new RCDS exam dates",
+          "cell": "fa-canada",
+          "delta_pct": 18
+        },
+        {
+          "why": "DHA fee reduction",
+          "cell": "ar-uae",
+          "delta_pct": 14
+        },
+        {
+          "why": "GDC backlog",
+          "cell": "en-uk",
+          "delta_pct": -9
+        }
+      ]
+    },
+    "created_at": "2026-04-30 01:48:11.239171+00"
+  },
+  {
+    "id": "d062f519-b8a4-47cd-8384-6507fd47bd81",
+    "agent": "shahed",
+    "kind": "competitor_diff",
+    "payload": {
+      "after": "$950 program fee",
+      "before": "$1,200 program fee",
+      "competitor": "dentmoves.example",
+      "change_type": "FEE",
+      "suggested_response": "highlight RxApply included consultation"
+    },
+    "created_at": "2026-04-30 01:48:11.239171+00"
+  },
+  {
+    "id": "d0b74aa7-98c7-4c5f-b619-a2f11bd1c2c5",
+    "agent": "dadbeh",
+    "kind": "reg_change",
+    "payload": {
+      "regulator": "NDEB Canada",
+      "trigger_date": "2026-04-22",
+      "change_summary": "AFK exam scheduling moves to monthly cohorts",
+      "affected_modules": [
+        "advisor",
+        "guide:canada"
+      ]
+    },
+    "created_at": "2026-04-30 01:48:11.239171+00"
+  },
+  {
+    "id": "6394fe97-5dc2-44e0-8ae9-c9713ffdca43",
+    "agent": "nasim",
+    "kind": "trend_spike",
+    "payload": {
+      "topic": "bridging program timeline 2026",
+      "momentum_pct": 42,
+      "sample_threads": [
+        "r/dentistry/12345",
+        "t.me/dentmoves/678"
+      ],
+      "predicted_relevance": 0.81
+    },
+    "created_at": "2026-04-30 01:48:11.239171+00"
+  }
+]

@@ -1,0 +1,111 @@
+{
+  "name": "cron-intel-daily",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 * * *"
+            }
+          ]
+        }
+      },
+      "id": "cron-intel-trigger",
+      "name": "Schedule (06:00 daily)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:7777/run-helper",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"agent\": \"roya\",\n  \"command\": \"run\",\n  \"args\": [\"--trigger\", \"cron\"]\n}",
+        "options": {"timeout": 60000, "response": {"response": {"neverError": true}}}
+      },
+      "id": "intel-roya",
+      "name": "Roya (market heatmap)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:7777/run-helper",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"agent\": \"shahed\",\n  \"command\": \"run\",\n  \"args\": [\"--trigger\", \"cron\"]\n}",
+        "options": {"timeout": 60000, "response": {"response": {"neverError": true}}}
+      },
+      "id": "intel-shahed",
+      "name": "Shahed (competitor diff)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:7777/run-helper",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"agent\": \"dadbeh\",\n  \"command\": \"run\",\n  \"args\": [\"--trigger\", \"cron\"]\n}",
+        "options": {"timeout": 60000, "response": {"response": {"neverError": true}}}
+      },
+      "id": "intel-dadbeh",
+      "name": "Dadbeh (regulatory)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [940, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:7777/run-helper",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"agent\": \"nasim\",\n  \"command\": \"run\",\n  \"args\": [\"--trigger\", \"cron\"]\n}",
+        "options": {"timeout": 60000, "response": {"response": {"neverError": true}}}
+      },
+      "id": "intel-nasim",
+      "name": "Nasim (trend spike)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1180, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:7777/run-helper",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"agent\": \"ramin\",\n  \"command\": \"run\",\n  \"args\": [\"--trigger\", \"cron\"]\n}",
+        "options": {"timeout": 60000, "response": {"response": {"neverError": true}}}
+      },
+      "id": "intel-ramin",
+      "name": "Ramin (keywords — must run last)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1420, 300]
+    }
+  ],
+  "connections": {
+    "Schedule (06:00 daily)":     {"main": [[{"node": "Roya (market heatmap)", "type": "main", "index": 0}]]},
+    "Roya (market heatmap)":      {"main": [[{"node": "Shahed (competitor diff)", "type": "main", "index": 0}]]},
+    "Shahed (competitor diff)":   {"main": [[{"node": "Dadbeh (regulatory)", "type": "main", "index": 0}]]},
+    "Dadbeh (regulatory)":        {"main": [[{"node": "Nasim (trend spike)", "type": "main", "index": 0}]]},
+    "Nasim (trend spike)":        {"main": [[{"node": "Ramin (keywords — must run last)", "type": "main", "index": 0}]]}
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true
+  },
+  "tags": []
+}
