@@ -13,6 +13,30 @@ Format:
 
 ---
 
+## 2026-05-01 · M7 · `claude` CLI subprocess removed (Track 1 #3 DONE)
+
+- `runClaude()` in server.js was the only use of `spawn('claude' …)`.
+  Rewritten as a direct Anthropic API call using `fetch`. Same in/out
+  shape so the two callers (`/run-agent`, `/run-agents-parallel`) work
+  unchanged.
+- Added `MODEL_ALIASES` map: shorthand `sonnet`/`opus`/`haiku` (which
+  the old CLI accepted) resolve to current snapshots:
+    sonnet → claude-sonnet-4-5-20250929
+    opus   → claude-opus-4-7
+    haiku  → claude-haiku-4-5-20251001
+  Anything else passes through unchanged so a caller can ask for a
+  specific model snapshot directly.
+- Removed `CLAUDE_BIN` env var + `claudeBin` field from `/health`
+  (no longer meaningful; replaced with `llmTransport: 'anthropic-api-direct'`).
+- Boot log now reads `llm=anthropic-api-direct`.
+- Boot test: cloud proxy listened on :7779, `/health` returned 200
+  with the new fields, zero startup errors.
+
+Track 1 #3 (drop CLI subprocess) is **DONE**. Cloud build now has
+zero subprocess spawns for LLM work — Python helpers are the only
+remaining child processes (still needed for KB extract.py and
+agent-helper scripts).
+
 ## 2026-05-01 · M6 · anthropic-chat + log-writer + server.js inline (pg port DONE)
 
 - `anthropic-chat.js` ported. `streamChat`, `recentRuns`, `getChat`,

@@ -68,10 +68,8 @@ app.use((req, res, next) => {
 
 const MODE = process.env.PROXY_MODE || 'cowork';
 const LOG = path.join(__dirname, 'proxy.log');
-const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
 const AGENTS_DIR = path.resolve(__dirname, '..', 'agents');
 const PYTHON_BIN = process.env.PYTHON_BIN || 'python';
-const PG_CONTAINER = process.env.SUPABASE_DB_CONTAINER || 'supabase_db_rxapply-test';
 
 // Allow-list of safe agent names to prevent path traversal in /run-helper and /prompts/:agent
 const AGENT_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,39}$/;
@@ -83,21 +81,50 @@ function log(line) {
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────
-function runClaude({ prompt, model = 'sonnet' }) {
-  return new Promise((resolve, reject) => {
-    const args = ['--print', '--model', model];
-    const child = spawn(CLAUDE_BIN, args, { shell: process.platform === 'win32' });
-    let out = '', err = '';
-    child.stdin.write(prompt);
-    child.stdin.end();
-    child.stdout.on('data', d => { out += d.toString(); });
-    child.stderr.on('data', d => { err += d.toString(); });
-    child.on('error', e => reject({ code: -1, error: e.message }));
-    child.on('close', code => {
-      if (code === 0) resolve({ output: out, model });
-      else reject({ code, error: err || `claude exited with code ${code}` });
+// Map shorthand model aliases (legacy `claude` CLI accepts these) to real
+// Anthropic model IDs. Anything else is passed through unchanged.
+const MODEL_ALIASES = {
+  sonnet:  'claude-sonnet-4-5-20250929',
+  opus:    'claude-opus-4-7',
+  haiku:   'claude-haiku-4-5-20251001',
+};
+
+// runClaude — drop-in replacement for the old `claude --print` subprocess.
+// Direct Anthropic API call. Same input/output shape so existing callers
+// (/run-agent, /run-agents-parallel) work without changes.
+//
+// Returns: { output, model, usage } on success
+// Rejects:  { code, error } on failure (error string for legacy compatibility)
+async function runClaude({ prompt, model = 'sonnet' }) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    return Promise.reject({ code: -1, error: 'ANTHROPIC_API_KEY not set' });
+  }
+  const resolvedModel = MODEL_ALIASES[model] || model;
+  try {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: resolvedModel,
+        max_tokens: parseInt(process.env.ANTHROPIC_MAX_TOKENS, 10) || 4096,
+        messages: [{ role: 'user', content: String(prompt || '') }],
+      }),
     });
-  });
+    if (!r.ok) {
+      const errText = await r.text();
+      return Promise.reject({ code: r.status, error: `Anthropic ${r.status}: ${errText.slice(0, 400)}` });
+    }
+    const j = await r.json();
+    const text = (j.content && j.content[0] && j.content[0].text) || '';
+    return { output: text, model: resolvedModel, usage: j.usage || null };
+  } catch (e) {
+    return Promise.reject({ code: -1, error: (e && e.message) || String(e) });
+  }
 }
 
 // Spawn `python agents/<agent>/<agent>.py <command> [args...]`. Captures stdout/stderr.
@@ -171,7 +198,7 @@ app.get('/config.js', (_, res) => {
 app.get('/health', (_, res) => res.json({
   ok: true,
   mode: MODE,
-  claudeBin: CLAUDE_BIN,
+  llmTransport: 'anthropic-api-direct',         // cloud build no longer shells out to `claude`
   pythonBin: PYTHON_BIN,
   agentsDir: AGENTS_DIR,
   agentsDirExists: fs.existsSync(AGENTS_DIR),
@@ -1981,7 +2008,7 @@ toolsRegistry.sync()
 
 app.listen(PORT, () => {
   console.log(`cowork-proxy listening on :${PORT}`);
-  console.log(`  mode=${MODE}  claudeBin=${CLAUDE_BIN}  pythonBin=${PYTHON_BIN}`);
+  console.log(`  mode=${MODE}  llm=anthropic-api-direct  pythonBin=${PYTHON_BIN}`);
   console.log(`  agentsDir=${AGENTS_DIR}`);
   console.log(`  routes: /health, /run-agent, /run-agents-parallel, /run-helper,`);
   console.log(`          /prompts/:agent (GET,PUT), /prompts/:agent/versions, /agents`);
