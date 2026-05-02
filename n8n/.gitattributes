@@ -1,0 +1,6 @@
+# Force LF line endings for shell scripts and Dockerfile
+# regardless of host OS. Without this, Windows clients commit
+# CRLF and Linux containers can't execute the scripts.
+*.sh        text eol=lf
+Dockerfile  text eol=lf
+entrypoint* text eol=lf
