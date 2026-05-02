@@ -22,8 +22,9 @@ const CAPABILITY_REGISTRY = {
   pooya:     ['plan', 'research'],
   paya:      ['plan'],
 
-  // Research / fact-grounding
-  daneshyar: ['research'],   // KB-grounded; verifies facts against the KB
+  // KB-grounded fact verification (own dedicated capability so recipes can
+  // explicitly invoke Daneshyar to verify rather than do general research).
+  daneshyar: ['verify', 'research'],
 
   // Drafting (long-form, master voice)
   sepehr:    ['draft'],

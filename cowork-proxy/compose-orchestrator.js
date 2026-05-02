@@ -37,6 +37,7 @@ const KB            = require('./knowledge-base');
 const handoffs      = require('./agent-handoffs');
 const capabilities  = require('./agent-capabilities');
 const renderers     = require('./compose-renderers');
+const logWriter     = require('./log-writer');
 
 const RECIPES_DIR = path.resolve(__dirname, '..', 'compose-recipes');
 
@@ -137,8 +138,8 @@ function _buildSystemPrompt({ agent, stageName, recipe, run, masterDraft, lang }
   const brand = brandProfile.renderAsPromptBlock();
   if (brand) blocks.push(brand);
 
-  // KB grounding for research / draft / critique stages
-  if (['research', 'draft', 'critique'].includes(stageName)) {
+  // KB grounding for research / verify / draft / critique stages
+  if (['research', 'verify', 'draft', 'critique'].includes(stageName)) {
     try {
       const country = KB.detectCountry(run.topic);
       const kb = KB.renderAsBlock({ country, query: run.topic, limit: 6 });
@@ -186,6 +187,27 @@ knowledge base — never invent URLs. Return ONLY this JSON:
   "sources_used": ["<name of KB section / institution>"],
   "handoff_intent": null
 }`,
+
+  verify:
+`You are Daneshyar, the KB-grounded fact verifier. Cross-check every numeric / regulatory / institutional
+claim in the upstream RESEARCH and DRAFT below against the knowledge base block in your system prompt.
+Mark anything you cannot verify. Do NOT propose new facts; only verify the existing ones.
+
+Return ONLY this JSON:
+
+{
+  "passed": true | false,
+  "verified_facts": [
+    { "claim": "<exact claim>", "kb_reference": "<which KB doc / section>", "confidence": 0.00 }
+  ],
+  "issues": [
+    { "claim": "<exact claim>", "problem": "<why it's wrong / unverifiable>", "fix": "<safer phrasing or removal>" }
+  ],
+  "overall_confidence": 0.00,
+  "handoff_intent": null
+}
+
+Pass requires: zero issues with confidence < 0.7 AND no claim flagged "unverifiable" or "wrong".`,
 
   draft:
 `Using the plan + research, write the FIRST DRAFT in the master voice for the format below.
@@ -575,7 +597,20 @@ async function _executeLlmStage({ runId, run, recipe, stage, stageIndex, lang, p
     agent, stageName, recipe, run, masterDraft, lang,
   });
 
+  // Open an agent_runs row so this stage execution shows up in the agent's
+  // Train tab, the Overview cost rollup, and is rate-able.
+  let agentRunId = null;
   const startedAt = Date.now();
+  try {
+    const lr = await logWriter.recordRunStart({
+      agent,
+      command: `compose:${recipe.id}:${stageName}${lang ? ':' + lang : ''}`,
+      args: [run.topic],
+      stdin: null,
+    });
+    agentRunId = lr.runId;
+  } catch (_) { /* non-fatal */ }
+
   let parsed, usage = {}, modelUsed = model, errMsg = null;
   try {
     const r = await llm.chat({
@@ -596,9 +631,12 @@ async function _executeLlmStage({ runId, run, recipe, stage, stageIndex, lang, p
   const costUsd = agentModels.calcCost(modelUsed, inputTokens, outputTokens);
 
   if (errMsg) {
+    if (agentRunId) {
+      try { await logWriter.recordRunEnd({ runId: agentRunId, agent, status: 'fail', error: errMsg, durationMs: Date.now() - startedAt, costUsd }); } catch (_) {}
+    }
     await _writeStage({
       runId, stageIndex, stageName, capability, lang: lang || null,
-      agent, model: modelUsed, input: { user_prompt_excerpt: userPrompt.slice(0, 500) },
+      agent, model: modelUsed, input: { user_prompt_excerpt: userPrompt.slice(0, 500), agent_run_id: agentRunId },
       output: null, status: 'failed', error: errMsg,
       inputTokens, outputTokens, costUsd,
     });
@@ -625,10 +663,24 @@ async function _executeLlmStage({ runId, run, recipe, stage, stageIndex, lang, p
   const gateHere = _shouldGate(stageName, recipe, run.gate_strategy);
   const finalStatus = gateHere ? 'gated' : 'done';
 
+  // Close the agent_runs row on success.
+  if (agentRunId) {
+    try {
+      await logWriter.recordRunEnd({
+        runId: agentRunId,
+        agent,
+        status: 'success',
+        parsedOutput: parsed,
+        costUsd,
+        durationMs: Date.now() - startedAt,
+      });
+    } catch (_) { /* non-fatal */ }
+  }
+
   await _writeStage({
     runId, stageIndex, stageName, capability, lang: lang || null,
     agent, model: modelUsed,
-    input: { user_prompt_excerpt: userPrompt.slice(0, 1500) },
+    input: { user_prompt_excerpt: userPrompt.slice(0, 1500), agent_run_id: agentRunId },
     output: parsed,
     status: finalStatus, approvalRequired: gateHere,
     inputTokens, outputTokens, costUsd,

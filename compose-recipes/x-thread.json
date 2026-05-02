@@ -3,19 +3,20 @@
   "label": "X thread",
   "icon": "twitter",
   "description": "Multi-tweet thread for X (Twitter): hook tweet + 4-12 body tweets + closing tweet with CTA. Auto-split per 280-char tweets. Optional cover for the first tweet.",
-  "version": "2",
+  "version": "3",
 
   "stages": [
     { "name": "plan",     "capability": "plan" },
     { "name": "draft",    "capability": "draft", "params": { "length_words": [350, 800] } },
     { "name": "critique", "capability": "critique" },
+    { "name": "verify",   "capability": "verify", "if_option": "kb_verify" },
     { "name": "adapt",    "capability": "adapt",
       "params": { "produce": ["hook_tweet", "body_tweets", "closing_tweet", "design_brief"] } },
     { "name": "render",   "renderer": "x-thread" },
     { "name": "image",    "renderer": "image-cover", "if_option": "with_image" }
   ],
 
-  "gateable_stages": ["critique", "adapt"],
+  "gateable_stages": ["critique", "verify", "adapt"],
 
   "translate": {
     "capability": "translate",
@@ -26,6 +27,7 @@
     { "key": "max_tweets",   "label": "Max tweets in thread", "type": "number", "default": 10, "min": 5, "max": 20 },
     { "key": "primary_cta",  "label": "CTA URL (last tweet)", "type": "text", "placeholder": "https://rxapply.com" },
     { "key": "use_emoji",    "label": "Use emoji",            "type": "checkbox", "default": true },
+    { "key": "kb_verify",    "label": "Daneshyar KB fact-check",                "type": "checkbox", "default": true },
     { "key": "with_image",   "label": "Generate cover image for hook tweet (~$0.04)", "type": "checkbox", "default": false }
   ]
 }

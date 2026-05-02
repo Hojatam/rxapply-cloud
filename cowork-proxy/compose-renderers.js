@@ -461,7 +461,8 @@ illustration style, clean composition, minimal text overlay, no logo.`;
     prompt: brief,
     runId: run.id,
     lang: lang || run.master_lang,
-    size: '1024x1024',
+    recipeId: recipe && recipe.id,
+    topic: run.topic,
   });
   if (!r.ok) throw new Error(r.error || 'image generation failed');
 
@@ -470,9 +471,12 @@ illustration style, clean composition, minimal text overlay, no logo.`;
     lang: lang || run.master_lang,
     url: r.url,
     key: r.key,
+    media_id: r.mediaId,
     model: r.model,
     size: r.size,
     cost_usd: r.cost_usd,
+    agent: 'afshin',                  // attribution for the UI cost annotation
+    agent_run_id: r.agent_run_id,
     prompt: brief,
   };
 }

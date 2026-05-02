@@ -5925,6 +5925,31 @@ function coRenderStageOutput(stage, expandedByDefault) {
             </div>` : ''}
         `;
       }
+      case 'verify': {
+        const verifiedFacts = Array.isArray(out.verified_facts) ? out.verified_facts : [];
+        const issues = Array.isArray(out.issues) ? out.issues : [];
+        const passColor = out.passed ? '#16a34a' : '#dc2626';
+        const conf = Number(out.overall_confidence) || 0;
+        const confColor = conf >= 0.8 ? '#16a34a' : conf >= 0.6 ? '#d97706' : '#dc2626';
+        return `
+          <div class="mt-2 flex items-center gap-2 flex-wrap">
+            <span class="text-xs uppercase tracking-wider" style="color:${passColor};font-weight:600;">${out.passed ? 'KB-verified' : 'KB-issues'}</span>
+            <span class="text-xs">overall confidence: <span class="mono" style="color:${confColor};font-weight:600;">${Math.round(conf * 100)}%</span></span>
+          </div>
+          ${verifiedFacts.length ? `
+            <div class="mt-2">
+              <div class="text-xs uppercase tracking-wider text-emerald-700">Verified facts</div>
+              <ul class="text-xs list-disc pl-5 mt-1">${verifiedFacts.map(f => `<li>${escapeHtml(f.claim || '')} <span class="text-slate-400">· ${escapeHtml(f.kb_reference || '?')} · ${Math.round((Number(f.confidence) || 0) * 100)}%</span></li>`).join('')}</ul>
+            </div>` : ''}
+          ${issues.length ? `
+            <div class="mt-2">
+              <div class="text-xs uppercase tracking-wider text-rose-700">KB-flagged issues</div>
+              <div class="space-y-2 mt-1">
+                ${issues.map(i => `<div class="text-xs"><span class="text-rose-700">${escapeHtml(i.claim || '')}</span><div class="text-slate-500 mt-1">problem: ${escapeHtml(i.problem || '')}</div><div class="text-slate-700 mt-1">→ ${escapeHtml(i.fix || '')}</div></div>`).join('')}
+              </div>
+            </div>` : ''}
+        `;
+      }
       case 'audit': {
         const issues = Array.isArray(out.issues) ? out.issues : [];
         const verdictColor = out.verdict === 'pass' ? '#16a34a' : '#dc2626';

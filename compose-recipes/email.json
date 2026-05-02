@@ -3,19 +3,20 @@
   "label": "Email",
   "icon": "mail",
   "description": "HTML email with subject, preview text, body, and an optional hero image. Good for campaigns, announcements, newsletters.",
-  "version": "2",
+  "version": "3",
 
   "stages": [
     { "name": "plan",     "capability": "plan" },
     { "name": "research", "capability": "research" },
     { "name": "draft",    "capability": "draft",    "params": { "length_words": [400, 700] } },
     { "name": "critique", "capability": "critique" },
+    { "name": "verify",   "capability": "verify",   "if_option": "kb_verify" },
     { "name": "adapt",    "capability": "adapt",    "params": { "produce": ["subject", "preview", "body", "design_brief"] } },
     { "name": "render",   "renderer": "email-html" },
     { "name": "image",    "renderer": "image-cover", "if_option": "with_image" }
   ],
 
-  "gateable_stages": ["critique", "adapt"],
+  "gateable_stages": ["critique", "verify", "adapt"],
 
   "translate": {
     "capability": "translate",
@@ -27,6 +28,7 @@
     { "key": "segment",     "label": "Audience segment",  "type": "text", "placeholder": "e.g. UK NDEB candidates" },
     { "key": "primary_cta", "label": "Primary CTA URL",   "type": "text", "placeholder": "https://rxapply.com/uk" },
     { "key": "from_name",   "label": "From name",         "type": "text", "placeholder": "RxApply", "default": "RxApply" },
+    { "key": "kb_verify",   "label": "Daneshyar KB fact-check",       "type": "checkbox", "default": true },
     { "key": "with_image",  "label": "Generate hero image (~$0.04)", "type": "checkbox", "default": false }
   ]
 }
