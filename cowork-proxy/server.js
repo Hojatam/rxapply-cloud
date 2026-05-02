@@ -623,17 +623,16 @@ app.patch('/settings', auth.middleware, async (req, res) => {
   }
 });
 
-// ── F3 · Service control ────────────────────────────────────────────────
-// GET  /services                       — status of 4 services
-// GET  /services/:name                 — status of one
-// POST /services/:name/:action         — start | stop | restart
+// ── Health Monitor (M18 · was F3 service control) ──────────────────────
+// GET  /services         → all probes (database, storage, anthropic, openai, process)
+// GET  /services/:name   → single probe
+// POST /services/:name/:action → 410 Gone (Railway can't shell out to docker)
 const SERVICE_NAME_RE = /^[a-z][a-z0-9_-]{0,30}$/;
-const SERVICE_ACTIONS = ['start', 'stop', 'restart'];
 
 app.get('/services', async (_, res) => {
   try {
-    const all = await services.statusAll();
-    res.json({ ok: true, services: all });
+    const r = await services.probeAll();
+    res.json({ ok: true, ...r });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -641,26 +640,19 @@ app.get('/services/:name', async (req, res) => {
   const name = req.params.name;
   if (!SERVICE_NAME_RE.test(name)) return res.status(400).json({ error: 'invalid service name' });
   try {
-    const status = await services.getStatus(name);
-    if (status.error) return res.status(404).json({ ok: false, error: status.error });
-    res.json({ ok: true, status });
+    const r = await services.probe(name);
+    if (r.error && /unknown service/.test(r.error)) return res.status(404).json({ ok: false, error: r.error });
+    res.json({ ok: true, name, status: r });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-// POST /services/:name/:action — start/stop/restart. Gated by auth (control plane).
-app.post('/services/:name/:action', auth.middleware, async (req, res) => {
-  const { name, action } = req.params;
-  if (!SERVICE_NAME_RE.test(name)) return res.status(400).json({ error: 'invalid service name' });
-  if (!SERVICE_ACTIONS.includes(action)) return res.status(400).json({ error: 'invalid action — start|stop|restart' });
-  log(`services.${action} name=${name}`);
-  try {
-    const r = services.action(name, action);
-    // services.action returns either { ok, stdout, stderr } or { ok:false, error }
-    if (r.ok === false && r.error) return res.status(400).json(r);
-    // Re-fetch status so the response shows the new state.
-    const after = await services.getStatus(name);
-    res.json({ ok: true, name, action, before: null, after, raw: { stdout: (r.stdout || '').slice(0, 1000), stderr: (r.stderr || '').slice(0, 1000) } });
-  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+// Start / stop / restart — gone in cloud build. Returns 410 with a hint.
+app.post('/services/:name/:action', auth.middleware, (req, res) => {
+  res.status(410).json({
+    ok: false,
+    error: 'service_actions_removed_in_cloud',
+    note: 'This deploy runs on Railway, not local Docker. Use Railway dashboard for restart, Supabase Cloud dashboard for DB pause, etc. The /services endpoint is now a read-only health monitor.',
+  });
 });
 
 // ── F8 · Afshin design pipeline ─────────────────────────────────────────
@@ -1976,9 +1968,9 @@ app.get('/n8n/executions', async (req, res) => {
 // DELETE /pipelines/:name          — delete
 // POST /pipelines/:name/run        — SSE stream of execution progress
 
-app.get('/pipelines', (_, res) => {
+app.get('/pipelines', async (_, res) => {
   try {
-    res.json({ ok: true, pipelines: pipelineRunner.listPipelines() });
+    res.json({ ok: true, pipelines: await pipelineRunner.listPipelines() });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -1990,8 +1982,8 @@ app.post('/pipelines', auth.middleware, async (req, res) => {
   res.json(r);
 });
 
-app.get('/pipelines/:name', (req, res) => {
-  const r = pipelineRunner.loadPipeline(req.params.name);   // file-only read; sync
+app.get('/pipelines/:name', async (req, res) => {
+  const r = await pipelineRunner.loadPipeline(req.params.name);
   if (!r.ok) return res.status(404).json(r);
   res.json(r);
 });

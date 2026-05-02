@@ -2192,8 +2192,8 @@
       <div class="nav-link" data-route="tools" data-tip="Tools">
         <span class="nav-icon"></span><span class="nav-label">Tools</span><span class="nav-num">9</span>
       </div>
-      <div class="nav-link" data-route="services" data-tip="Services">
-        <span class="nav-icon"></span><span class="nav-label">Services</span><span class="nav-num">0</span>
+      <div class="nav-link" data-route="services" data-tip="Health">
+        <span class="nav-icon"></span><span class="nav-label">Health</span><span class="nav-num">0</span>
       </div>
       <div class="nav-link" data-route="workflows" data-tip="Workflows">
         <span class="nav-icon"></span><span class="nav-label">Workflows</span><span class="nav-num">-</span>
@@ -3493,34 +3493,34 @@ async function loadTeamQuality() {
   }
 }
 
-// Per-service visual identity. Each service gets a tinted icon tile + accent
-// color so the row reads as four distinct things at a glance, not four
-// identical rectangles. Sub-text shows the type (CLI / docker container).
+// Per-service visual identity for the cloud Health Monitor (M18).
+// Maps each probe name to a label / accent / icon / explainer.
 const SERVICE_META = {
-  supabase:      { label: 'Supabase',     accent: 'indigo',  icon: 'logs',    sub: 'Postgres + REST API' },
-  'cowork-proxy':{ label: 'cowork-proxy', accent: 'teal',    icon: 'workflows', sub: 'this dashboard server' },
-  n8n:           { label: 'n8n',          accent: 'amber',   icon: 'pipelines', sub: 'workflow engine' },
-  mailhog:       { label: 'MailHog',      accent: 'emerald', icon: 'inbox',   sub: 'SMTP capture' },
+  database:  { label: 'Database',          accent: 'indigo',  icon: 'logs',      sub: 'Supabase Cloud · Postgres pooler' },
+  storage:   { label: 'Object storage',    accent: 'teal',    icon: 'workflows', sub: 'Cloudflare R2' },
+  anthropic: { label: 'Anthropic API',     accent: 'amber',   icon: 'pipelines', sub: 'Claude · LLM provider' },
+  openai:    { label: 'OpenAI API',        accent: 'emerald', icon: 'pipelines', sub: 'GPT-5.x / o3 · LLM provider' },
+  process:   { label: 'Proxy process',     accent: 'copper',  icon: 'services',  sub: 'Node + Express runtime' },
 };
 
 async function renderServices() {
   $('main').innerHTML = `
     <div class="section-h">
       <div>
-        <h1>Services</h1>
-        <div class="breadcrumb">Local stack health · start, stop, and restart the four services this dashboard depends on</div>
+        <h1>Health</h1>
+        <div class="breadcrumb">Live probes against database · storage · LLM providers · Node process. Read-only.</div>
       </div>
       <button class="btn btn-ghost btn-xs" onclick="renderServices()">${ICONS.refresh} Refresh</button>
     </div>
     <div id="services-grid" class="services-grid">
-      ${skeletonCards(4, { cls: 'service-card' })}
+      ${skeletonCards(5, { cls: 'service-card' })}
     </div>
     <div class="card mt-6">
-      <h3 class="font-semibold text-sm mb-3">Notes</h3>
+      <h3 class="font-semibold text-sm mb-3">About this panel</h3>
       <ul class="text-xs list-disc pl-5 space-y-2" style="color:var(--text-muted);">
-        <li><strong>Start</strong> / <strong>Stop</strong> dispatches <code class="mono">supabase</code> CLI or <code class="mono">docker</code> commands. Sign in via <a class="text-indigo-600 underline" href="#/settings">Settings</a> first.</li>
-        <li><strong>cowork-proxy</strong> can't stop itself mid-request — Ctrl+C in its terminal and rerun <code class="mono">start-proxy.bat</code>.</li>
-        <li>Stopping Supabase ends the n8n DB connection too — stop n8n first, then Supabase.</li>
+        <li>Each probe runs server-side with a 5-second timeout. Anthropic + OpenAI probes cost about $0.0001 each.</li>
+        <li>OpenAI is grey-pilled "skipped" if <code class="mono">OPENAI_API_KEY</code> isn't set — that's normal until you add it.</li>
+        <li>Service control (start / stop / restart) lives in Railway's dashboard now — this proxy doesn't manage containers any more.</li>
       </ul>
     </div>
   `;
@@ -3533,76 +3533,78 @@ async function loadServices() {
     const j = await r.json();
     if (!j.ok) throw new Error(j.error || 'failed');
     const grid = $('services-grid');
-    grid.innerHTML = Object.entries(j.services).map(([name, s]) => {
-      const meta = SERVICE_META[name] || { label: name, accent: 'idle', icon: 'services', sub: '' };
-      const isUp = s.kind === 'self' ? true
-                 : s.kind === 'supabase-cli' ? !!s.running
-                 : !!s.running;
-      const reachable = s.reachable;
-      const url = s.healthUrl ? s.healthUrl.replace(/^https?:\/\//, '') : '';
-      const subType = s.kind === 'docker' ? `docker · ${s.container || 'container'}`
-                    : s.kind === 'supabase-cli' ? 'CLI · supabase'
-                    : s.kind === 'self' ? 'native · this proxy' : '';
-      return `
-        <div class="service-card stat-${meta.accent}">
-          <div class="service-head">
-            <div class="service-icon-wrap"><div class="stat-icon">${ICONS[meta.icon] || ICONS.services}</div></div>
-            <div class="service-title-block">
-              <div class="service-name">${escapeHtml(meta.label)}</div>
-              <div class="service-sub">${escapeHtml(meta.sub)}</div>
+    const order = ['database', 'storage', 'anthropic', 'openai', 'process'];
+    grid.innerHTML = order
+      .filter(name => j.services && (name in j.services))
+      .map(name => {
+        const s = j.services[name];
+        const meta = SERVICE_META[name] || { label: name, accent: 'idle', icon: 'services', sub: '' };
+        // Tri-state: ok=true (green), ok=false (red), ok=null (grey: skipped)
+        const pill = s.ok === true  ? `<span class="pill ok"><span class="dot"></span>healthy</span>`
+                   : s.ok === false ? `<span class="pill err"><span class="dot"></span>error</span>`
+                   :                  `<span class="pill"><span class="dot"></span>skipped</span>`;
+
+        // Per-service detail rows
+        const rows = [];
+        if (typeof s.latency_ms === 'number') {
+          rows.push(`<div class="service-meta"><span class="service-meta-label">Latency</span>
+            <span class="service-meta-value mono">${s.latency_ms} ms</span></div>`);
+        }
+        if (s.backend) {
+          rows.push(`<div class="service-meta"><span class="service-meta-label">Backend</span>
+            <span class="service-meta-value mono">${escapeHtml(s.backend)}</span></div>`);
+        }
+        if (s.status) {
+          rows.push(`<div class="service-meta"><span class="service-meta-label">HTTP</span>
+            <span class="service-meta-value mono">${s.status}</span></div>`);
+        }
+        if (typeof s.uptime_sec === 'number') {
+          const h = Math.floor(s.uptime_sec / 3600), m = Math.floor((s.uptime_sec % 3600) / 60);
+          rows.push(`<div class="service-meta"><span class="service-meta-label">Uptime</span>
+            <span class="service-meta-value mono">${h}h ${m}m</span></div>`);
+        }
+        if (typeof s.memory_rss_mb === 'number') {
+          rows.push(`<div class="service-meta"><span class="service-meta-label">Memory</span>
+            <span class="service-meta-value mono">${s.memory_rss_mb} MB</span></div>`);
+        }
+        if (s.node_version) {
+          rows.push(`<div class="service-meta"><span class="service-meta-label">Node</span>
+            <span class="service-meta-value mono">${escapeHtml(s.node_version)}</span></div>`);
+        }
+
+        const errorRow = s.ok === false && s.error
+          ? `<div class="service-meta" style="border-top:none;color:var(--err);font-size:11px;line-height:1.4;">
+               ${escapeHtml(String(s.error).slice(0, 200))}</div>`
+          : (s.note ? `<div class="service-meta" style="border-top:none;color:var(--text-faint);font-size:11px;line-height:1.4;">
+               ${escapeHtml(s.note)}</div>` : '');
+
+        return `
+          <div class="service-card stat-${meta.accent}">
+            <div class="service-head">
+              <div class="service-icon-wrap"><div class="stat-icon">${ICONS[meta.icon] || ICONS.services}</div></div>
+              <div class="service-title-block">
+                <div class="service-name">${escapeHtml(meta.label)}</div>
+                <div class="service-sub">${escapeHtml(meta.sub)}</div>
+              </div>
+              ${pill}
             </div>
-            <span class="pill ${isUp ? 'ok' : 'err'}"><span class="dot"></span>${isUp ? 'running' : 'stopped'}</span>
+            ${rows.join('')}
+            ${errorRow}
           </div>
-          <div class="service-meta">
-            <span class="service-meta-label">Endpoint</span>
-            ${url ? `<span class="mono service-meta-value">${escapeHtml(url)}</span>` : `<span class="service-meta-value" style="color:var(--text-faint);">—</span>`}
-          </div>
-          <div class="service-meta">
-            <span class="service-meta-label">Reachable</span>
-            <span class="service-meta-value">
-              ${reachable === true ? `<span style="color:var(--ok);">✓ yes</span>`
-                : reachable === false ? `<span style="color:var(--err);">✕ no</span>`
-                : `<span style="color:var(--text-faint);">—</span>`}
-            </span>
-          </div>
-          <div class="service-meta">
-            <span class="service-meta-label">Type</span>
-            <span class="mono service-meta-value" style="color:var(--text-muted);font-size:11px;">${escapeHtml(subType)}</span>
-          </div>
-          <div class="service-actions">
-            ${s.kind === 'self'
-              ? `<div class="service-self-note">Stop with <code class="mono">Ctrl+C</code> in the proxy's terminal — this dashboard <em>is</em> the proxy and can't stop itself mid-request.</div>`
-              : `<button class="btn btn-primary btn-xs" onclick="serviceAction('${name}','start')" ${isUp ? 'disabled' : ''}>${ICONS.check} Start</button>
-                 <button class="btn btn-danger  btn-xs" onclick="serviceAction('${name}','stop')"  ${!isUp ? 'disabled' : ''}>${ICONS.x} Stop</button>
-                 <button class="btn btn-xs" onclick="serviceAction('${name}','restart')">${ICONS.refresh} Restart</button>`
-            }
-          </div>
-        </div>
-      `;
-    }).join('');
+        `;
+      }).join('');
+    if (j.generated_at) {
+      const ts = new Date(j.generated_at);
+      const stale = Date.now() - ts.getTime();
+      const fresh = stale < 30_000 ? `<span style="color:var(--ok);">just now</span>` :
+                    stale < 5*60_000 ? `<span style="color:var(--text-muted);">${Math.round(stale/1000)}s ago</span>` :
+                    `<span style="color:var(--warn);">${Math.round(stale/60_000)}m ago</span>`;
+      grid.insertAdjacentHTML('afterend',
+        `<div class="text-xs mt-2" style="color:var(--text-faint);">Last probe: ${fresh}. Click Refresh for a fresh round.</div>`);
+    }
   } catch (e) {
     $('services-grid').innerHTML = `<div class="card"><div class="empty"><div class="empty-text">Failed: ${escapeHtml(e.message)}</div></div></div>`;
   }
-}
-
-async function serviceAction(name, action) {
-  if (action === 'stop' && !confirm(`Stop ${name}? This will interrupt anything currently using it.`)) return;
-  const grid = $('services-grid');
-  const card = [...grid.querySelectorAll('.card')].find(c => c.textContent.includes(name));
-  if (card) card.style.opacity = '0.5';
-  try {
-    const r = await fetch(`${PROXY}/services/${name}/${action}`, {
-      method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' })
-    });
-    if (r.status === 401) {
-      alert('Sign in required to control services. Going to Settings.');
-      navigate('settings');
-      return;
-    }
-    const j = await r.json();
-    if (!j.ok) alert(`Failed: ${j.error || 'unknown'}`);
-  } catch (e) { alert('Failed: ' + e.message); }
-  setTimeout(loadServices, 500);
 }
 
 // ════════════════════════════════════════════════════════════════════════
