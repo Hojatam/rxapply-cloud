@@ -13,6 +13,26 @@ Format:
 
 ---
 
+## 2026-05-01 · M13a · Deploy guide + R2 preflight (deploy prep)
+
+The cloud build is feature-complete. M13 is the cutover itself, which
+needs platform clicks only the founder can do. Shipped the prep:
+
+- **`DEPLOY.md`** — canonical 7-step deploy walkthrough (Supabase
+  Cloud → R2 bucket → Railway service → env vars → wizard → DNS →
+  smoke test). Includes troubleshooting table and post-launch
+  checklist (backups, monitoring, secret rotation).
+- **`POST /setup/api/test-r2`** — round-trips a 32-byte test object
+  through the storage layer. Reports backend (`r2` vs `local`) so
+  the wizard's preflight shows the correct status on the live deploy.
+- **Wizard preflight** updated to call `/setup/api/test-r2` and add a
+  storage check row alongside server / database / connection.
+- **architecture.html** closing summary updated — points to DEPLOY.md.
+
+Everything else (database migrations, auth, tools, storage) was
+already verified end-to-end in M11/M12. M13 proper is the founder's
+platform-clicks workflow guided by DEPLOY.md.
+
 ## 2026-05-01 · M12 · Easy-to-Start wizard (Track 2 DONE)
 
 The 8-step polished setup wizard. Uses the same Claude Design tokens

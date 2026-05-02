@@ -367,6 +367,27 @@ app.post('/setup/api/sprite-upload', async (req, res) => {
   }
 });
 
+// Round-trip a 32-byte test object to R2 (or local-disk fallback) so
+// the wizard can confirm storage is wired correctly. Reports the backend
+// in use so the founder sees `r2` vs `local` immediately.
+app.post('/setup/api/test-r2', async (_req, res) => {
+  try {
+    const probe = `setup-probe-${Date.now()}`;
+    const body = Buffer.from('rxapply-storage-probe');
+    await storage.put({ key: `_probes/${probe}`, body, contentType: 'text/plain' });
+    const got = await storage.get(`_probes/${probe}`);
+    await storage.remove(`_probes/${probe}`);
+    res.json({
+      ok: true,
+      backend: storage.BACKEND,
+      bytes: got.size,
+      verified: got.body.toString('utf-8') === 'rxapply-storage-probe',
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, backend: storage.BACKEND, error: e.message });
+  }
+});
+
 // Manual reset (debug / re-run wizard).
 app.post('/setup/api/reset', auth.middleware, async (_req, res) => {
   try {

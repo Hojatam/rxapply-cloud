@@ -496,6 +496,17 @@ async function renderWelcome() {
   } catch (e) {
     checks.push({ ok: false, label: 'Server unreachable', desc: e.message });
   }
+  // Storage probe — round-trips a tiny object through R2 (or local fallback).
+  try {
+    const r = await fetch('/setup/api/test-r2', { method: 'POST' }).then(r => r.json());
+    checks.push({
+      ok: r.ok && r.verified,
+      label: r.backend === 'r2' ? 'Object storage (R2)' : 'Object storage (local fallback)',
+      desc: r.ok ? `round-trip ${r.bytes} bytes` : (r.error || 'failed'),
+    });
+  } catch (e) {
+    checks.push({ ok: false, label: 'Object storage', desc: e.message });
+  }
   checks.push({ ok: !!window.location.origin.startsWith('https') || /localhost|127\\.0\\.0\\.1/.test(location.hostname),
                 label: location.protocol === 'https:' ? 'HTTPS connection' : 'Local-dev connection',
                 desc: location.host });
