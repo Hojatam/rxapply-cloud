@@ -1,0 +1,30 @@
+{
+  "id": "email",
+  "label": "Email",
+  "icon": "mail",
+  "description": "HTML email with subject, preview text, and body. Good for campaigns, announcements, newsletters.",
+  "version": "1",
+
+  "stages": [
+    { "name": "plan",     "capability": "plan" },
+    { "name": "research", "capability": "research" },
+    { "name": "draft",    "capability": "draft",    "params": { "length_words": [400, 700] } },
+    { "name": "critique", "capability": "critique" },
+    { "name": "adapt",    "capability": "adapt",    "params": { "produce": ["subject", "preview", "body"] } },
+    { "name": "render",   "renderer": "email-html" }
+  ],
+
+  "gateable_stages": ["critique", "adapt"],
+
+  "translate": {
+    "capability": "translate",
+    "stages_to_retranslate": ["body", "subject", "preview"]
+  },
+
+  "options_schema": [
+    { "key": "campaign",    "label": "Campaign",          "type": "text", "placeholder": "e.g. 2026-spring-uk-launch" },
+    { "key": "segment",     "label": "Audience segment",  "type": "text", "placeholder": "e.g. UK NDEB candidates" },
+    { "key": "primary_cta", "label": "Primary CTA URL",   "type": "text", "placeholder": "https://rxapply.com/uk" },
+    { "key": "from_name",   "label": "From name",         "type": "text", "placeholder": "RxApply", "default": "RxApply" }
+  ]
+}

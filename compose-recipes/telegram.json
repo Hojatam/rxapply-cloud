@@ -1,0 +1,29 @@
+{
+  "id": "telegram",
+  "label": "Telegram post",
+  "icon": "send",
+  "description": "Telegram channel post with markdown, emoji, and a CTA. Length-aware (capped to one screen).",
+  "version": "1",
+
+  "stages": [
+    { "name": "plan",     "capability": "plan" },
+    { "name": "draft",    "capability": "draft", "params": { "length_words": [120, 280] } },
+    { "name": "critique", "capability": "critique" },
+    { "name": "adapt",    "capability": "adapt",
+      "params": { "produce": ["body_md", "cta_text", "cta_url"] } },
+    { "name": "render",   "renderer": "telegram" }
+  ],
+
+  "gateable_stages": ["critique", "adapt"],
+
+  "translate": {
+    "capability": "translate",
+    "stages_to_retranslate": ["body_md", "cta_text"]
+  },
+
+  "options_schema": [
+    { "key": "channel",     "label": "Channel handle",   "type": "text", "placeholder": "e.g. @rxapply_en" },
+    { "key": "primary_cta", "label": "CTA URL",          "type": "text", "placeholder": "https://rxapply.com" },
+    { "key": "include_emoji", "label": "Include emoji",  "type": "checkbox", "default": true }
+  ]
+}
