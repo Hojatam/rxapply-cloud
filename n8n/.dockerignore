@@ -1,0 +1,5 @@
+# Don't bake workflow/credential exports into the image.
+# These are imported via the n8n UI or API at runtime.
+workflows/
+credentials.json
+README.md
