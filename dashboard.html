@@ -525,6 +525,156 @@
     gap: 5px;
   }
   .btn-lg { height: 38px; padding: 0 18px; font-size: 13.5px; border-radius: 8px; }
+  /* M34 · Compose platform mockups -------------------------------------- */
+  .co-mockup-wrap { display:flex; justify-content:center; padding:8px 0 16px; }
+
+  /* Phone shell (used by Telegram + Instagram) */
+  .co-mock-phone {
+    width: 360px; max-width: 100%;
+    background: #ffffff;
+    border: 8px solid #1f2937;
+    border-radius: 32px;
+    overflow: hidden;
+    box-shadow: 0 8px 24px rgba(0,0,0,.18);
+  }
+
+  /* Telegram */
+  .co-mock-tg-header {
+    display:flex; align-items:center; gap:10px;
+    padding: 12px 14px; background: linear-gradient(180deg, #517da2 0%, #4a7596 100%);
+    color: #fff;
+  }
+  .co-mock-tg-avatar {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: linear-gradient(135deg, #fbbf24, #f59e0b); flex-shrink: 0;
+  }
+  .co-mock-tg-title { font-size: 14px; font-weight: 600; line-height: 1.2; }
+  .co-mock-tg-sub   { font-size: 11px; opacity: .85; }
+  .co-mock-tg-body  { padding: 14px 12px; background: #aabfd1 url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'><circle cx='10' cy='10' r='1.5' fill='%23a3b6c8'/><circle cx='30' cy='25' r='1.5' fill='%23a3b6c8'/></svg>"); min-height: 220px; }
+  .co-mock-tg-bubble {
+    background: #ffffff; padding: 8px 8px 6px; border-radius: 12px;
+    box-shadow: 0 1px 1px rgba(0,0,0,.08); max-width: 92%;
+  }
+  .co-mock-tg-photo { display:block; width:100%; border-radius:8px; margin-bottom:6px; }
+  .co-mock-tg-text  { font-size: 14px; line-height: 1.45; color: #1c1c1c; white-space: pre-wrap; word-wrap: break-word; }
+  .co-mock-tg-text a { color: #1976d2; text-decoration: none; }
+  .co-mock-tg-meta  { font-size: 11px; color: #5a6a78; text-align: right; margin-top: 4px; }
+
+  /* Instagram */
+  .co-mock-ig-header {
+    display:flex; align-items:center; gap:10px;
+    padding: 10px 12px; background: #fff; border-bottom: 1px solid #efefef;
+  }
+  .co-mock-ig-avatar {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: linear-gradient(135deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888);
+    padding: 2px; flex-shrink: 0;
+  }
+  .co-mock-ig-photo { display:block; width:100%; aspect-ratio: 1/1; object-fit: cover; }
+  .co-mock-ig-actions { display:flex; gap:14px; padding: 8px 12px; font-size: 22px; }
+  .co-mock-ig-likes { padding: 0 12px 4px; font-size: 13px; font-weight: 600; }
+  .co-mock-ig-caption {
+    padding: 0 12px 8px; font-size: 13px; line-height: 1.45; color: #262626;
+    white-space: pre-wrap; word-wrap: break-word;
+  }
+  .co-mock-ig-hashtags {
+    padding: 0 12px 8px; font-size: 13px; color: #00376b;
+    word-wrap: break-word;
+  }
+  .co-mock-ig-time { padding: 0 12px 12px; font-size: 11px; color: #8e8e8e; text-transform: uppercase; }
+
+  /* Facebook */
+  .co-mock-fb-card {
+    width: 500px; max-width: 100%;
+    background: #ffffff; border-radius: 8px;
+    border: 1px solid #ced0d4;
+    box-shadow: 0 2px 4px rgba(0,0,0,.06);
+    overflow: hidden;
+  }
+  .co-mock-fb-header { display:flex; align-items:center; gap:10px; padding: 12px 16px; }
+  .co-mock-fb-avatar {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: linear-gradient(135deg, #1877f2, #0a5fcc); flex-shrink: 0;
+  }
+  .co-mock-fb-hook { padding: 0 16px 8px; font-size: 17px; font-weight: 600; color: #050505; line-height: 1.35; }
+  .co-mock-fb-body { padding: 0 16px 12px; font-size: 15px; line-height: 1.5; color: #050505; }
+  .co-mock-fb-photo { display:block; width:100%; }
+  .co-mock-fb-cta { padding: 12px 16px; background: #f0f2f5; font-size: 14px; color: #050505; }
+  .co-mock-fb-actions {
+    display:flex; gap: 0; padding: 4px 16px; border-top: 1px solid #ced0d4;
+    font-size: 14px; font-weight: 600; color: #65676b;
+  }
+  .co-mock-fb-actions span { padding: 8px 16px; cursor: default; }
+
+  /* X / Twitter */
+  .co-mock-x-thread {
+    width: 540px; max-width: 100%; background: #fff;
+    border: 1px solid #eff3f4; border-radius: 16px; overflow: hidden;
+  }
+  .co-mock-x-tweet {
+    display:flex; gap: 10px; padding: 12px 16px;
+    border-bottom: 1px solid #eff3f4;
+  }
+  .co-mock-x-tweet:last-child { border-bottom: none; }
+  .co-mock-x-avatar {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: #0f172a; flex-shrink: 0;
+  }
+  .co-mock-x-meta { display:flex; gap: 4px; font-size: 14px; align-items: baseline; flex-wrap: wrap; }
+  .co-mock-x-body {
+    margin-top: 2px; font-size: 15px; line-height: 1.4; color: #0f1419;
+    white-space: pre-wrap; word-wrap: break-word;
+  }
+  .co-mock-x-photo {
+    display:block; width:100%; border-radius: 16px; margin-top: 12px;
+    border: 1px solid #eff3f4;
+  }
+  .co-mock-x-actions {
+    display:flex; gap: 56px; margin-top: 12px;
+    font-size: 14px; color: #536471;
+  }
+
+  /* Email (Gmail-style preview) */
+  .co-mock-email {
+    width: 600px; max-width: 100%; background: #fff;
+    border: 1px solid #dadce0; border-radius: 8px;
+    box-shadow: 0 1px 2px rgba(60,64,67,.1);
+    overflow: hidden;
+  }
+  .co-mock-email-toolbar { padding: 8px 16px; border-bottom: 1px solid #f1f3f4; background: #f8f9fa; }
+  .co-mock-email-headline { padding: 16px 24px 8px; }
+  .co-mock-email-meta { display:flex; gap:12px; padding: 0 24px 12px; align-items: flex-start; }
+  .co-mock-email-avatar {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: linear-gradient(135deg, #4f46e5, #7c3aed); flex-shrink: 0;
+  }
+  .co-mock-email-body { padding: 16px 24px 32px; }
+
+  /* SEO article — browser preview */
+  .co-mock-browser {
+    width: 720px; max-width: 100%; background: #fff;
+    border: 1px solid #cbd5e1; border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,.08); overflow: hidden;
+  }
+  .co-mock-browser-bar {
+    display:flex; align-items:center; gap: 10px;
+    padding: 8px 12px; background: #f1f5f9; border-bottom: 1px solid #cbd5e1;
+  }
+  .co-mock-browser-dots { display:flex; gap: 4px; }
+  .co-mock-browser-dots span {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #cbd5e1;
+  }
+  .co-mock-browser-dots span:nth-child(1) { background: #ff5f56; }
+  .co-mock-browser-dots span:nth-child(2) { background: #ffbd2e; }
+  .co-mock-browser-dots span:nth-child(3) { background: #27c93f; }
+  .co-mock-browser-url {
+    flex:1; font-size: 12px; color: #475569;
+    background: #fff; padding: 4px 10px; border-radius: 4px;
+    border: 1px solid #e2e8f0; font-family: ui-monospace, monospace;
+  }
+  .co-mock-browser-body { padding: 32px 40px; max-height: 640px; overflow-y: auto; }
+
   /* Train-tab kind switcher (segmented control). Used in the Teach card. */
   .btn-teach-kind {
     height: 26px; padding: 0 12px;
@@ -6084,6 +6234,207 @@ function coRenderPreview(run) {
   coShowPreviewLang(langs[0]);
 }
 
+// M34 · Image stage state card. Shown above the platform mockup so the
+// founder can always tell what the image stage is doing.
+function _coRenderImageState(stage) {
+  if (!stage) return '';   // no image stage in this recipe / run
+  if (stage.status === 'skipped') {
+    return `<div class="card-tight mb-3" style="background:#f8fafc;color:var(--text-muted);font-size:12px;">
+      <strong>Cover image:</strong> skipped (option <code class="mono">with_image</code> was off).
+    </div>`;
+  }
+  if (stage.status === 'pending' || stage.status === 'running') {
+    return `<div class="card-tight mb-3" style="background:#fef9c3;color:#854d0e;font-size:12px;">
+      <strong>Cover image:</strong> ${escapeHtml(stage.status)}…
+    </div>`;
+  }
+  if (stage.status === 'failed') {
+    return `<div class="card-tight mb-3" style="background:#fee2e2;color:#991b1b;font-size:12px;">
+      <strong>Cover image failed:</strong> ${escapeHtml((stage.error || 'unknown').slice(0, 300))}
+    </div>`;
+  }
+  if (stage.status === 'done' && stage.output && stage.output.url) {
+    const o = stage.output;
+    return `<div class="card-tight mb-3" style="text-align:center;background:#f8fafc;">
+      <img src="${escapeHtml(o.url)}" alt="cover"
+            style="max-width:100%;max-height:360px;border-radius:6px;background:#e2e8f0;"
+            onerror="this.parentElement.innerHTML='<div style=&quot;padding:32px;color:#dc2626;font-size:12px;&quot;>Image generated but URL <span class=mono>'+this.src.replace(/[<>&\"]/g,'')+'</span> failed to load. Check R2_PUBLIC_URL or /storage route.</div>';" />
+      <div class="text-xs text-slate-400 mt-2">
+        cover · ${escapeHtml(o.model || '')} · ${escapeHtml(o.size || '')} · $${Number(o.cost_usd || 0).toFixed(4)}
+        ${o.media_id ? ` · <a href="#" onclick="navigate('designs');return false;" class="text-indigo-600 underline">Designs ↗</a>` : ''}
+      </div>
+      <div class="text-xs mono text-slate-400 mt-1" style="word-break:break-all;">${escapeHtml(o.url)}</div>
+    </div>`;
+  }
+  return `<div class="card-tight mb-3" style="background:#f8fafc;color:var(--text-muted);font-size:12px;">
+    <strong>Cover image:</strong> ${escapeHtml(stage.status || 'unknown')}
+  </div>`;
+}
+
+// M34 · Platform-authentic mockups. Each format gets a shell that mimics
+// what the post will look like on the actual platform — phone screen for
+// mobile-first apps (Telegram/IG), desktop card for FB/X, inbox for Email,
+// browser preview for SEO.
+function _coRenderPlatformMockup({ run, recipeId, lang, out, coverUrl }) {
+  switch (recipeId) {
+    case 'telegram':   return _mockupTelegram(out, coverUrl, run);
+    case 'ig':         return _mockupInstagram(out, coverUrl, run);
+    case 'facebook':   return _mockupFacebook(out, coverUrl, run);
+    case 'x-thread':   return _mockupXThread(out, coverUrl, run);
+    case 'email':      return _mockupEmail(out, coverUrl, run, lang);
+    case 'seo-article':return _mockupSeoArticle(out, coverUrl, run, lang);
+    default:           return '';
+  }
+}
+
+function _mockupTelegram(out, coverUrl, run) {
+  const channel = (run.options && run.options.channel) || '@rxapply';
+  const time = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: false });
+  return `
+    <div class="co-mockup-wrap">
+      <div class="co-mock-phone">
+        <div class="co-mock-tg-header">
+          <div class="co-mock-tg-avatar"></div>
+          <div style="flex:1;min-width:0;">
+            <div class="co-mock-tg-title">${escapeHtml(channel)}</div>
+            <div class="co-mock-tg-sub">channel</div>
+          </div>
+        </div>
+        <div class="co-mock-tg-body">
+          <div class="co-mock-tg-bubble">
+            ${coverUrl ? `<img src="${escapeHtml(coverUrl)}" alt="" class="co-mock-tg-photo" />` : ''}
+            <div class="co-mock-tg-text">${out.body_html || escapeHtml(out.body_plain || '')}</div>
+            <div class="co-mock-tg-meta">${escapeHtml(time)} <span style="opacity:.5;">✓✓</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function _mockupInstagram(out, coverUrl, run) {
+  const handle = 'rxapply_official';
+  return `
+    <div class="co-mockup-wrap">
+      <div class="co-mock-phone">
+        <div class="co-mock-ig-header">
+          <div class="co-mock-ig-avatar"></div>
+          <div style="flex:1;font-weight:600;font-size:13px;">${escapeHtml(handle)}</div>
+          <div style="color:#888;font-size:18px;">⋯</div>
+        </div>
+        ${coverUrl
+          ? `<img src="${escapeHtml(coverUrl)}" alt="" class="co-mock-ig-photo" />`
+          : `<div class="co-mock-ig-photo" style="background:#e2e8f0;display:grid;place-items:center;color:#64748b;font-size:11px;">no cover yet</div>`}
+        <div class="co-mock-ig-actions"><span>♡</span><span>💬</span><span>↗</span><span style="margin-left:auto;">🔖</span></div>
+        <div class="co-mock-ig-likes">2,148 likes</div>
+        <div class="co-mock-ig-caption">
+          <span style="font-weight:600;">${escapeHtml(handle)}</span> ${escapeHtml(out.caption || '')}
+        </div>
+        <div class="co-mock-ig-hashtags">${(out.hashtags || []).join(' ')}</div>
+        <div class="co-mock-ig-time">2 minutes ago</div>
+      </div>
+    </div>
+  `;
+}
+
+function _mockupFacebook(out, coverUrl, run) {
+  const pageHandle = (run.options && run.options.page_handle) || 'RxApply';
+  return `
+    <div class="co-mockup-wrap">
+      <div class="co-mock-fb-card">
+        <div class="co-mock-fb-header">
+          <div class="co-mock-fb-avatar"></div>
+          <div style="flex:1;">
+            <div style="font-weight:600;font-size:14px;color:#1c1e21;">${escapeHtml(pageHandle)}</div>
+            <div style="font-size:11px;color:#65676b;">Just now · 🌐</div>
+          </div>
+          <div style="font-size:18px;color:#65676b;">⋯</div>
+        </div>
+        ${out.hook ? `<div class="co-mock-fb-hook">${escapeHtml(out.hook)}</div>` : ''}
+        ${out.body ? `<div class="co-mock-fb-body" style="white-space:pre-wrap;">${escapeHtml(out.body)}</div>` : ''}
+        ${coverUrl ? `<img src="${escapeHtml(coverUrl)}" alt="" class="co-mock-fb-photo" />` : ''}
+        ${out.cta_text ? `<div class="co-mock-fb-cta"><strong>${escapeHtml(out.cta_text)}</strong>${out.cta_url ? ` · <span class="text-xs" style="color:#65676b;">${escapeHtml(out.cta_url)}</span>` : ''}</div>` : ''}
+        <div class="co-mock-fb-actions"><span>👍 Like</span><span>💬 Comment</span><span>↗ Share</span></div>
+      </div>
+    </div>
+  `;
+}
+
+function _mockupXThread(out, coverUrl, run) {
+  const handle = 'rxapply';
+  const tweets = out.tweets || [];
+  return `
+    <div class="co-mockup-wrap">
+      <div class="co-mock-x-thread">
+        ${tweets.map((t, i) => `
+          <div class="co-mock-x-tweet">
+            <div class="co-mock-x-avatar"></div>
+            <div style="flex:1;min-width:0;">
+              <div class="co-mock-x-meta">
+                <span style="font-weight:700;">RxApply</span>
+                <span style="color:#536471;">@${escapeHtml(handle)}</span>
+                <span style="color:#536471;">· ${i + 1}/${tweets.length}</span>
+              </div>
+              <div class="co-mock-x-body">${escapeHtml(t)}</div>
+              ${i === 0 && coverUrl ? `<img src="${escapeHtml(coverUrl)}" alt="" class="co-mock-x-photo" />` : ''}
+              <div class="co-mock-x-actions"><span>💬</span><span>🔁</span><span>♡</span><span>📊</span></div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function _mockupEmail(out, coverUrl, run, lang) {
+  const fromName = (run.options && run.options.from_name) || 'RxApply';
+  const today = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return `
+    <div class="co-mockup-wrap">
+      <div class="co-mock-email">
+        <div class="co-mock-email-toolbar">
+          <div style="font-size:13px;color:#5f6368;">Inbox · 1 of 4,231</div>
+        </div>
+        <div class="co-mock-email-headline">
+          <div style="font-size:18px;font-weight:500;color:#202124;">${escapeHtml(out.subject || '(no subject)')}</div>
+        </div>
+        <div class="co-mock-email-meta">
+          <div class="co-mock-email-avatar"></div>
+          <div style="flex:1;">
+            <div style="font-size:13px;font-weight:500;color:#202124;">${escapeHtml(fromName)} <span style="font-weight:400;color:#5f6368;">&lt;hello@rxapply.com&gt;</span></div>
+            <div style="font-size:12px;color:#5f6368;">to me · ${escapeHtml(today)}</div>
+          </div>
+        </div>
+        <div class="co-mock-email-body">
+          ${coverUrl ? `<img src="${escapeHtml(coverUrl)}" alt="" style="display:block;width:100%;margin-bottom:16px;border-radius:4px;" />` : ''}
+          <div style="font-size:14px;line-height:1.6;color:#202124;">${out.body_html || escapeHtml(out.body_md || '')}</div>
+          ${out.cta_url ? `<div style="margin-top:24px;"><a href="#" style="display:inline-block;background:#1a73e8;color:#fff;padding:10px 20px;border-radius:4px;text-decoration:none;font-size:14px;">Read more</a></div>` : ''}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function _mockupSeoArticle(out, coverUrl, run, lang) {
+  const slug = out.slug || 'article';
+  return `
+    <div class="co-mockup-wrap">
+      <div class="co-mock-browser">
+        <div class="co-mock-browser-bar">
+          <div class="co-mock-browser-dots"><span></span><span></span><span></span></div>
+          <div class="co-mock-browser-url">https://rxapply.com/blog/${escapeHtml(slug)}</div>
+        </div>
+        <div class="co-mock-browser-body">
+          ${coverUrl ? `<img src="${escapeHtml(coverUrl)}" alt="" style="display:block;width:100%;border-radius:6px;margin-bottom:20px;" />` : ''}
+          <h1 style="font-size:28px;line-height:1.25;margin:0 0 8px;font-weight:700;color:#0f172a;">${escapeHtml(out.title || '')}</h1>
+          <div style="font-size:13px;color:#64748b;margin-bottom:20px;">RxApply · ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} · ${out.word_count || 0} words</div>
+          <div style="font-size:16px;line-height:1.7;color:#1e293b;">${out.body_html || ''}</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function coShowPreviewLang(lang, btn) {
   const run = _coState.currentRun;
   if (!run) return;
@@ -6099,15 +6450,19 @@ function coShowPreviewLang(lang, btn) {
   const out = stage.output;
   const recipeId = run.recipe_id;
 
-  // M32 · Cover image stage runs once (master phase), used for all langs.
-  const imageStage = (run.stages || []).find(s => s.stage_name === 'image' && s.status === 'done' && s.output);
-  const coverHtml = (imageStage && imageStage.output && imageStage.output.url)
-    ? `<div class="card-tight mb-3" style="text-align:center;background:#f8fafc;">
-         <img src="${escapeHtml(imageStage.output.url)}" alt="cover" style="max-width:100%;max-height:360px;border-radius:6px;" />
-         <div class="text-xs text-slate-400 mt-2">cover · ${escapeHtml(imageStage.output.model || '')} · ${imageStage.output.size || ''} · $${Number(imageStage.output.cost_usd || 0).toFixed(4)}</div>
-       </div>`
-    : '';
-  let html = coverHtml;
+  // M32/M33 · Cover image stage runs once (master phase), used for all langs.
+  // M34 · Surface the image stage state regardless of status — so the founder
+  // can see whether it ran, is running, failed, or was skipped.
+  const imageStage = (run.stages || []).find(s => s.stage_name === 'image');
+  const coverUrl = imageStage && imageStage.output && imageStage.output.url;
+  const imageDebug = _coRenderImageState(imageStage);
+
+  // Build the platform mockup (M34) — realistic shell per format.
+  const mockupHtml = _coRenderPlatformMockup({ run, recipeId, lang, out, coverUrl });
+
+  // The "raw" preview (existing format-specific HTML) stays available
+  // collapsed, so the founder can still inspect the unstyled output.
+  let html = imageDebug + mockupHtml + '<details class="mt-4"><summary class="text-xs text-slate-400 cursor-pointer">Raw preview (no platform shell)</summary><div class="mt-2">';
 
   if (recipeId === 'email' && out.full_html) {
     html += `
@@ -6171,6 +6526,8 @@ function coShowPreviewLang(lang, btn) {
   } else {
     html += `<pre class="text-xs mono p-2 rounded" style="background:#f8fafc;max-height:540px;overflow:auto;white-space:pre-wrap;">${escapeHtml(JSON.stringify(out, null, 2))}</pre>`;
   }
+  // M34 · close the "Raw preview" <details> wrapper opened above.
+  html += '</div></details>';
   $('co-preview-body').innerHTML = html;
 
   // M30 · Export bar (under the preview).
