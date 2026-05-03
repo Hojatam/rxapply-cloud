@@ -2112,6 +2112,132 @@ app.post('/brand/dm-analysis/upload', auth.middleware, async (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
+// M56 · DM tone profile import (different shape from dm_question_patterns + dm_objection_playbook)
+app.post('/brand/dm-tone-profile/upload', auth.middleware, async (req, res) => {
+  try {
+    const r = await brandInt.importDmToneProfile(req.body || {});
+    log(`brand.import.dm-tone source=${r.source} intelligence=${r.intelligence} exemplars=${r.exemplars}`);
+    res.json(r);
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// M56 · Per-agent training packet preview (what the agent will SEE on next call)
+app.get('/training/preview', async (req, res) => {
+  try {
+    const trainingRetrieval = require('./agent-training-retrieval');
+    const packet = await trainingRetrieval.getTrainingPacket({
+      agent: req.query.agent || null,
+      stageName: req.query.stage || 'draft',
+      platform: req.query.platform || null,
+      language: req.query.language || null,
+      topicTags: (req.query.topics || '').split(',').map(s => s.trim()).filter(Boolean),
+    });
+    res.json({
+      ok: true,
+      packet,
+      rendered: trainingRetrieval.renderUnifiedBlock(packet),
+    });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// M56 · Promotion proposals (librarian → founder review)
+app.get('/training/promotions', async (req, res) => {
+  try {
+    const status = req.query.status || 'pending';
+    const limit = parseInt(req.query.limit, 10) || 50;
+    const { queryRows } = require('./db');
+    const rows = await queryRows(`
+      SELECT id::text, source_kind, source_id::text, source_agent,
+              proposed_kind, proposed_target_agent, proposed_scope_platform,
+              proposed_scope_language, proposed_topic_tags, proposed_rule_text,
+              proposed_importance, promotion_reason, recurrence_count, avg_rating,
+              detected_at::text, status, decided_at::text, decided_by, decision_note
+        FROM training_promotion_proposals
+       WHERE status = '${String(status).replace(/'/g, "''")}'
+       ORDER BY detected_at DESC LIMIT ${limit};`);
+    res.json({ ok: true, items: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Founder approves a promotion proposal — creates the brand_intelligence row
+app.post('/training/promotions/:id/approve', auth.middleware, async (req, res) => {
+  try {
+    const { query, queryRows, queryReturning, q, qJson } = require('./db');
+    const rows = await queryRows(`SELECT * FROM training_promotion_proposals WHERE id = '${String(req.params.id).replace(/'/g, "''")}' LIMIT 1;`);
+    const p = rows[0];
+    if (!p) return res.status(404).json({ ok: false, error: 'proposal not found' });
+    if (p.status !== 'pending') return res.status(400).json({ ok: false, error: `already ${p.status}` });
+    // Create the intelligence row
+    const created = await brandInt.createIntelligence({
+      kind: p.proposed_kind,
+      target_agent: p.proposed_target_agent || null,
+      scope_platform: p.proposed_scope_platform || null,
+      scope_language: p.proposed_scope_language || null,
+      topic_tags: p.proposed_topic_tags || [],
+      rule_text: p.proposed_rule_text,
+      importance: p.proposed_importance,
+      source: 'promoted_from_memory',
+      source_ref: p.source_id,
+      founder_edited: true,
+      founder_note: req.body && req.body.note,
+    });
+    await query(`UPDATE training_promotion_proposals
+                    SET status='approved', decided_at=NOW(),
+                        decided_by=${q((req.user && req.user.username) || 'founder')},
+                        decision_note=${q(req.body && req.body.note)},
+                        resulting_intelligence_id=${q(created.id)}
+                  WHERE id=${q(p.id)};`);
+    log(`training.promotion.approved id=${p.id} → intelligence ${created.id}`);
+    res.json({ ok: true, intelligence_id: created.id });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.post('/training/promotions/:id/reject', auth.middleware, async (req, res) => {
+  try {
+    const { query, q } = require('./db');
+    await query(`UPDATE training_promotion_proposals
+                    SET status='rejected', decided_at=NOW(),
+                        decided_by=${q((req.user && req.user.username) || 'founder')},
+                        decision_note=${q(req.body && req.body.note)}
+                  WHERE id=${q(req.params.id)} AND status='pending';`);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// M56 · Librarian scan — find candidates to promote. Founder approves manually.
+//   Heuristic: agent_memory rows of type=procedural with promotion_score>=3
+//   AND not already promoted (no resulting_intelligence_id pointing at them).
+app.post('/training/promotions/scan', auth.middleware, async (_req, res) => {
+  try {
+    const { query, queryRows, queryReturning, q, qArr } = require('./db');
+    // Find unpromoted procedural memories with proven repetition
+    const candidates = await queryRows(`
+      SELECT m.id::text, m.agent, m.content, m.tags, m.importance, m.promotion_score
+        FROM agent_memory m
+        LEFT JOIN training_promotion_proposals p ON p.source_id = m.id
+       WHERE m.type = 'procedural'
+         AND COALESCE(m.archived, false) = false
+         AND COALESCE(m.promotion_score, 0) >= 3
+         AND p.id IS NULL
+       ORDER BY m.promotion_score DESC LIMIT 50;`);
+    let proposed = 0;
+    for (const c of candidates) {
+      await queryReturning(`
+        INSERT INTO training_promotion_proposals
+          (source_kind, source_id, source_agent, proposed_kind, proposed_rule_text,
+            proposed_importance, proposed_topic_tags, promotion_reason, recurrence_count)
+        VALUES ('agent_memory', ${q(c.id)}, ${q(c.agent)}, 'manual',
+                ${q(c.content)}, ${parseInt(c.importance || 4, 10)},
+                ${qArr(Array.isArray(c.tags) ? c.tags : [])},
+                'recurring_correction', ${parseInt(c.promotion_score, 10) || 0})
+        RETURNING id::text;`);
+      proposed++;
+    }
+    log(`training.promotion.scan proposed=${proposed}`);
+    res.json({ ok: true, proposed });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 app.post('/brand/cache/clear', auth.middleware, (_req, res) => {
   try { brandInt.clearCache(); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ ok: false, error: e.message }); }

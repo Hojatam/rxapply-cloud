@@ -42,6 +42,7 @@ const protectedTerms = require('./kb-protected-terms');
 const costRouter     = require('./cost-aware-router');
 const contracts      = require('./agent-contracts');     // M49 · per-stage output validation
 const brandInt       = require('./brand-intelligence');  // M55 · dynamic brand training data
+const trainingRetrieval = require('./agent-training-retrieval');  // M56 · unified topic-aware retrieval
 
 const RECIPES_DIR = path.resolve(__dirname, '..', 'compose-recipes');
 
@@ -164,42 +165,34 @@ async function _buildSystemPrompt({ agent, stageName, recipe, run, masterDraft, 
     blocks.push(fingerprintBlock);
   }
 
-  // Per-agent memory (top procedural + relevant semantic).
+  // M56 · Unified, budgeted, topic-aware retrieval. ONE call replaces:
+  //   - the old per-agent memory dump (6 items, no relevance ranking)
+  //   - brandInt.renderAsPromptBlock (top-25 rules with no topic match)
+  //   - brandInt.renderExemplarsBlock (top-3 exemplars, no rotation)
+  // Per-stage budgets are tight (typical: 3 rules + 2 exemplars + 5 memories).
+  // Topic_tags drive matching — empty topic_tags treats as "applies to all topics."
+  // Conflicts between global rules and per-agent memories are surfaced in-prompt
+  // so the model resolves toward the more-specific instruction explicitly.
   try {
-    const mem = agentMemory.renderAsBlock(agent, {
-      limit: 6,
-      queryKeywords: String(run.topic || '').split(/\s+/).filter(w => w.length >= 4).slice(0, 5),
+    const platform = recipe && recipe.id;
+    const topicKw = String(run.topic || '').split(/\s+/).filter(w => w.length >= 4).slice(0, 5).map(s => s.toLowerCase());
+    const packet = await trainingRetrieval.getTrainingPacket({
+      agent, stageName, platform,
+      language: lang || run.master_lang,
+      topicTags: topicKw,                  // simple topic-tag inference from the topic words
+      recipe,
     });
-    if (mem) blocks.push(mem);
-  } catch (_) { /* non-fatal */ }
-
-  // M55 · Live brand intelligence — dynamic rules from DB, founder-editable.
-  // Pulled per (agent, platform, language) combo. Cached 60s in brand-intelligence.js.
-  try {
-    const platform = recipe && recipe.id;            // recipe id doubles as platform key (telegram/email/etc)
-    const block = await brandInt.renderAsPromptBlock({ agent, platform, language: lang || run.master_lang });
+    const block = trainingRetrieval.renderUnifiedBlock(packet);
     if (block) blocks.push(block);
-  } catch (_) { /* non-fatal */ }
-
-  // M55 · Brand exemplars — top 2-3 reference posts/replies/etc for this stage.
-  // Stage-specific kind mapping; null kind means skip.
-  const exemplarKind =
-      stageName === 'draft'    ? 'post_caption'
-    : stageName === 'adapt'    ? 'post_caption'
-    : stageName === 'translate'? 'post_caption'
-    : stageName === 'verify-translation' ? null
-    : stageName === 'design'   ? 'design_brief'
-    : stageName === 'reply-draft' ? 'objection_handler'
-    : stageName === 'triage'   ? 'intent_example_hot'   // Bineh sees hot examples; tags pull qualifying too
-    : null;
-  if (exemplarKind) {
+  } catch (e) {
+    // Fallback to legacy renderers (graceful degradation if retrieval fails)
     try {
-      const platform = recipe && recipe.id;
-      const exBlock = await brandInt.renderExemplarsBlock({
-        kind: exemplarKind, platform, language: lang || run.master_lang, limit: 3,
+      const mem = agentMemory.renderAsBlock(agent, {
+        limit: 6,
+        queryKeywords: String(run.topic || '').split(/\s+/).filter(w => w.length >= 4).slice(0, 5),
       });
-      if (exBlock) blocks.push(exBlock);
-    } catch (_) { /* non-fatal */ }
+      if (mem) blocks.push(mem);
+    } catch (_) {}
   }
 
   return blocks.join('\n\n');

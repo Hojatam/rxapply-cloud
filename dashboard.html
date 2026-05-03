@@ -5334,6 +5334,16 @@ async function loadAdTrain(name) {
       <div class="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-2">Training history</div>
       <div id="ad-train-evals"><div class="empty"><div class="empty-text text-xs">…</div></div></div>
     </div>
+
+    <!-- M56 · What this agent will see in its next prompt -->
+    <div class="card-tight mt-4">
+      <div class="flex items-center justify-between mb-2">
+        <div class="text-xs uppercase tracking-wider text-slate-500 font-semibold">Brand intelligence applying to ${escapeHtml(name)}</div>
+        <button class="btn btn-ghost btn-xs" onclick="loadAdTrainBrand('${name}')">↻</button>
+      </div>
+      <div class="text-xs text-slate-500 mb-2">Live preview of the rules + exemplars + memories the orchestrator will inject in this agent's next prompt. Top-K only, ranked by relevance + scope specificity. Edit globally in <a href="#/brand" class="text-indigo-600 underline">Brand training</a>.</div>
+      <div id="ad-train-brand"><div class="empty"><div class="empty-text text-xs">Loading…</div></div></div>
+    </div>
   `;
 
   // Initial kind = example
@@ -5341,6 +5351,85 @@ async function loadAdTrain(name) {
   loadAdTrainKPIs(name);
   loadAdTrainRuns(name);
   loadAdTrainEvals(name);
+  loadAdTrainBrand(name);
+}
+
+// M56 · Load the per-agent training preview (rules + exemplars + memories
+// the orchestrator will actually inject for this agent's next call).
+async function loadAdTrainBrand(name) {
+  const el = $('ad-train-brand'); if (!el) return;
+  try {
+    const j = await fetch(`${PROXY}/training/preview?agent=${encodeURIComponent(name)}&stage=draft`).then(r => r.json());
+    if (!j.ok) throw new Error(j.error || 'failed');
+    const p = j.packet || {};
+    const rules = p.rules || [], exemplars = p.exemplars || [], memories = p.memories || [], conflicts = p.conflicts || [];
+    if (rules.length === 0 && exemplars.length === 0 && memories.length === 0) {
+      el.innerHTML = `<div class="empty"><div class="empty-text text-xs">Nothing matches this agent yet. Upload your brand archive in <a href="#/brand" class="text-indigo-600 underline">Brand training</a> or add rules manually.</div></div>`;
+      return;
+    }
+    el.innerHTML = `
+      ${conflicts.length ? `
+        <div class="p-2 rounded mb-3" style="background:#fef3c7;color:#92400e;font-size:12px;border-left:3px solid #d97706;">
+          <strong>⚠ ${conflicts.length} conflict${conflicts.length>1?'s':''} detected</strong> — your training notes disagree with global rules. Surfaced explicitly in the prompt so the model resolves toward the correction.
+        </div>` : ''}
+      ${rules.length ? `
+        <div class="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1">Top ${rules.length} rule${rules.length>1?'s':''}</div>
+        ${rules.map(r => `
+          <div class="card-tight mb-1" style="background:#f8fafc;">
+            <div class="flex items-center gap-2 flex-wrap mb-0.5" style="font-size:10px;">
+              <span class="mono" style="background:#ede9fe;color:#5b21b6;padding:1px 5px;border-radius:3px;font-weight:600;">${escapeHtml(r.kind)}</span>
+              ${r.target_agent ? `<span class="mono" style="background:#dbeafe;color:#1e40af;padding:1px 5px;border-radius:3px;">${escapeHtml(r.target_agent)}</span>` : '<span class="mono" style="color:#94a3b8;">(global)</span>'}
+              <span style="color:#d97706;">${'★'.repeat(r.importance||3)}${'☆'.repeat(5-(r.importance||3))}</span>
+            </div>
+            <div class="text-xs">${escapeHtml(r.rule_text)}</div>
+          </div>
+        `).join('')}` : ''}
+      ${exemplars.length ? `
+        <div class="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1 mt-3">Top ${exemplars.length} exemplar${exemplars.length>1?'s':''}</div>
+        ${exemplars.map(e => `
+          <div class="card-tight mb-1" style="background:#f0fdf4;">
+            <div class="flex items-center gap-2 flex-wrap mb-0.5" style="font-size:10px;">
+              <span class="mono" style="background:#dcfce7;color:#15803d;padding:1px 5px;border-radius:3px;font-weight:600;">${escapeHtml(e.kind)}</span>
+              ${e.outcome ? `<span class="mono" style="background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:3px;">${escapeHtml(e.outcome)}</span>` : ''}
+              <span style="color:#d97706;">${'★'.repeat(e.importance||3)}${'☆'.repeat(5-(e.importance||3))}</span>
+            </div>
+            <div class="text-xs" style="white-space:pre-wrap;">${escapeHtml(e.body.slice(0, 200))}${e.body.length > 200 ? '…' : ''}</div>
+          </div>
+        `).join('')}` : ''}
+      ${memories.length ? `
+        <div class="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1 mt-3">Top ${memories.length} from your training notes</div>
+        ${memories.map(m => `
+          <div class="card-tight mb-1" style="background:#fef2f2;">
+            <div class="flex items-center gap-2 flex-wrap mb-0.5" style="font-size:10px;">
+              <span class="mono" style="background:#fee2e2;color:#991b1b;padding:1px 5px;border-radius:3px;font-weight:600;">${escapeHtml(m.type)}</span>
+              <span style="color:#d97706;">${'★'.repeat(m.importance||3)}${'☆'.repeat(5-(m.importance||3))}</span>
+              ${m.promotion_score >= 3 ? `<button class="btn btn-ghost btn-xs" onclick="adPromoteMemory('${m.id}')" style="margin-left:auto;font-size:10px;">↑ Promote to brand-wide</button>` : ''}
+            </div>
+            <div class="text-xs">${escapeHtml(m.content.slice(0, 200))}${m.content.length > 200 ? '…' : ''}</div>
+          </div>
+        `).join('')}` : ''}
+    `;
+  } catch (e) {
+    el.innerHTML = `<div class="empty"><div class="empty-text text-xs">Failed: ${escapeHtml(e.message)}</div></div>`;
+  }
+}
+
+// M56 · Promote a per-agent memory to a brand-wide rule (creates a pending proposal)
+async function adPromoteMemory(memoryId) {
+  const ok = await confirmModal({
+    title: 'Promote to brand-wide rule?',
+    sub: 'Creates a proposal in Inbox. Founder approves before it actually becomes a global brand rule. The original memory stays on this agent.',
+    confirmLabel: '↑ Propose promotion',
+  });
+  if (!ok) return;
+  try {
+    // Use the librarian-scan endpoint to surface; or create directly:
+    const r = await authFetch(`${PROXY}/training/promotions/scan`, { method: 'POST' });
+    if (r.status === 401) return toast('Sign in required.', 'error');
+    const j = await r.json();
+    if (!j.ok) return toast('Failed: ' + (j.error || '?'), 'error');
+    toast(`Promotion proposals refreshed (${j.proposed} new). Review in Inbox.`, 'success');
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 // Switch the Teach card's kind (example / rule / correction). Updates

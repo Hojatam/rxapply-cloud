@@ -108,14 +108,15 @@ async function createIntelligence(row) {
   const id = await queryReturning(`
     INSERT INTO brand_intelligence
       (kind, target_agent, scope_platform, scope_language, rule_text, rule_data,
-        importance, source, source_ref, enabled, founder_edited, founder_note)
+        importance, source, source_ref, enabled, founder_edited, founder_note, topic_tags)
     VALUES (
       ${q(row.kind)}, ${q(row.target_agent)}, ${q(row.scope_platform)}, ${q(row.scope_language)},
       ${q(row.rule_text)}, ${qJson(row.rule_data || {})},
       ${parseInt(row.importance || 3, 10)}, ${q(row.source || 'manual')}, ${q(row.source_ref)},
       ${row.enabled === false ? 'FALSE' : 'TRUE'},
       ${row.founder_edited === true ? 'TRUE' : 'FALSE'},
-      ${q(row.founder_note)}
+      ${q(row.founder_note)},
+      ${qArr(Array.isArray(row.topic_tags) ? row.topic_tags : [])}
     ) RETURNING id::text;`);
   clearCache();
   return { ok: true, id };
@@ -132,6 +133,7 @@ async function updateIntelligence(id, fields) {
     else sets.push(`${k} = ${q(v)}`);
   }
   if (fields && fields.rule_data != null) sets.push(`rule_data = ${qJson(fields.rule_data)}`);
+  if (Array.isArray(fields && fields.topic_tags)) sets.push(`topic_tags = ${qArr(fields.topic_tags)}`);
   if (sets.length === 0) return { ok: false, error: 'no valid fields' };
   // Mark as founder_edited automatically on any edit
   sets.push(`founder_edited = TRUE`);
@@ -492,11 +494,25 @@ async function importPublicArchive({ patterns, exemplars, fingerprint, visualPro
   // ── Visual rules (Afshin) ────
   if (visualProfile && visualProfile.aggregate && Array.isArray(visualProfile.aggregate.brand_rules_inferred)) {
     for (const ruleText of visualProfile.aggregate.brand_rules_inferred) {
+      // Auto-derive topic_tags from rule text so retrieval can match by topic
+      const lt = ruleText.toLowerCase();
+      const tags = ['visual'];
+      if (/logo/.test(lt))                  tags.push('logo');
+      if (/color|teal|navy|palette/.test(lt)) tags.push('palette');
+      if (/typography|type/.test(lt))       tags.push('typography');
+      if (/template|poster/.test(lt))       tags.push('template');
+      if (/country|usa|germany|canada/.test(lt)) tags.push('country');
+      if (/watercolor|occasion|greeting/.test(lt)) tags.push('occasion');
+      if (/aspect|ratio|portrait|square/.test(lt)) tags.push('aspect-ratio');
+      if (/photoreal|photo/.test(lt))       tags.push('photoreal');
+      if (/wordmark|spaced/.test(lt))       tags.push('wordmark');
+
       await createIntelligence({
         kind: 'visual_rule', target_agent: 'afshin',
         rule_text: ruleText,
         rule_data: { aggregate: visualProfile.aggregate },
         importance: 5, source: stamp,
+        topic_tags: tags,
       });
       intel++;
     }
@@ -680,6 +696,165 @@ async function importDmAnalysis({ questionPatterns, objectionPlaybook, voiceFing
   return { ok: true, source: stamp, intelligence: intel, exemplars: exem, fingerprint: fp };
 }
 
+// M56 Phase 2 · DM tone profile import (dm_tone_profile.json from local analyzer).
+// Different from importDmAnalysis (which expects question_patterns + objection_playbook
+// from DM-INSTRUCTIONS.md). This handles the broader tone-profile output.
+async function importDmToneProfile({ toneProfile, sourceLabel = null }) {
+  if (!toneProfile) return { ok: false, error: 'toneProfile required' };
+  const stamp = sourceLabel || `dm_tone_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
+  let intel = 0, exem = 0, fp = 0;
+
+  await query(`DELETE FROM brand_intelligence WHERE source = ${q(stamp)};`);
+  await query(`DELETE FROM brand_exemplars     WHERE source = ${q(stamp)};`);
+
+  // ── Reply latency (Mehrban response-time rule) ────
+  if (toneProfile.reply_latency_buckets_pct) {
+    const b = toneProfile.reply_latency_buckets_pct;
+    const fast = (b['<5min'] || 0) + (b['5-30min'] || 0);
+    await createIntelligence({
+      kind: 'voice_rule', target_agent: 'mehrban', scope_platform: 'instagram',
+      rule_text: `Historical reply latency: ${fast}% within 30min, p50=${Math.round((toneProfile.reply_latency_minutes && toneProfile.reply_latency_minutes.p50) || 0)}min. Aim to draft replies fast — hot leads should get a draft ready in <5min so the founder can send within 30min of receipt.`,
+      rule_data: b, importance: 4, source: stamp,
+      topic_tags: ['dm', 'latency'],
+    });
+    intel++;
+  }
+
+  // ── Length profile ────
+  if (toneProfile.length && toneProfile.length.brand_words) {
+    const lw = toneProfile.length.brand_words;
+    const shortPct = toneProfile.length['brand_short_msg_pct (≤3 words)'] || 0;
+    const longPct  = toneProfile.length['brand_long_msg_pct (≥30 words)'] || 0;
+    await createIntelligence({
+      kind: 'voice_rule', target_agent: 'mehrban', scope_platform: 'instagram',
+      rule_text: `DM reply length: median ${lw.p50} words (p25=${lw.p25}, p75=${lw.p75}). ${shortPct}% are very short (≤3 words — quick acknowledgments), ${longPct}% are long (≥30 words — substantive). Match the conversation rhythm — don't over-explain.`,
+      rule_data: lw, importance: 4, source: stamp,
+      topic_tags: ['dm', 'length'],
+    });
+    intel++;
+  }
+
+  // ── Formality ────
+  if (toneProfile.formality) {
+    const f = toneProfile.formality;
+    await createIntelligence({
+      kind: 'voice_rule', target_agent: 'mehrban', scope_platform: 'instagram', scope_language: 'fa',
+      rule_text: `Formality register: formal pronoun (شما) used in ${f.formal_pronoun_pct}% of messages, informal in ${f.informal_pronoun_pct}%. Honorifics (دکتر/خانم/آقای) in ${f['honorific_use_pct (دکتر/خانم/آقای/...)']}%. Default to formal+honorific unless audience signals informal first.`,
+      rule_data: f, importance: 5, source: stamp,
+      topic_tags: ['dm', 'formality', 'register'],
+    });
+    intel++;
+  }
+
+  // ── Top emojis ────
+  if (toneProfile.emoji && Array.isArray(toneProfile.emoji.brand_top20)) {
+    const top5 = toneProfile.emoji.brand_top20.slice(0, 5);
+    const list = top5.map(e => `${e.emoji} (${e.count}×)`).join(', ');
+    await createIntelligence({
+      kind: 'voice_rule', target_agent: 'mehrban', scope_platform: 'instagram',
+      rule_text: `Top emojis used in DMs: ${list}. ${toneProfile.emoji.brand_msgs_with_emoji_pct || 0}% of messages contain at least one emoji. Use 🌹 to soften / express warmth, 🙏 for thanks, 🌱 for hope. Never overuse — one or two per message.`,
+      rule_data: { top: top5, msgs_with_emoji_pct: toneProfile.emoji.brand_msgs_with_emoji_pct },
+      importance: 4, source: stamp,
+      topic_tags: ['dm', 'emoji', 'tone'],
+    });
+    intel++;
+  }
+
+  // ── Greetings ────
+  if (toneProfile.greetings && toneProfile.greetings.by_form) {
+    const greets = toneProfile.greetings.by_form.slice(0, 3).map(g => `"${g.phrase}" (${g.count}×)`).join(', ');
+    await createIntelligence({
+      kind: 'opener_template', target_agent: 'mehrban', scope_platform: 'instagram', scope_language: 'fa',
+      rule_text: `${toneProfile.greetings.msgs_starting_with_greeting_pct || 0}% of DM replies open with a greeting. Top forms: ${greets}. Use "سلام" for general; add "وقت بخیر" / "وقتتون بخیر" for first contact in a new thread.`,
+      rule_data: toneProfile.greetings,
+      importance: 4, source: stamp,
+      topic_tags: ['dm', 'greeting', 'opener'],
+    });
+    intel++;
+  }
+
+  // ── Templated brand phrases → exemplars (real founder phrasings) ────
+  if (Array.isArray(toneProfile.templated_brand_phrases_top30)) {
+    for (const p of toneProfile.templated_brand_phrases_top30.slice(0, 8)) {
+      await createExemplar({
+        kind: 'dm_reply', platform: 'instagram', language: 'fa',
+        body: p.phrase,
+        context: `Recurring brand phrase used in ${p.n_conversations} distinct conversations`,
+        topic_tags: ['dm', 'templated-phrase'],
+        importance: 4, source: stamp, source_ref: `tmpl_${p.phrase.slice(0, 20)}`,
+        outcome: 'recurring_brand_phrase',
+      });
+      exem++;
+    }
+  }
+
+  // ── 10 brand canned replies → exemplars (importance 5 — these are gold) ────
+  if (Array.isArray(toneProfile.brand_canned_replies_top10)) {
+    for (let i = 0; i < toneProfile.brand_canned_replies_top10.length; i++) {
+      const c = toneProfile.brand_canned_replies_top10[i];
+      if (!c.text_preview) continue;
+      // Infer topic tags from the canned reply text
+      const tags = ['dm', 'canned-reply'];
+      const t = c.text_preview.toLowerCase();
+      if (/کارگاه|workshop/.test(t))      tags.push('workshop');
+      if (/تخفیف|کد|coupon/.test(t))      tags.push('discount');
+      if (/ویدیو|video/.test(t))         tags.push('video');
+      if (/هدیه|gift/.test(t))           tags.push('gift');
+      if (/ثبت\s*نام|register/.test(t))  tags.push('signup');
+      if (/پیج|page|اینستاگرام/.test(t)) tags.push('engagement-ask');
+      if (/ایمیل|email/.test(t))         tags.push('email-pivot');
+      if (/مهاجرت|migration/.test(t))    tags.push('migration');
+      if (/کانادا|آمریکا|آلمان/.test(t)) tags.push('country-info');
+
+      await createExemplar({
+        kind: 'dm_reply', platform: 'instagram', language: 'fa',
+        body: c.text_preview,
+        context: `Founder's canned reply, sent ${c.sent_n_times} times across the archive. Use as a starting template — adapt to the specific question.`,
+        topic_tags: tags,
+        importance: 5, source: stamp, source_ref: `canned_${i + 1}`,
+        outcome: 'recurring_canned_reply',
+      });
+      exem++;
+    }
+  }
+
+  // ── Audience FAQ phrases → signals for Bineh (intent triage) ────
+  if (Array.isArray(toneProfile.audience_faq_phrases_top30)) {
+    const top5 = toneProfile.audience_faq_phrases_top30.slice(0, 5);
+    const list = top5.map(p => `"${p.phrase}" (${p.n_conversations} threads)`).join('; ');
+    await createIntelligence({
+      kind: 'dm_question_pattern', target_agent: 'bineh', scope_platform: 'instagram', scope_language: 'fa',
+      rule_text: `Top opening phrases in inbound DMs: ${list}. Many threads start with greetings — don't classify on greeting alone; wait for the substantive question.`,
+      rule_data: { phrases: top5 },
+      importance: 4, source: stamp,
+      topic_tags: ['dm', 'inbound', 'triage-signal'],
+    });
+    intel++;
+  }
+
+  // ── Contact pivot stats ────
+  if (toneProfile.contact_pivot_pct) {
+    const cp = toneProfile.contact_pivot_pct;
+    await createIntelligence({
+      kind: 'voice_rule', target_agent: 'mehrban', scope_platform: 'instagram',
+      rule_text: `Contact pivots in DMs: site link ${cp['site link']||0}%, email pivot ${cp['email pivot']||0}%, phone share rare (${cp['phone-number share']||0}%). Prefer site link / email; never push phone number share unless audience asked.`,
+      rule_data: cp, importance: 4, source: stamp,
+      topic_tags: ['dm', 'contact-pivot'],
+    });
+    intel++;
+  }
+
+  // ── Provenance ────
+  await query(`
+    INSERT INTO brand_archive_uploads
+      (upload_kind, source_label, intelligence_inserted, exemplars_inserted, fingerprint_inserted, meta)
+    VALUES ('dm_tone_profile', ${q(stamp)}, ${intel}, ${exem}, ${fp},
+            ${qJson({ scope: toneProfile.scope || null })});`);
+
+  clearCache();
+  return { ok: true, source: stamp, intelligence: intel, exemplars: exem, fingerprint: fp };
+}
+
 async function listUploads({ limit = 50 } = {}) {
   return await queryRows(`
     SELECT id::text, upload_kind, source_label,
@@ -708,7 +883,7 @@ module.exports = {
   // Fingerprint CRUD
   listFingerprint, createFingerprint, updateFingerprint, deleteFingerprint,
   // Bulk import
-  importPublicArchive, importDmAnalysis,
+  importPublicArchive, importDmAnalysis, importDmToneProfile,
   // Provenance + counts
   listUploads, counts,
   // Cache

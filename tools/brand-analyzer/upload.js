@@ -156,6 +156,32 @@ async function main() {
     console.log('Visual rules from visual_style_profile.aggregate.brand_rules_inferred are imported as Afshin intelligence.');
     console.log('Image uploads to media_library: ship M55b if needed.');
   }
+
+  // M56 · Auto-detect + upload dm_tone_profile.json if present
+  const tonePath = path.join(outDir, 'dm_tone_profile.json');
+  if (fs.existsSync(tonePath)) {
+    console.log(`\n→ Detected dm_tone_profile.json — uploading separately ...`);
+    try {
+      const tonePayload = {
+        toneProfile: JSON.parse(fs.readFileSync(tonePath, 'utf8')),
+        sourceLabel: `dm_tone_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`,
+      };
+      const tr = await fetch(`${baseUrl}/brand/dm-tone-profile/upload`, {
+        method: 'POST',
+        headers: { 'authorization': `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify(tonePayload),
+      });
+      const tt = await tr.text();
+      if (!tr.ok) {
+        console.error(`  FAIL: HTTP ${tr.status}\n  ${tt.slice(0, 500)}`);
+      } else {
+        console.log(`  ✓ dm_tone_profile uploaded.`);
+        try { console.log('  ' + JSON.stringify(JSON.parse(tt))); } catch (_) {}
+      }
+    } catch (e) {
+      console.error(`  ERROR: ${e.message}`);
+    }
+  }
 }
 
 main().catch(e => { console.error('FATAL:', e); process.exit(1); });
