@@ -172,8 +172,25 @@ stages will use. Return ONLY this JSON (no prose, no markdown):
   "angle": "<one sentence — the perspective / hook>",
   "channel_fit_notes": "<one or two sentences on what this format demands; e.g. email needs subject + preview>",
   "success_criteria": ["<criterion 1>", "<criterion 2>", "..."],
+  "complexity": "trivial | standard | deep",
+  "complexity_reason": "<one sentence — why this complexity tier>",
   "handoff_intent": null
-}`,
+}
+
+Complexity guide (M40 · effort-scaling — every level still runs verify):
+  • trivial  — short, casual post on a topic the KB already covers well
+                (a daily Telegram update, a quick IG caption with no new claims).
+                Skips the structured RESEARCH stage; KB block is still injected
+                into the draft so the agent has full KB access.
+  • standard — most content. Needs structured research + critique + verify.
+                Default for any post that takes a position, makes claims,
+                or covers a topic at length. (DEFAULT if you can't decide.)
+  • deep     — high-stakes content (regulatory deep-dive, official launches,
+                country-launch announcements, anything where a hallucinated fact
+                would damage trust). Adds adversarial audit on top of standard.
+
+Bias toward "standard" when uncertain. Never pick "trivial" for content that
+makes regulatory / numeric / legal claims. Never pick "deep" for short posts.`,
 
   research:
 `Given the plan below, research the topic. Cite real institutions / regulators / numbers from the
@@ -489,13 +506,35 @@ async function _markAwaitingApproval(runId, stageName) {
                 WHERE id = ${q(runId)};`);
 }
 
-// Should this stage run for this run? Honors `if_option` (skip when the
-// run.options[key] is falsy). Used to gate optional stages like cover-image.
+// M40 · Effort-scaling — complexity tiers from the plan stage.
+// Verify ALWAYS runs (per founder's KB-first rule); only research + audit
+// are gated by complexity.
+const _COMPLEXITY_RANK = { trivial: 1, standard: 2, deep: 3 };
+function _runComplexity(run) {
+  // Founder override on the run wins
+  if (run && run.options && _COMPLEXITY_RANK[run.options.complexity]) {
+    return run.options.complexity;
+  }
+  // Else read from the plan stage's output
+  const planRow = (run && run.stages || []).find(s => s.stage_name === 'plan' && s.status === 'done');
+  const out = planRow && planRow.output;
+  if (out && _COMPLEXITY_RANK[out.complexity]) return out.complexity;
+  return 'standard';   // safe default
+}
+
+// Should this stage run for this run? Honors:
+//   - if_option              : skip when run.options[key] is falsy
+//   - if_complexity_at_least : skip when current complexity rank < required rank
 function _stageShouldRun(stage, run) {
   if (!stage) return false;
   if (stage.if_option) {
     const val = (run.options || {})[stage.if_option];
     if (!val) return false;
+  }
+  if (stage.if_complexity_at_least) {
+    const required = _COMPLEXITY_RANK[stage.if_complexity_at_least] || 0;
+    const current  = _COMPLEXITY_RANK[_runComplexity(run)] || 2;
+    if (current < required) return false;
   }
   return true;
 }

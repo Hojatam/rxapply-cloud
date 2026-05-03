@@ -7,10 +7,11 @@
 
   "stages": [
     { "name": "plan",     "capability": "plan" },
-    { "name": "research", "capability": "research", "params": { "depth": "deep" } },
+    { "name": "research", "capability": "research", "params": { "depth": "deep" }, "if_complexity_at_least": "standard" },
     { "name": "draft",    "capability": "draft",    "params": { "length_words": [1200, 2000] } },
     { "name": "critique", "capability": "critique" },
-    { "name": "verify",   "capability": "verify",   "if_option": "kb_verify" },
+    { "name": "verify",   "capability": "verify" },
+    { "name": "audit",    "capability": "audit",    "if_complexity_at_least": "deep" },
     { "name": "adapt",    "capability": "adapt",
       "params": { "produce": ["title", "slug", "meta_description", "outline", "body_md", "design_brief"] } },
     { "name": "render",   "renderer": "seo-article" },
@@ -18,7 +19,7 @@
     { "name": "image",    "renderer": "image-cover", "if_option": "with_image" }
   ],
 
-  "gateable_stages": ["critique", "verify", "adapt", "design"],
+  "gateable_stages": ["critique", "verify", "audit", "adapt", "design"],
 
   "translate": {
     "capability": "translate",
@@ -31,7 +32,6 @@
       "placeholder": "e.g. Canadian dental licensing, internationally trained dentists" },
     { "key": "internal_links",   "label": "Internal links (URL per line)", "type": "textarea",
       "placeholder": "https://rxapply.com/uk-licensing\nhttps://rxapply.com/about" },
-    { "key": "kb_verify",        "label": "Daneshyar KB fact-check",        "type": "checkbox", "default": true },
     { "key": "with_image",       "label": "Generate hero image (~$0.04)",   "type": "checkbox", "default": false }
   ]
 }

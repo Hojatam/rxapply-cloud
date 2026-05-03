@@ -6128,6 +6128,17 @@ function coRenderForm() {
       </div>
     </div>
 
+    <div class="co-form-section">
+      <div class="co-form-section-title">Effort tier (optional override · planner picks if left auto)</div>
+      <div class="co-segmented">
+        <label><input type="radio" name="co-complexity" value="" checked><span>Auto (planner decides)</span></label>
+        <label><input type="radio" name="co-complexity" value="trivial"><span>Trivial · skip research</span></label>
+        <label><input type="radio" name="co-complexity" value="standard"><span>Standard · full pipeline</span></label>
+        <label><input type="radio" name="co-complexity" value="deep"><span>Deep · adds adversarial audit</span></label>
+      </div>
+      <div class="text-xs mt-2" style="color:var(--text-muted, #64748b);">Verify against KB always runs, on every tier.</div>
+    </div>
+
     ${(r.options_schema && r.options_schema.length) ? `
       <div class="co-form-section">
         <div class="co-form-section-title">${escapeHtml(meta.label)} options</div>
@@ -6240,6 +6251,9 @@ async function coStart() {
   const gateEl = document.querySelector('input[name="co-gate"]:checked');
   const gateStrategy = gateEl ? gateEl.value : 'critique';
   const options = coGatherOptions();
+  // M40 · founder complexity override
+  const complexityEl = document.querySelector('input[name="co-complexity"]:checked');
+  if (complexityEl && complexityEl.value) options.complexity = complexityEl.value;
 
   try {
     const resp = await authFetch(`${PROXY}/compose/runs`, {

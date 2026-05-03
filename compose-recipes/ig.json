@@ -7,10 +7,11 @@
 
   "stages": [
     { "name": "plan",     "capability": "plan" },
-    { "name": "research", "capability": "research" },
+    { "name": "research", "capability": "research", "if_complexity_at_least": "standard" },
     { "name": "draft",    "capability": "draft", "params": { "length_words": [80, 220] } },
     { "name": "critique", "capability": "critique" },
-    { "name": "verify",   "capability": "verify", "if_option": "kb_verify" },
+    { "name": "verify",   "capability": "verify" },
+    { "name": "audit",    "capability": "audit", "if_complexity_at_least": "deep" },
     { "name": "adapt",    "capability": "adapt",
       "params": { "produce": ["caption", "hashtags", "design_plan", "design_brief"] } },
     { "name": "render",   "renderer": "ig" },
@@ -18,7 +19,7 @@
     { "name": "image",    "renderer": "image-cover", "if_option": "with_image" }
   ],
 
-  "gateable_stages": ["critique", "verify", "adapt", "design"],
+  "gateable_stages": ["critique", "verify", "audit", "adapt", "design"],
 
   "translate": {
     "capability": "translate",
@@ -28,7 +29,6 @@
   "options_schema": [
     { "key": "primary_cta",     "label": "CTA URL (link in bio)", "type": "text", "placeholder": "https://rxapply.com" },
     { "key": "max_hashtags",    "label": "Max hashtags",          "type": "number", "default": 12, "min": 3, "max": 30 },
-    { "key": "kb_verify",       "label": "Daneshyar KB fact-check",       "type": "checkbox", "default": true },
     { "key": "with_image",      "label": "Generate cover image (~$0.04)", "type": "checkbox", "default": true }
   ]
 }
