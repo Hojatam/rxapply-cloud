@@ -44,6 +44,11 @@ const CAPABILITY_REGISTRY = {
   // Channel-native adaptation (subject lines, length, hashtags, CTA placement)
   avang:     ['adapt'],
 
+  // M60 · Tarrah (طرّاح) — carousel slide planner. Owns the
+  // 'carousel-plan' capability: turns research+caption into a structured
+  // slot-spec JSON that Afshin renders. Tarrah does not draw; Afshin draws.
+  tarrah:    ['carousel-plan'],
+
   // M47 · DM triage + reply drafting
   bineh:     ['triage'],         // Inbound-DM intent classification
   mehrban:   ['reply-draft'],    // Drafts a reply for hot/qualifying DMs

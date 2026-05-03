@@ -38,6 +38,10 @@ const STAGE_BUDGETS = {
   'voice-critic':       { rules: 0, exemplars: 0, memories: 0 },
   adapt:                { rules: 3, exemplars: 2, memories: 4 },
   translate:            { rules: 1, exemplars: 1, memories: 2 },
+  // M60 · Tarrah's carousel-plan stage — needs brand visual rules and
+  // a couple of cover/post-caption exemplars to anchor the slot voice;
+  // memory is per-agent corrections (e.g. "always use Persian numerals").
+  'carousel-plan':      { rules: 4, exemplars: 2, memories: 4 },
   design:               { rules: 5, exemplars: 3, memories: 4 },
   render:               { rules: 0, exemplars: 0, memories: 0 },
   triage:               { rules: 2, exemplars: 2, memories: 3 },
@@ -57,6 +61,10 @@ const STAGE_EXEMPLAR_KIND = {
   draft:       'post_caption',
   adapt:       'post_caption',
   translate:   'post_caption',
+  // M60 · Tarrah pulls design_brief exemplars (which carry the visual-
+  // reference images Afshin uses) so the planner sees the same canonical
+  // templates Afshin will render — keeps slot decisions aligned.
+  'carousel-plan': 'design_brief',
   design:      'design_brief',
   triage:      'intent_example_hot',
   'reply-draft': 'dm_reply',

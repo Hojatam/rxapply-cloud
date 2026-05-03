@@ -48,6 +48,97 @@ const KIND_SPECS = {
   custom:             { dim: '1080x1080', label: 'Custom' },
 };
 
+// ── M61 · Brand templates (codified from 5-yr archive analysis) ─────
+// Two templates carry 22% of the brand's output. Each template binds a
+// slot schema → preferred model → render-prompt scaffolding. Tarrah
+// picks a template; Afshin renders each slide using template + slot
+// values. Founders can hand-tune `prefer_model` per template if needed.
+const TEMPLATE_REGISTRY = {
+  'vertical-workshop-poster': {
+    label: 'Vertical workshop poster',
+    description: 'Large title + Persian country pill + circular medical icon + 2-4 body bullets + small date pill. The brand\'s most-used template.',
+    slot_schema: ['title', 'subtitle', 'country_pill', 'icon', 'body_bullets', 'block_color', 'accent_color', 'date_pill', 'key_number'],
+    required_slots: ['title', 'block_color'],
+    prefer_model: 'gpt-image-2',
+    render_scaffold:
+      'Vertical poster, RxApply brand. Solid-fill {block_color} block dominates the layout with the title "{title}" rendered in bold sans-serif Persian/Arabic-supporting type. ' +
+      'Small {country_pill_color} pill containing the word "{country_pill}" near the title. ' +
+      'A circular {icon} icon callout in brand teal #13a597 sized ~12% of the canvas. ' +
+      'Body bullets stacked beneath the title in white-on-block. Small date pill in the lower corner. ' +
+      'Teal R-arrow logo on white square placed as an integrated element (not a corner watermark). ' +
+      'Mood: {mood}. No clichéd dental imagery (toothbrush/pill stock).',
+  },
+  'shield-frame-deadline': {
+    label: 'Shield-frame deadline poster',
+    description: 'Landmark/portrait + flag-color overlay + map background + bold orange deadline pill. For urgent country-specific exam deadlines.',
+    slot_schema: ['title', 'country_pill', 'deadline_pill', 'date_pill', 'block_color', 'accent_color', 'icon'],
+    required_slots: ['title', 'deadline_pill', 'date_pill'],
+    prefer_model: 'gpt-image-2',
+    render_scaffold:
+      'Vertical poster, RxApply brand, deadline-pressure variant. Country landmark or doctor portrait with subtle flag-color overlay, faint world-map background pattern. ' +
+      'Bold orange (#ff7a1a) deadline pill with the text "{deadline_pill}" in upper third. ' +
+      'Title "{title}" in {block_color} solid-fill block. ' +
+      'Country pill "{country_pill}" near title. Date "{date_pill}" in small pill. ' +
+      'Teal R-arrow logo integrated. Tone: urgent but professional, not clickbait.',
+  },
+  'photoreal-hero-with-block': {
+    label: 'Photoreal hero with caption block',
+    description: 'Photo of doctor/clinic/student + solid-fill caption block in lower third. Country posts.',
+    slot_schema: ['title', 'subtitle', 'country_pill', 'block_color', 'accent_color', 'icon'],
+    required_slots: ['title', 'block_color'],
+    prefer_model: 'gpt-image-2',
+    render_scaffold:
+      'Photoreal hero portrait (doctor / dentist / student in clinical or study setting), no clichéd stock dental imagery. ' +
+      'Subtle flag-color overlay if country-specific. Lower-third caption: solid {block_color} block with title "{title}" in bold {accent_color} type. ' +
+      'Optional country pill "{country_pill}" near title. ' +
+      'Teal R-arrow logo integrated. Mood: {mood}.',
+  },
+  'watercolor-occasion': {
+    label: 'Watercolor occasion illustration',
+    description: 'Hand-drawn watercolor with bilingual Persian + English title. ONLY for occasion days (Doctor Day, Pharmacist Day, etc.).',
+    slot_schema: ['title', 'subtitle', 'block_color', 'accent_color'],
+    required_slots: ['title'],
+    prefer_model: 'recraft-v3',
+    render_scaffold:
+      'Hand-drawn watercolor illustration, RxApply brand, occasion-day variant. Soft brush strokes, warm palette anchored on {block_color}. ' +
+      'Bilingual title: "{title}" (Persian, large) and English equivalent (smaller). ' +
+      'No photoreal elements. Subtle teal R-arrow watermark. ' +
+      'Mood: warm, celebratory, restrained — not flashy.',
+  },
+};
+
+function getTemplate(templateId) {
+  return TEMPLATE_REGISTRY[templateId] || null;
+}
+
+function listTemplates() {
+  return Object.entries(TEMPLATE_REGISTRY).map(([id, t]) => ({
+    id, label: t.label, description: t.description,
+    required_slots: t.required_slots, prefer_model: t.prefer_model,
+  }));
+}
+
+// Render a template scaffold by substituting {slot} tokens with values
+// from the slide's slots. Missing slots are dropped (sentence-aware).
+function renderTemplatePrompt(templateId, slots = {}) {
+  const t = TEMPLATE_REGISTRY[templateId];
+  if (!t) return null;
+  const ctx = {
+    ...slots,
+    country_pill: slots.country_pill || '',
+    country_pill_color: slots.country_pill_color || slots.accent_color || '#ff7a1a',
+    icon: slots.icon || 'tooth',
+    block_color: slots.block_color || '#1c3a52',
+    accent_color: slots.accent_color || '#13a597',
+    mood: slots.mood || 'calm, authoritative',
+    title: slots.title || '',
+    subtitle: slots.subtitle || '',
+    deadline_pill: slots.deadline_pill || '',
+    date_pill: slots.date_pill || '',
+  };
+  return t.render_scaffold.replace(/\{(\w+)\}/g, (_, k) => String(ctx[k] != null ? ctx[k] : ''));
+}
+
 // ── Model registry ────────────────────────────────────────────────────
 // Each entry: {
 //   label, provider, envKey, costEst (USD per render),
@@ -55,18 +146,40 @@ const KIND_SPECS = {
 // }
 
 const MODEL_REGISTRY = {
+  // M59 · OpenAI's current flagship (released 2026-04-21). #1 on Image
+  // Arena, state-of-the-art multilingual text rendering (Persian/Arabic),
+  // accepts reference images for style conditioning, supports a Thinking
+  // mode that produces N consistent panels in one call (carousel mode).
+  'gpt-image-2': {
+    label: 'GPT Image 2 (flagship)',
+    provider: 'openai',
+    envKey: 'OPENAI_API_KEY',
+    costEst: 0.19,                         // high-quality default
+    apiModelId: 'gpt-image-2',             // sent to /v1/images/generations
+    qualityDefault: 'high',
+    supportsReferenceImages: true,
+    supportsThinkingMode: true,            // multi-panel consistent generation
+    sizeMap: {
+      '1080x1080': '1024x1024',
+      '1280x720':  '1536x1024',
+      '1920x600':  '1536x1024',            // closest valid; provider will downscale
+      '600x200':   '1024x1024',
+    },
+    notes: 'OpenAI flagship (2026). Best multilingual typography. Accepts reference images. Use for IG slides, posters, covers.',
+  },
   'gpt-image-1': {
     label: 'GPT Image 1',
     provider: 'openai',
     envKey: 'OPENAI_API_KEY',
     costEst: 0.05,
+    apiModelId: 'gpt-image-1',
     sizeMap: {
       '1080x1080': '1024x1024',
       '1280x720':  '1536x1024',
       '1920x600':  '1536x1024',
       '600x200':   '1024x1024',
     },
-    notes: 'OpenAI flagship image model. High quality, reliable.',
+    notes: 'OpenAI prior-gen image model. Kept for fallback / cost control.',
   },
   'dall-e-3': {
     label: 'DALL·E 3',
@@ -350,24 +463,73 @@ function buildRenderPrompt(row) {
 
 // ── Provider implementations ──────────────────────────────────────────
 
-async function _renderOpenAI(row, modelKey, model, apiKey, prompt) {
+async function _renderOpenAI(row, modelKey, model, apiKey, prompt, opts = {}) {
   const size = model.sizeMap[row.dimensions] || '1024x1024';
-  const isGptImage1 = modelKey === 'gpt-image-1';
+  const apiModelId = model.apiModelId || (modelKey === 'dall-e-3' ? 'dall-e-3' : modelKey);
+  const isGptImage = apiModelId === 'gpt-image-1' || apiModelId === 'gpt-image-2';
+
   const body = {
-    model: isGptImage1 ? 'gpt-image-1' : 'dall-e-3',
+    model: apiModelId,
     prompt,
     n: 1,
     size,
   };
-  if (!isGptImage1) body.response_format = 'url';  // dall-e-3 returns URL by default
+  // gpt-image-2 supports quality tiers (low|medium|high|auto). Default 'high'
+  // for the flagship — your brand demands it; cost is irrelevant per founder.
+  if (apiModelId === 'gpt-image-2') {
+    body.quality = opts.quality || model.qualityDefault || 'high';
+    // M63 · Thinking mode for multi-slide consistency (carousel renders).
+    // When the orchestrator passes panels:N, the model produces N visually
+    // consistent panels in one call (same palette, fonts, characters).
+    if (opts.panels && opts.panels > 1) body.partial_images = opts.panels;
+  }
+  if (apiModelId === 'dall-e-3') body.response_format = 'url';  // dall-e-3 returns URL by default
 
-  const r = await fetch('https://api.openai.com/v1/images/generations', {
-    method: 'POST',
-    headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  // M62 · Reference-image conditioning — when the orchestrator hands us
+  // top-ranked brand exemplars, switch to the /edits endpoint so the model
+  // sees "look like this" rather than generating from prompt alone.
+  // Only gpt-image-2 supports high-fidelity image input on /edits cleanly.
+  const refs = Array.isArray(opts.referenceImages) ? opts.referenceImages.filter(Boolean) : [];
+  const useEdits = apiModelId === 'gpt-image-2' && refs.length > 0;
+
+  let r;
+  if (useEdits) {
+    if (typeof FormData === 'undefined') {
+      return { ok: false, error: 'OpenAI edits endpoint requires Node 18+ (FormData missing)' };
+    }
+    const fd = new FormData();
+    fd.append('model', apiModelId);
+    fd.append('prompt', prompt);
+    fd.append('size', size);
+    fd.append('n', '1');
+    fd.append('quality', body.quality);
+    // Attach up to 3 reference images (as Blobs) — gpt-image-2 supports
+    // multiple via repeated 'image[]' fields per the 2026 docs.
+    for (let i = 0; i < Math.min(refs.length, 3); i++) {
+      const ref = refs[i];
+      if (!ref || !ref.buffer || !ref.contentType) continue;
+      const blob = new Blob([ref.buffer], { type: ref.contentType });
+      fd.append('image[]', blob, ref.filename || `ref_${i}.png`);
+    }
+    r = await fetch('https://api.openai.com/v1/images/edits', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + apiKey },
+      body: fd,
+    });
+  } else {
+    r = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
   if (!r.ok) return { ok: false, error: `OpenAI ${r.status}: ${(await r.text()).slice(0, 300)}` };
   const j = await r.json();
+  // gpt-image-2 thinking mode returns multiple panels in j.data[]
+  if (opts.panels && opts.panels > 1 && Array.isArray(j.data) && j.data.length > 1) {
+    return { ok: true, panels: j.data.map(d => ({ b64: d.b64_json || null, url: d.url || null })) };
+  }
   const datum = (j.data || [])[0];
   if (!datum) return { ok: false, error: 'no image returned by OpenAI' };
   return { ok: true, b64: datum.b64_json || null, url: datum.url || null };
@@ -484,9 +646,60 @@ async function _renderRecraft(row, model, apiKey, prompt) {
   return { ok: true, url };
 }
 
+// ── M62 · Brand reference-image loader ───────────────────────────────
+// Pulls top-K visual references from brand_exemplars (already populated
+// from the analyzer's 75 visual references upload) ranked by topic-tag
+// overlap × importance, fetches them as buffers, and returns them in
+// the shape _renderOpenAI's `referenceImages` opt expects.
+async function _loadReferenceImages({ topicTags = [], platform = null, language = null, max = 3 } = {}) {
+  try {
+    const { queryRows } = require('./db');
+    const conds = ["enabled = TRUE", "kind = 'design_brief'"];
+    if (platform) conds.push(`(platform = '${platform.replace(/'/g, "''")}' OR platform IS NULL)`);
+    if (language) conds.push(`(language = '${language.replace(/'/g, "''")}' OR language IS NULL)`);
+    const rows = await queryRows(`
+      SELECT id::text, body, topic_tags, importance, outcome
+        FROM brand_exemplars WHERE ${conds.join(' AND ')}
+       ORDER BY importance DESC, updated_at DESC LIMIT 50;`);
+    if (!rows || rows.length === 0) return [];
+
+    // Score: importance + topic overlap + winner bonus
+    const tags = Array.isArray(topicTags) ? topicTags.map(t => String(t).toLowerCase()) : [];
+    const scored = rows.map(r => {
+      const rTags = Array.isArray(r.topic_tags) ? r.topic_tags.map(t => String(t).toLowerCase()) : [];
+      const overlap = rTags.filter(t => tags.includes(t)).length;
+      const winnerBonus = r.outcome === 'top_engagement' ? 0.5 : 0;
+      return { ...r, _score: (Number(r.importance) || 3) + overlap * 1.5 + winnerBonus };
+    }).sort((a, b) => b._score - a._score).slice(0, max);
+
+    // Each exemplar's body has a "URL: <url>" line — extract and fetch.
+    const out = [];
+    for (const ex of scored) {
+      const m = String(ex.body || '').match(/URL:\s*(\S+)/);
+      if (!m) continue;
+      let url = m[1];
+      // Resolve relative storage paths to absolute if needed
+      if (url.startsWith('/storage/')) {
+        const base = process.env.PUBLIC_BASE_URL || '';
+        if (base) url = base.replace(/\/+$/, '') + url;
+      }
+      try {
+        const r = await fetch(url);
+        if (!r.ok) continue;
+        const ct = r.headers.get('content-type') || 'image/jpeg';
+        const buffer = Buffer.from(await r.arrayBuffer());
+        if (buffer.length < 200 || buffer.length > 20 * 1024 * 1024) continue;
+        const ext = ct.includes('png') ? 'png' : ct.includes('webp') ? 'webp' : 'jpg';
+        out.push({ buffer, contentType: ct, filename: `ref_${ex.id.slice(0, 8)}.${ext}` });
+      } catch (_) { /* skip this ref, keep going */ }
+    }
+    return out;
+  } catch (_) { return []; }
+}
+
 // ── Render: dispatcher ────────────────────────────────────────────────
 
-async function generateRender({ mediaId, prompt, modelKey }) {
+async function generateRender({ mediaId, prompt, modelKey, referenceImages = null, panels = null, quality = null, topicTags = null }) {
   // Fetch the DB row first to get kind + approval status.
   const rowSql = `SELECT row_to_json(r) FROM (SELECT id::text, kind, topic, language, draft_path, approved, dimensions FROM media_library WHERE id = ${_q(mediaId)}) r;`;
   let row;
@@ -494,9 +707,13 @@ async function generateRender({ mediaId, prompt, modelKey }) {
   if (!row) return { ok: false, error: 'media not found' };
   if (!row.approved) return { ok: false, error: 'draft must be approved before render' };
 
-  // Resolve model: explicit arg → per-kind default → gpt-image-1
+  // Resolve model: explicit arg → per-kind default → text-heavy fallback (gpt-image-2)
+  // M59 · Text-heavy kinds default to gpt-image-2 (the 2026 flagship —
+  // best multilingual typography). Older fallback chain stays in place.
   const defaults = getModelDefaults();
-  const resolvedKey = modelKey || defaults[row.kind] || 'gpt-image-1';
+  const TEXT_HEAVY_KINDS = new Set(['ig_carousel_slide', 'telegram_cover', 'youtube_thumb', 'web_banner', 'email_header_ravi']);
+  const fallback = TEXT_HEAVY_KINDS.has(row.kind) ? 'gpt-image-2' : 'gpt-image-1';
+  const resolvedKey = modelKey || defaults[row.kind] || fallback;
   const model = MODEL_REGISTRY[resolvedKey];
   if (!model) return { ok: false, error: `unknown model key: ${resolvedKey}` };
 
@@ -507,13 +724,30 @@ async function generateRender({ mediaId, prompt, modelKey }) {
 
   const renderPrompt = prompt || buildRenderPrompt(row);
 
+  // M62 · Auto-load brand reference images if caller didn't pass any AND
+  // the model supports them. Topic tags default to keywords from the
+  // media row's topic if not provided. Falls through silently on failure.
+  let resolvedRefs = Array.isArray(referenceImages) ? referenceImages : [];
+  if (resolvedRefs.length === 0 && model.supportsReferenceImages) {
+    try {
+      const tags = Array.isArray(topicTags) && topicTags.length
+        ? topicTags
+        : String(row.topic || '').split(/\s+/).filter(w => w.length >= 4).slice(0, 5).map(s => s.toLowerCase());
+      resolvedRefs = await _loadReferenceImages({
+        topicTags: tags, language: row.language || null, max: 3,
+      });
+    } catch (_) { /* non-fatal */ }
+  }
+
   // Dispatch to provider
   let result;
   try {
     switch (model.provider) {
       case 'openai':
       case 'openai_dalle3':
-        result = await _renderOpenAI(row, resolvedKey, model, apiKey, renderPrompt);
+        result = await _renderOpenAI(row, resolvedKey, model, apiKey, renderPrompt, {
+          referenceImages: resolvedRefs, panels, quality,
+        });
         break;
       case 'stability':
         result = await _renderStability(row, model, apiKey, renderPrompt);
@@ -626,6 +860,10 @@ module.exports = {
   generateDraft, generateRender, gallery, approve, archive,
   listModels, getKindDefaults, setModelDefault, getModelDefaults,
   KIND_SPECS, MODEL_REGISTRY,
+  // M61 · template registry
+  TEMPLATE_REGISTRY, getTemplate, listTemplates, renderTemplatePrompt,
+  // M62 · expose reference loader for orchestrator + tests
+  _loadReferenceImages,
   hasOpenAI: () => !!process.env.OPENAI_API_KEY,
   hasAnthropic: () => !!process.env.ANTHROPIC_API_KEY,
   ASSETS_ROOT,

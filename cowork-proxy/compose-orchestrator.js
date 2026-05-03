@@ -501,28 +501,59 @@ Verdict thresholds:
 Be DECISIVE about scoring. A vague "pretty close" verdict isn't useful — pick
 a number based on actual voice fidelity to the cluster.`,
 
-  design:
-`You are Afshin, the visual director for the RxApply brand. Avang has
-written a one-line design_brief for this post (in the ADAPTED block
-below). Your job: turn that brief into a fully art-directed prompt
-AND pick the right image-generation model for this specific cover.
+  'carousel-plan':
+`You are Tarrah, the carousel slide planner. Read your SKILL above for
+the slot vocabulary and the brand templates. Your job: turn the topic +
+research key_facts into a structured slide spec for Afshin to render.
 
-Read the brand profile (in your system prompt) for visual rules:
-brand colours, typography hints, photography style, things the brand
-NEVER shows. Reference real brand visuals when they fit.
+Hard rules (re-stated for safety):
+  • Never repeat the caption. The caption (in the ADAPTED block) teases.
+    Slides educate using research key_facts.
+  • Never write paragraphs. Bullets, key_numbers, short lines.
+  • Word caps are real. Title ≤ 5 words. Subtitle ≤ 8. Bullets ≤ 4 each.
+  • Persian numerals (۰۱۲۳۴۵۶۷۸۹) on Persian slides; Latin on Latin.
+  • Every carousel: cover slide first, cta slide last. 4–8 slides total.
+  • Pick block_color by mood (navy=analytical, teal=positive, red=urgent/USA,
+    green=Germany, brown=occasion, orange=DEADLINE-ONLY).
+  • Pick template from: vertical-workshop-poster, shield-frame-deadline,
+    photoreal-hero-with-block, watercolor-occasion (occasion days only).
+
+Return ONLY the JSON described in your SKILL output schema. No prose.`,
+
+  design:
+`You are Afshin, the visual director for the RxApply brand.
+
+If the upstream stage produced a CAROUSEL SPEC from Tarrah, your job is
+to turn EACH SLIDE in that spec into a render-ready art direction. Treat
+the slot values as MANDATORY — render the title text, country pill,
+icon, block_color etc. exactly as Tarrah specified. Do not improvise
+text content.
+
+If there is no carousel spec (single cover image case), Avang has written
+a one-line design_brief in the ADAPTED block below. Turn that into a
+single art-directed prompt.
+
+Read the brand profile + brand-intelligence + reference exemplars (in
+your system prompt) for visual rules: colors, typography, photography
+style, things the brand NEVER shows.
 
 Available image models (May 2026):
-  • "openai/gpt-image-1"      — strong instruction-following + on-image text
-  • "recraft/recraft-v3"      — best for branded graphics, palette adherence, repeatable look
-  • "ideogram/ideogram-v3"    — best when the cover needs 1-3 words rendered legibly in image
-  • "bfl/flux-pro-1.1"        — best photorealism, weak at on-image text
-  • "bfl/flux-pro-1.1-ultra"  — premium photoreal at 4MP
+  • "openai/gpt-image-2"      — FLAGSHIP. Best multilingual typography
+                                  (Persian/Arabic on slides), accepts
+                                  reference images, supports Thinking
+                                  mode for consistent multi-panel output.
+                                  DEFAULT for IG carousel slides + posters.
+  • "openai/gpt-image-1"      — Prior gen; fallback when gpt-image-2 not set
+  • "recraft/recraft-v3"      — Best for watercolor occasion illustrations + branded vector graphics
+  • "ideogram/ideogram-v3"    — Strong text rendering, alternative to gpt-image-2
+  • "bfl/flux-pro-1.1"        — Photoreal hero, weak at on-image text
+  • "bfl/flux-pro-1.1-ultra"  — Premium photoreal at 4MP
 
-Pick the model that matches what THIS cover needs. As a guide:
-  - If the cover is brand-graphic / illustration / consistent series →  recraft/recraft-v3
-  - If it needs a legible word in the image                          →  ideogram/ideogram-v3
-  - If it's a photoreal hero (clinic, dentist, patient)              →  bfl/flux-pro-1.1
-  - When unsure / generic editorial scene                            →  openai/gpt-image-1
+Pick the model per slide:
+  - Carousel slide with on-image Persian text → openai/gpt-image-2
+  - Watercolor occasion-day illustration      → recraft/recraft-v3
+  - Photoreal hero with NO text overlay       → bfl/flux-pro-1.1
+  - Single-word legibility focus              → ideogram/ideogram-v3
 
 Return ONLY this JSON:
 
@@ -899,6 +930,9 @@ async function _executeLlmStage({ runId, run, recipe, stage, stageIndex, lang, p
   if (priorMaster.draft)    userParts.push(`\n--- DRAFT ---\n${JSON.stringify(priorMaster.draft, null, 2)}`);
   if (priorMaster.critique) userParts.push(`\n--- CRITIQUE ---\n${JSON.stringify(priorMaster.critique, null, 2)}`);
   if (priorMaster.adapt)    userParts.push(`\n--- ADAPTED ---\n${JSON.stringify(priorMaster.adapt, null, 2)}`);
+  // M60 · Carousel spec from Tarrah is consumed by the `design` stage so
+  // Afshin renders each slide using the structured slot values.
+  if (priorMaster['carousel-plan']) userParts.push(`\n--- CAROUSEL SPEC (from Tarrah) ---\n${JSON.stringify(priorMaster['carousel-plan'], null, 2)}`);
   if (stage.params) userParts.push(`\n--- STAGE PARAMS ---\n${JSON.stringify(stage.params, null, 2)}`);
   userParts.push(`\nReturn the JSON for stage "${stageName}" now.`);
   const userPrompt = userParts.join('\n');

@@ -2,8 +2,8 @@
   "id": "ig",
   "label": "Instagram",
   "icon": "instagram",
-  "description": "Instagram feed post: caption + hashtags + cover image (the 'Afshin' visual brief is also stored for human designers).",
-  "version": "4",
+  "description": "Instagram feed post: caption + hashtags + cover image OR multi-slide carousel (Tarrah plans the slides, Afshin renders).",
+  "version": "5",
 
   "stages": [
     { "name": "plan",     "capability": "plan" },
@@ -16,11 +16,12 @@
     { "name": "adapt",    "capability": "adapt",
       "params": { "produce": ["caption", "hashtags", "design_plan", "design_brief"] } },
     { "name": "render",   "renderer": "ig" },
+    { "name": "carousel-plan", "capability": "carousel-plan", "if_option": "as_carousel" },
     { "name": "design",   "capability": "design", "if_option": "with_image" },
     { "name": "image",    "renderer": "image-cover", "if_option": "with_image" }
   ],
 
-  "gateable_stages": ["critique", "verify", "voice-critic", "audit", "adapt", "design"],
+  "gateable_stages": ["critique", "verify", "voice-critic", "audit", "adapt", "carousel-plan", "design"],
 
   "translate": {
     "capability": "translate",
@@ -30,6 +31,8 @@
   "options_schema": [
     { "key": "primary_cta",     "label": "CTA URL (link in bio)", "type": "text", "placeholder": "https://rxapply.com" },
     { "key": "max_hashtags",    "label": "Max hashtags",          "type": "number", "default": 12, "min": 3, "max": 30 },
-    { "key": "with_image",      "label": "Generate cover image (~$0.04)", "type": "checkbox", "default": true }
+    { "key": "with_image",      "label": "Generate cover image (~$0.19)", "type": "checkbox", "default": true },
+    { "key": "as_carousel",     "label": "Plan as multi-slide carousel (Tarrah → Afshin)", "type": "checkbox", "default": false },
+    { "key": "carousel_slides", "label": "Slide count (when carousel)", "type": "number", "default": 6, "min": 4, "max": 8 }
   ]
 }
