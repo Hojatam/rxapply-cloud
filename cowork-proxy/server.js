@@ -46,6 +46,7 @@ const evalHarness = require('./eval-harness');                  // M43 · pairwi
 const watchdog = require('./regulatory-watchdog');              // M46 · regulatory drift watchdog
 const dmTriage = require('./dm-triage');                        // M47 · DM intent triage + reply draft
 const fanout = require('./fanout');                             // M48 · 1 source → N channel fan-out
+const memMaint = require('./memory-maintenance');               // M51 · memory decay + promotion
 const permissions = require('./permissions');          // K1 · approval matrix + Inbox queue
 const renderers = require('./output-renderers');       // K1 · narrative output formatters
 const agentMemory = require('./agent-memory');         // K2 · per-agent persistent memory
@@ -1976,6 +1977,29 @@ app.post('/fanout/expand', auth.middleware, async (req, res) => {
 app.get('/fanout/children/:sourceRunId', async (req, res) => {
   try { res.json({ ok: true, children: await fanout.listChildren(req.params.sourceRunId) }); }
   catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── M51 · Memory maintenance ────────────────────────────────────────────
+app.post('/memory/maintenance/run', auth.middleware, async (req, res) => {
+  try {
+    const r = await memMaint.run(req.body || {});
+    log(`memory.maintenance decayed=${r.decayed} promoted=${r.promoted}`);
+    res.json(r);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.get('/memory/health', async (_req, res) => {
+  try { res.json({ ok: true, ...(await memMaint.health()) }); }
+  catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.get('/memory/maintenance/runs', async (req, res) => {
+  try {
+    const items = await memMaint.listMaintenanceRuns({ limit: parseInt(req.query.limit, 10) || 30 });
+    res.json({ ok: true, items });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post('/memory/promotion-score/bump', auth.middleware, async (req, res) => {
+  try { res.json(await memMaint.bumpPromotionScore(req.body || {})); }
+  catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
 app.post('/dm/inbox/:id/action', auth.middleware, async (req, res) => {
