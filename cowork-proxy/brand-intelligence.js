@@ -354,13 +354,16 @@ async function importPublicArchive({ patterns, exemplars, fingerprint, visualPro
                                       engagementAnalysis, sourceLabel = null }) {
   const stamp = sourceLabel || `archive_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
   let intel = 0, exem = 0, fp = 0;
+  let lastSection = 'init';
 
+  try {
   // Wipe prior rows from the same source so re-uploads don't duplicate.
   await query(`DELETE FROM brand_intelligence WHERE source = ${q(stamp)};`);
   await query(`DELETE FROM brand_exemplars     WHERE source = ${q(stamp)};`);
   await query(`DELETE FROM brand_voice_fingerprint WHERE source = ${q(stamp)};`);
 
   // ── Voice patterns → intelligence rows ────
+  lastSection = 'voice_patterns';
   if (patterns && patterns.patterns) {
     for (const [groupKey, group] of Object.entries(patterns.patterns)) {
       if (!group || group.insufficient_data) continue;
@@ -463,6 +466,7 @@ async function importPublicArchive({ patterns, exemplars, fingerprint, visualPro
   }
 
   // ── Exemplars ────
+  lastSection = 'exemplars';
   if (exemplars && Array.isArray(exemplars.exemplars)) {
     for (const ex of exemplars.exemplars) {
       await createExemplar({
@@ -480,6 +484,7 @@ async function importPublicArchive({ patterns, exemplars, fingerprint, visualPro
   }
 
   // ── Voice fingerprint ────
+  lastSection = 'fingerprint';
   if (fingerprint && Array.isArray(fingerprint.cluster)) {
     for (const c of fingerprint.cluster) {
       await createFingerprint({
@@ -492,6 +497,7 @@ async function importPublicArchive({ patterns, exemplars, fingerprint, visualPro
   }
 
   // ── Visual rules (Afshin) ────
+  lastSection = 'visual_rules';
   if (visualProfile && visualProfile.aggregate && Array.isArray(visualProfile.aggregate.brand_rules_inferred)) {
     for (const ruleText of visualProfile.aggregate.brand_rules_inferred) {
       // Auto-derive topic_tags from rule text so retrieval can match by topic
@@ -519,6 +525,7 @@ async function importPublicArchive({ patterns, exemplars, fingerprint, visualPro
   }
 
   // ── Engagement insights ────
+  lastSection = 'engagement_insights';
   if (engagementAnalysis) {
     // Top topics by engagement
     if (engagementAnalysis.topic_x_engagement) {
@@ -596,6 +603,7 @@ async function importPublicArchive({ patterns, exemplars, fingerprint, visualPro
     }
   }
 
+  lastSection = 'provenance';
   // Provenance row
   await query(`
     INSERT INTO brand_archive_uploads
@@ -605,6 +613,11 @@ async function importPublicArchive({ patterns, exemplars, fingerprint, visualPro
 
   clearCache();
   return { ok: true, source: stamp, intelligence: intel, exemplars: exem, fingerprint: fp };
+  } catch (e) {
+    // Diagnostic-friendly error: tell the founder which section blew up
+    e.message = `[importPublicArchive · last section: ${lastSection} · intel=${intel} exem=${exem} fp=${fp}] ${e.message}`;
+    throw e;
+  }
 }
 
 // DM analyzer JSONs → DB rows. Same idempotency on (source, source_ref).
