@@ -41,6 +41,7 @@ const logWriter     = require('./log-writer');
 const protectedTerms = require('./kb-protected-terms');
 const costRouter     = require('./cost-aware-router');
 const contracts      = require('./agent-contracts');     // M49 · per-stage output validation
+const brandInt       = require('./brand-intelligence');  // M55 · dynamic brand training data
 
 const RECIPES_DIR = path.resolve(__dirname, '..', 'compose-recipes');
 
@@ -116,7 +117,7 @@ function _parseJsonOrThrow(text, contextLabel) {
 //   • KB block (for research / draft / critique)
 //   • per-agent memory
 //   • the stage-specific instruction template
-function _buildSystemPrompt({ agent, stageName, recipe, run, masterDraft, lang, protectedTermsBlock = null }) {
+async function _buildSystemPrompt({ agent, stageName, recipe, run, masterDraft, lang, protectedTermsBlock = null }) {
   const blocks = [];
 
   // The agent's own SKILL is loaded from disk (agents/<agent>/SKILL.md).
@@ -165,6 +166,35 @@ function _buildSystemPrompt({ agent, stageName, recipe, run, masterDraft, lang, 
     });
     if (mem) blocks.push(mem);
   } catch (_) { /* non-fatal */ }
+
+  // M55 · Live brand intelligence — dynamic rules from DB, founder-editable.
+  // Pulled per (agent, platform, language) combo. Cached 60s in brand-intelligence.js.
+  try {
+    const platform = recipe && recipe.id;            // recipe id doubles as platform key (telegram/email/etc)
+    const block = await brandInt.renderAsPromptBlock({ agent, platform, language: lang || run.master_lang });
+    if (block) blocks.push(block);
+  } catch (_) { /* non-fatal */ }
+
+  // M55 · Brand exemplars — top 2-3 reference posts/replies/etc for this stage.
+  // Stage-specific kind mapping; null kind means skip.
+  const exemplarKind =
+      stageName === 'draft'    ? 'post_caption'
+    : stageName === 'adapt'    ? 'post_caption'
+    : stageName === 'translate'? 'post_caption'
+    : stageName === 'verify-translation' ? null
+    : stageName === 'design'   ? 'design_brief'
+    : stageName === 'reply-draft' ? 'objection_handler'
+    : stageName === 'triage'   ? 'intent_example_hot'   // Bineh sees hot examples; tags pull qualifying too
+    : null;
+  if (exemplarKind) {
+    try {
+      const platform = recipe && recipe.id;
+      const exBlock = await brandInt.renderExemplarsBlock({
+        kind: exemplarKind, platform, language: lang || run.master_lang, limit: 3,
+      });
+      if (exBlock) blocks.push(exBlock);
+    } catch (_) { /* non-fatal */ }
+  }
 
   return blocks.join('\n\n');
 }
@@ -823,7 +853,7 @@ async function _executeLlmStage({ runId, run, recipe, stage, stageIndex, lang, p
     catch (_) { /* non-fatal — KB may not be reachable; verify still runs without the block */ }
   }
 
-  const systemPrompt = _buildSystemPrompt({
+  const systemPrompt = await _buildSystemPrompt({
     agent, stageName, recipe, run, masterDraft, lang, protectedTermsBlock,
   });
 

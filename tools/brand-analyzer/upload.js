@@ -112,16 +112,31 @@ async function main() {
 
   if (args['dry-run']) { console.log('\n[--dry-run] not uploading.'); return; }
 
-  // 3. POST to /brand/archive/upload
+  // 3. POST to /brand/archive/upload (M55 endpoint shape)
+  // The endpoint takes the analyzer JSONs as named keys.
+  const archivePayload = {
+    patterns:           payload.brand_voice_profile,
+    exemplars:          payload.exemplars,
+    fingerprint:        payload.voice_fingerprint,
+    visualProfile:      payload.visual_style_profile,
+    sourceLabel:        `archive_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`,
+  };
+  // engagement_analysis.json is optional — read it if present in output/
+  const engagementPath = path.join(outDir, 'engagement_analysis.json');
+  if (fs.existsSync(engagementPath)) {
+    archivePayload.engagementAnalysis = JSON.parse(fs.readFileSync(engagementPath, 'utf8'));
+  }
+
   const url = `${baseUrl}/brand/archive/upload`;
   console.log(`\nUploading to ${url} ...`);
+  console.log(`  source label: ${archivePayload.sourceLabel}`);
   const r = await fetch(url, {
     method: 'POST',
     headers: {
       'authorization': `Bearer ${token}`,
       'content-type': 'application/json',
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(archivePayload),
   });
   const txt = await r.text();
   if (!r.ok) {
@@ -132,6 +147,15 @@ async function main() {
   try { resp = JSON.parse(txt); } catch { resp = { raw: txt.slice(0, 500) }; }
   console.log('\n✓ Upload succeeded.');
   console.log(JSON.stringify(resp, null, 2));
+
+  // Style references (images) — separate path: upload one by one to /brand/exemplars
+  // (the design-brief kind). Skip for now; the visual_style_profile already
+  // captured the brand_rules_inferred. Image uploads can come in M55b if needed.
+  if (styleRefs.length > 0) {
+    console.log(`\n${styleRefs.length} style reference images detected but NOT uploaded.`);
+    console.log('Visual rules from visual_style_profile.aggregate.brand_rules_inferred are imported as Afshin intelligence.');
+    console.log('Image uploads to media_library: ship M55b if needed.');
+  }
 }
 
 main().catch(e => { console.error('FATAL:', e); process.exit(1); });

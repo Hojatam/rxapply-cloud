@@ -2740,6 +2740,9 @@
         <span class="nav-icon"></span><span class="nav-label">Watchdog</span>
         <span class="nav-badge" id="wd-badge" hidden></span>
       </div>
+      <div class="nav-link" data-route="brand" data-tip="Brand training">
+        <span class="nav-icon"></span><span class="nav-label">Brand</span>
+      </div>
       <div class="nav-link" data-route="settings" data-tip="Settings">
         <span class="nav-icon"></span><span class="nav-label">Settings</span><span class="lock"></span>
       </div>
@@ -3492,6 +3495,8 @@ const ROUTES = {
   dms:      () => renderDMs(),
   evals:    () => renderEvals(),
   watchdog: () => renderWatchdog(),
+  // M55 · brand intelligence
+  brand:    () => renderBrand(),
   // S3 · Approvals route deleted — legacy approval_queue rows now appear
   // under the Inbox panel as a third "LEGACY APPROVALS" subsection.
   // Keep the slug alive as an alias so any old bookmarks redirect cleanly.
@@ -8742,6 +8747,463 @@ async function wdResolve(id, status) {
     if (r.status === 401) return toast('Sign in required.', 'error');
     toast(status === 'dismissed' ? 'Dismissed' : 'Resolved', 'success');
     wdLoadEvents();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+// =====================================================================
+// M55 · Brand intelligence tab — dynamic agent training data
+// =====================================================================
+let _brandState = { tab: 'rules', filterAgent: '', filterPlatform: '', filterLanguage: '', filterKind: '' };
+
+async function renderBrand() {
+  $('main').innerHTML = `
+    <div class="section-h">
+      <div class="flex items-center gap-2">
+        <h1>Brand training</h1>
+        <button class="help-btn" onclick="helpReshow('brand')" title="What does this tab do?">?</button>
+      </div>
+      <div class="flex gap-2">
+        <button class="btn btn-ghost btn-xs" onclick="renderBrand()">↻ Refresh</button>
+        <button class="btn btn-xs" onclick="brandClearCache()">Clear prompt cache</button>
+      </div>
+    </div>
+    <div class="breadcrumb mb-4">Live data the agents read on every prompt — rules, exemplars, voice fingerprint. Edit anything; agents pick it up within 60s.</div>
+    ${helpPanel({
+      key: 'brand',
+      title: 'Why this exists',
+      paragraphs: [
+        'Every agent (Sepehr, Avang, Goyesh, Kherad, Mehrban, Pooya, Afshin, Bineh) reads from these tables when building its system prompt. This is where their training lives — not in code.',
+        'Rules + exemplars are auto-imported from your local Claude Code analysis. You can edit, disable, add, or delete any row. Changes propagate to the next compose run within 60s. No redeploy.',
+      ],
+      bullets: [
+        '🧠 Rules — banned phrases, length stats, opener templates, hashtag mix, visual rules. Each tagged with target agent + platform + language.',
+        '📌 Exemplars — actual past posts and DM replies the agents reference as few-shot examples.',
+        '🎯 Fingerprint — canonical voice cluster (broadcast + DM-reply). M50 voice critic uses these to flag drift.',
+        '📥 Uploads — provenance log of every batch import. Re-uploading the same source label replaces (idempotent).',
+      ],
+    })}
+    <div id="brand-counts" class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4"></div>
+    <div class="flex gap-2 mb-4 flex-wrap">
+      <button class="btn btn-xs ${_brandState.tab === 'rules' ? 'btn-primary' : ''}" onclick="brandSwitchTab('rules')">🧠 Rules</button>
+      <button class="btn btn-xs ${_brandState.tab === 'exemplars' ? 'btn-primary' : ''}" onclick="brandSwitchTab('exemplars')">📌 Exemplars</button>
+      <button class="btn btn-xs ${_brandState.tab === 'fingerprint' ? 'btn-primary' : ''}" onclick="brandSwitchTab('fingerprint')">🎯 Fingerprint</button>
+      <button class="btn btn-xs ${_brandState.tab === 'uploads' ? 'btn-primary' : ''}" onclick="brandSwitchTab('uploads')">📥 Uploads</button>
+      <button class="btn btn-ghost btn-xs ml-auto" onclick="brandNew()">+ Add row</button>
+    </div>
+    <div id="brand-content"></div>
+  `;
+  brandLoadCounts();
+  brandRenderTab();
+}
+
+function brandSwitchTab(tab) { _brandState.tab = tab; renderBrand(); }
+
+async function brandLoadCounts() {
+  try {
+    const j = await fetch(`${PROXY}/brand/counts`).then(r => r.json());
+    if (!j.ok) return;
+    const c = j.counts || {};
+    $('brand-counts').innerHTML = `
+      <div class="card-tight" style="border-top:3px solid #4f46e5;text-align:center;"><div class="text-xs text-slate-500">Rules</div><div class="text-2xl font-bold mt-1">${c.intelligence||0}</div></div>
+      <div class="card-tight" style="border-top:3px solid #16a34a;text-align:center;"><div class="text-xs text-slate-500">Exemplars</div><div class="text-2xl font-bold mt-1">${c.exemplars||0}</div></div>
+      <div class="card-tight" style="border-top:3px solid #d97706;text-align:center;"><div class="text-xs text-slate-500">Fingerprint</div><div class="text-2xl font-bold mt-1">${c.fingerprint||0}</div></div>
+      <div class="card-tight" style="border-top:3px solid #94a3b8;text-align:center;"><div class="text-xs text-slate-500">Total active</div><div class="text-2xl font-bold mt-1">${(c.intelligence||0)+(c.exemplars||0)+(c.fingerprint||0)}</div></div>
+    `;
+  } catch (_) {}
+}
+
+async function brandRenderTab() {
+  const tab = _brandState.tab;
+  if (tab === 'rules')        return brandRenderRules();
+  if (tab === 'exemplars')    return brandRenderExemplars();
+  if (tab === 'fingerprint')  return brandRenderFingerprint();
+  if (tab === 'uploads')      return brandRenderUploads();
+}
+
+// ── Rules tab ─────────────────────────────────────────────────────────
+async function brandRenderRules() {
+  $('brand-content').innerHTML = `
+    <div class="card mb-3">
+      <div class="flex gap-2 flex-wrap items-center">
+        <select id="br-flt-agent" class="co-select" style="max-width:160px;" onchange="_brandState.filterAgent=this.value;brandRenderRules()">
+          <option value="">All agents</option>
+          ${['sepehr','avang','goyesh','kherad','bidar','daneshyar','afshin','mehrban','bineh','pooya','payvand','davari'].map(a => `<option value="${a}" ${_brandState.filterAgent===a?'selected':''}>${a}</option>`).join('')}
+        </select>
+        <select id="br-flt-platform" class="co-select" style="max-width:160px;" onchange="_brandState.filterPlatform=this.value;brandRenderRules()">
+          <option value="">All platforms</option>
+          ${['telegram','instagram','email','facebook','x-thread','seo-article','ig'].map(p => `<option value="${p}" ${_brandState.filterPlatform===p?'selected':''}>${p}</option>`).join('')}
+        </select>
+        <select id="br-flt-language" class="co-select" style="max-width:140px;" onchange="_brandState.filterLanguage=this.value;brandRenderRules()">
+          <option value="">All languages</option>
+          ${['en','fa','ar','de','fr'].map(l => `<option value="${l}" ${_brandState.filterLanguage===l?'selected':''}>${l}</option>`).join('')}
+        </select>
+        <select id="br-flt-kind" class="co-select" style="max-width:200px;" onchange="_brandState.filterKind=this.value;brandRenderRules()">
+          <option value="">All kinds</option>
+          ${['voice_rule','banned_phrase','favored_phrase','visual_rule','engagement_insight','dm_question_pattern','dm_objection','cta_template','opener_template','protected_term','topic_priority','manual'].map(k => `<option value="${k}" ${_brandState.filterKind===k?'selected':''}>${k}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div id="br-rules-list">Loading…</div>
+  `;
+  try {
+    const params = new URLSearchParams();
+    if (_brandState.filterAgent)    params.set('agent', _brandState.filterAgent);
+    if (_brandState.filterPlatform) params.set('platform', _brandState.filterPlatform);
+    if (_brandState.filterLanguage) params.set('language', _brandState.filterLanguage);
+    if (_brandState.filterKind)     params.set('kind', _brandState.filterKind);
+    params.set('limit', '500');
+    const j = await fetch(`${PROXY}/brand/intelligence?${params}`).then(r => r.json());
+    const items = j.items || [];
+    if (items.length === 0) {
+      $('br-rules-list').innerHTML = `<div class="empty"><div class="empty-text text-xs">No rules match. Use "+ Add row" or run the local analyzer + upload.</div></div>`;
+      return;
+    }
+    $('br-rules-list').innerHTML = items.map(r => _brandRuleRow(r)).join('');
+  } catch (e) { $('br-rules-list').innerHTML = `<div class="empty"><div class="empty-text text-xs">Failed: ${escapeHtml(e.message)}</div></div>`; }
+}
+function _brandRuleRow(r) {
+  const star = '★'.repeat(r.importance) + '☆'.repeat(5 - r.importance);
+  const enabledColor = r.enabled ? '#16a34a' : '#94a3b8';
+  return `
+    <div class="card-tight mb-2" style="${!r.enabled ? 'opacity:0.5;' : ''}border-left:3px solid ${enabledColor};">
+      <div class="flex items-start justify-between gap-3 flex-wrap">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 mb-1 flex-wrap" style="font-size:10px;">
+            <span class="mono" style="background:#ede9fe;color:#5b21b6;padding:2px 6px;border-radius:3px;font-weight:600;">${escapeHtml(r.kind)}</span>
+            ${r.target_agent ? `<span class="mono" style="background:#dbeafe;color:#1e40af;padding:2px 6px;border-radius:3px;">→ ${escapeHtml(r.target_agent)}</span>` : ''}
+            ${r.scope_platform ? `<span class="mono" style="background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:3px;">${escapeHtml(r.scope_platform)}</span>` : ''}
+            ${r.scope_language ? `<span class="mono" style="background:#dcfce7;color:#15803d;padding:2px 6px;border-radius:3px;">${escapeHtml(r.scope_language)}</span>` : ''}
+            <span style="color:#d97706;">${star}</span>
+            ${r.founder_edited ? '<span class="mono" style="color:#7c3aed;">edited</span>' : ''}
+          </div>
+          <div class="text-sm">${escapeHtml(r.rule_text)}</div>
+          ${r.founder_note ? `<div class="text-xs italic mt-1" style="color:var(--text-muted);">📝 ${escapeHtml(r.founder_note)}</div>` : ''}
+          <div class="text-xs text-slate-400 mono mt-1">${escapeHtml(r.source || '?')}</div>
+        </div>
+        <div class="flex flex-col gap-1 shrink-0">
+          <button class="btn btn-ghost btn-xs" onclick="brandEditRule('${r.id}')">Edit</button>
+          <button class="btn btn-ghost btn-xs" onclick="brandToggleRule('${r.id}', ${!r.enabled})">${r.enabled ? 'Disable' : 'Enable'}</button>
+          <button class="btn btn-ghost btn-xs" onclick="brandDeleteRule('${r.id}')" style="color:#dc2626;">Delete</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function brandEditRule(id) {
+  // Fetch current
+  const j = await fetch(`${PROXY}/brand/intelligence?limit=500`).then(r => r.json());
+  const cur = (j.items || []).find(x => x.id === id);
+  if (!cur) return toast('Rule not found', 'error');
+  const data = await formModal({
+    title: 'Edit rule',
+    sub: `kind: ${cur.kind} · originally from ${cur.source || 'manual'}`,
+    fields: [
+      { key: 'rule_text', label: 'Rule text', type: 'textarea', required: true, default: cur.rule_text,
+        hint: 'What gets injected into the agent prompt. Be specific.' },
+      { key: 'target_agent', label: 'Target agent', type: 'select', default: cur.target_agent || '',
+        options: [{ value: '', label: 'All agents' }, ...['sepehr','avang','goyesh','kherad','bidar','daneshyar','afshin','mehrban','bineh','pooya','payvand','davari'].map(a => ({ value: a, label: a }))] },
+      { key: 'scope_platform', label: 'Platform', type: 'select', default: cur.scope_platform || '',
+        options: [{ value: '', label: 'All platforms' }, ...['telegram','instagram','email','facebook','x-thread','seo-article','ig'].map(p => ({ value: p, label: p }))] },
+      { key: 'scope_language', label: 'Language', type: 'select', default: cur.scope_language || '',
+        options: [{ value: '', label: 'All languages' }, ...['en','fa','ar','de','fr'].map(l => ({ value: l, label: l }))] },
+      { key: 'importance', label: 'Importance (1-5)', type: 'select', default: String(cur.importance || 3),
+        options: [{ value: '1', label: '1' }, { value: '2', label: '2' }, { value: '3', label: '3 (default)' }, { value: '4', label: '4' }, { value: '5', label: '5 (highest)' }] },
+      { key: 'founder_note', label: 'Note (optional)', type: 'textarea', default: cur.founder_note || '',
+        placeholder: 'Why you edited this rule, optional context for future you' },
+    ],
+    submitLabel: 'Save',
+  });
+  if (!data) return;
+  try {
+    const r = await authFetch(`${PROXY}/brand/intelligence/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        rule_text: data.rule_text,
+        target_agent: data.target_agent || null,
+        scope_platform: data.scope_platform || null,
+        scope_language: data.scope_language || null,
+        importance: parseInt(data.importance, 10),
+        founder_note: data.founder_note || null,
+      }),
+    });
+    if (r.status === 401) return toast('Sign in required.', 'error');
+    toast('Rule updated', 'success');
+    brandRenderRules(); brandLoadCounts();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+async function brandToggleRule(id, enabled) {
+  try {
+    const r = await authFetch(`${PROXY}/brand/intelligence/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+    if (r.status === 401) return toast('Sign in required.', 'error');
+    toast(enabled ? 'Enabled' : 'Disabled', 'success');
+    brandRenderRules();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+async function brandDeleteRule(id) {
+  const ok = await confirmModal({ title: 'Delete this rule?', sub: 'Soft delete — sets enabled=false. Source data preserved.', danger: true, confirmLabel: 'Delete' });
+  if (!ok) return;
+  try {
+    const r = await authFetch(`${PROXY}/brand/intelligence/${id}`, { method: 'DELETE' });
+    if (r.status === 401) return toast('Sign in required.', 'error');
+    toast('Deleted', 'success');
+    brandRenderRules(); brandLoadCounts();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function brandNew() {
+  const tab = _brandState.tab;
+  if (tab === 'rules' || tab === 'uploads') {
+    const data = await formModal({
+      title: 'Add rule',
+      sub: 'Manually add a brand rule. Will be tagged source=manual and founder_edited=true.',
+      fields: [
+        { key: 'kind', label: 'Kind', type: 'select', required: true,
+          options: ['voice_rule','banned_phrase','favored_phrase','visual_rule','engagement_insight','protected_term','topic_priority','manual'].map(k => ({ value: k, label: k })) },
+        { key: 'rule_text', label: 'Rule text', type: 'textarea', required: true,
+          placeholder: 'e.g. Always close IG-FA captions with a soft question CTA',
+          hint: 'Be specific. This is what gets injected into the agent prompt.' },
+        { key: 'target_agent', label: 'Target agent', type: 'select',
+          options: [{ value: '', label: 'All agents' }, ...['sepehr','avang','goyesh','kherad','bidar','daneshyar','afshin','mehrban','bineh','pooya','payvand','davari'].map(a => ({ value: a, label: a }))] },
+        { key: 'scope_platform', label: 'Platform', type: 'select',
+          options: [{ value: '', label: 'All platforms' }, ...['telegram','instagram','email','facebook','x-thread','seo-article','ig'].map(p => ({ value: p, label: p }))] },
+        { key: 'scope_language', label: 'Language', type: 'select',
+          options: [{ value: '', label: 'All languages' }, ...['en','fa','ar','de','fr'].map(l => ({ value: l, label: l }))] },
+        { key: 'importance', label: 'Importance', type: 'select', default: '4',
+          options: [{ value: '1', label: '1' }, { value: '2', label: '2' }, { value: '3', label: '3' }, { value: '4', label: '4 (default for manual)' }, { value: '5', label: '5 (highest)' }] },
+      ],
+      submitLabel: 'Add rule',
+    });
+    if (!data) return;
+    try {
+      const r = await authFetch(`${PROXY}/brand/intelligence`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kind: data.kind, rule_text: data.rule_text,
+          target_agent: data.target_agent || null,
+          scope_platform: data.scope_platform || null,
+          scope_language: data.scope_language || null,
+          importance: parseInt(data.importance, 10),
+          source: 'manual', founder_edited: true,
+        }),
+      });
+      if (r.status === 401) return toast('Sign in required.', 'error');
+      toast('Rule added', 'success');
+      brandRenderRules(); brandLoadCounts();
+    } catch (e) { toast('Error: ' + e.message, 'error'); }
+  } else if (tab === 'exemplars') {
+    const data = await formModal({
+      title: 'Add exemplar',
+      sub: 'A reference body — caption, DM reply, design brief — agents can use as a few-shot example.',
+      fields: [
+        { key: 'kind', label: 'Kind', type: 'select', required: true,
+          options: ['post_caption','dm_reply','objection_handler','design_brief','manual'].map(k => ({ value: k, label: k })) },
+        { key: 'body', label: 'Exemplar body', type: 'textarea', required: true,
+          hint: 'The actual text that should be referenced as a model.' },
+        { key: 'context', label: 'Context (optional)', type: 'textarea',
+          placeholder: 'e.g. inbound DM that prompted this reply, or topic of the post' },
+        { key: 'platform', label: 'Platform', type: 'select',
+          options: [{ value: '', label: 'All platforms' }, ...['telegram','instagram','email','facebook','x-thread','ig'].map(p => ({ value: p, label: p }))] },
+        { key: 'language', label: 'Language', type: 'select',
+          options: [{ value: '', label: 'All languages' }, ...['en','fa','ar','de','fr'].map(l => ({ value: l, label: l }))] },
+        { key: 'importance', label: 'Importance', type: 'select', default: '4',
+          options: ['1','2','3','4','5'].map(i => ({ value: i, label: i })) },
+      ],
+      submitLabel: 'Add exemplar',
+    });
+    if (!data) return;
+    try {
+      const r = await authFetch(`${PROXY}/brand/exemplars`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kind: data.kind, body: data.body, context: data.context || null,
+          platform: data.platform || null, language: data.language || null,
+          importance: parseInt(data.importance, 10), source: 'manual',
+        }),
+      });
+      if (r.status === 401) return toast('Sign in required.', 'error');
+      toast('Exemplar added', 'success');
+      brandRenderExemplars(); brandLoadCounts();
+    } catch (e) { toast('Error: ' + e.message, 'error'); }
+  } else if (tab === 'fingerprint') {
+    const data = await formModal({
+      title: 'Add fingerprint paragraph',
+      sub: 'A canonical voice sample. M50 critic uses these to flag drift on candidate outputs.',
+      fields: [
+        { key: 'cluster', label: 'Cluster', type: 'select', required: true,
+          options: [{ value: 'broadcast', label: 'broadcast (post captions)' }, { value: 'dm_reply', label: 'dm_reply (1-on-1)' }, { value: 'manual', label: 'manual' }] },
+        { key: 'language', label: 'Language', type: 'select', required: true,
+          options: ['en','fa','ar','de','fr'].map(l => ({ value: l, label: l })) },
+        { key: 'body', label: 'Body', type: 'textarea', required: true,
+          hint: 'A representative paragraph in the brand voice.' },
+        { key: 'why_picked', label: 'Why is this canonical?', type: 'textarea',
+          placeholder: 'e.g. opener pattern + soft CTA + restrained tone' },
+        { key: 'importance', label: 'Importance', type: 'select', default: '4',
+          options: ['1','2','3','4','5'].map(i => ({ value: i, label: i })) },
+      ],
+      submitLabel: 'Add to fingerprint',
+    });
+    if (!data) return;
+    try {
+      const r = await authFetch(`${PROXY}/brand/fingerprint`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cluster: data.cluster, language: data.language, body: data.body,
+          why_picked: data.why_picked || null, importance: parseInt(data.importance, 10),
+          source: 'manual',
+        }),
+      });
+      if (r.status === 401) return toast('Sign in required.', 'error');
+      toast('Added to fingerprint', 'success');
+      brandRenderFingerprint(); brandLoadCounts();
+    } catch (e) { toast('Error: ' + e.message, 'error'); }
+  }
+}
+
+// ── Exemplars tab ────────────────────────────────────────────────────
+async function brandRenderExemplars() {
+  $('brand-content').innerHTML = `<div id="br-exemplars-list">Loading…</div>`;
+  try {
+    const j = await fetch(`${PROXY}/brand/exemplars?limit=200`).then(r => r.json());
+    const items = j.items || [];
+    if (items.length === 0) {
+      $('br-exemplars-list').innerHTML = `<div class="empty"><div class="empty-text text-xs">No exemplars yet. Run the local analyzer + upload, or add manually.</div></div>`;
+      return;
+    }
+    $('br-exemplars-list').innerHTML = items.map(e => `
+      <div class="card-tight mb-2" style="${!e.enabled ? 'opacity:0.5;' : ''}">
+        <div class="flex items-center gap-2 mb-1 flex-wrap" style="font-size:10px;">
+          <span class="mono" style="background:#ede9fe;color:#5b21b6;padding:2px 6px;border-radius:3px;font-weight:600;">${escapeHtml(e.kind)}</span>
+          ${e.platform ? `<span class="mono" style="background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:3px;">${escapeHtml(e.platform)}</span>` : ''}
+          ${e.language ? `<span class="mono" style="background:#dcfce7;color:#15803d;padding:2px 6px;border-radius:3px;">${escapeHtml(e.language)}</span>` : ''}
+          ${e.outcome ? `<span class="mono" style="background:#dbeafe;color:#1e40af;padding:2px 6px;border-radius:3px;">${escapeHtml(e.outcome)}</span>` : ''}
+          <span style="color:#d97706;">${'★'.repeat(e.importance)}${'☆'.repeat(5-e.importance)}</span>
+        </div>
+        ${e.context ? `<div class="text-xs italic mb-1" style="color:var(--text-muted);">${escapeHtml(e.context.slice(0,200))}</div>` : ''}
+        <div class="text-sm" style="white-space:pre-wrap;">${escapeHtml(e.body.slice(0, 400))}${e.body.length > 400 ? '…' : ''}</div>
+        <div class="flex gap-1 mt-2">
+          <button class="btn btn-ghost btn-xs" onclick="brandToggleExemplar('${e.id}', ${!e.enabled})">${e.enabled ? 'Disable' : 'Enable'}</button>
+          <button class="btn btn-ghost btn-xs" onclick="brandDeleteExemplar('${e.id}')" style="color:#dc2626;">Delete</button>
+        </div>
+      </div>
+    `).join('');
+  } catch (e) { $('br-exemplars-list').innerHTML = `<div class="empty"><div class="empty-text text-xs">Failed: ${escapeHtml(e.message)}</div></div>`; }
+}
+async function brandToggleExemplar(id, enabled) {
+  try {
+    const r = await authFetch(`${PROXY}/brand/exemplars/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }),
+    });
+    if (r.status === 401) return toast('Sign in required.', 'error');
+    toast(enabled ? 'Enabled' : 'Disabled', 'success');
+    brandRenderExemplars();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+async function brandDeleteExemplar(id) {
+  const ok = await confirmModal({ title: 'Delete this exemplar?', danger: true, confirmLabel: 'Delete' });
+  if (!ok) return;
+  try {
+    const r = await authFetch(`${PROXY}/brand/exemplars/${id}`, { method: 'DELETE' });
+    if (r.status === 401) return toast('Sign in required.', 'error');
+    toast('Deleted', 'success');
+    brandRenderExemplars(); brandLoadCounts();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+// ── Fingerprint tab ──────────────────────────────────────────────────
+async function brandRenderFingerprint() {
+  $('brand-content').innerHTML = `<div id="br-fp-list">Loading…</div>`;
+  try {
+    const j = await fetch(`${PROXY}/brand/fingerprint?limit=200`).then(r => r.json());
+    const items = j.items || [];
+    if (items.length === 0) {
+      $('br-fp-list').innerHTML = `<div class="empty"><div class="empty-text text-xs">No fingerprint paragraphs yet.</div></div>`;
+      return;
+    }
+    // Group by cluster
+    const byCluster = {};
+    for (const f of items) { (byCluster[f.cluster] = byCluster[f.cluster] || []).push(f); }
+    $('br-fp-list').innerHTML = Object.entries(byCluster).map(([cluster, fs]) => `
+      <div class="mb-4">
+        <div class="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-2">${escapeHtml(cluster)} cluster · ${fs.length} paragraphs</div>
+        ${fs.map(f => `
+          <div class="card-tight mb-2" style="${!f.enabled ? 'opacity:0.5;' : ''}">
+            <div class="flex items-center gap-2 mb-1" style="font-size:10px;">
+              <span class="mono" style="background:#dcfce7;color:#15803d;padding:2px 6px;border-radius:3px;">${escapeHtml(f.language)}</span>
+              <span style="color:#d97706;">${'★'.repeat(f.importance)}${'☆'.repeat(5-f.importance)}</span>
+            </div>
+            <div class="text-sm" style="white-space:pre-wrap;">${escapeHtml(f.body.slice(0, 300))}${f.body.length>300?'…':''}</div>
+            ${f.why_picked ? `<div class="text-xs italic mt-1" style="color:#7c3aed;">${escapeHtml(f.why_picked)}</div>` : ''}
+            <div class="flex gap-1 mt-2">
+              <button class="btn btn-ghost btn-xs" onclick="brandDeleteFingerprint('${f.id}')" style="color:#dc2626;">Delete</button>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `).join('');
+  } catch (e) { $('br-fp-list').innerHTML = `<div class="empty"><div class="empty-text text-xs">Failed: ${escapeHtml(e.message)}</div></div>`; }
+}
+async function brandDeleteFingerprint(id) {
+  const ok = await confirmModal({ title: 'Delete fingerprint paragraph?', danger: true, confirmLabel: 'Delete' });
+  if (!ok) return;
+  try {
+    const r = await authFetch(`${PROXY}/brand/fingerprint/${id}`, { method: 'DELETE' });
+    if (r.status === 401) return toast('Sign in required.', 'error');
+    toast('Deleted', 'success');
+    brandRenderFingerprint(); brandLoadCounts();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+// ── Uploads tab ──────────────────────────────────────────────────────
+async function brandRenderUploads() {
+  $('brand-content').innerHTML = `
+    <div class="card mb-3">
+      <div class="text-xs text-slate-500 mb-2">
+        Upload analyzer outputs from <code class="mono">tools/brand-analyzer/</code>:
+        <ul class="list-disc pl-5 mt-1">
+          <li><code class="mono">node upload.js --to https://rxapply.com --token &lt;founder-token&gt;</code> for the public archive</li>
+          <li><code class="mono">node upload-dms.js --to https://rxapply.com --token &lt;founder-token&gt;</code> for the DM analysis</li>
+        </ul>
+        Each upload is idempotent on its source label — re-running replaces.
+      </div>
+    </div>
+    <div id="br-uploads-list">Loading…</div>
+  `;
+  try {
+    const j = await fetch(`${PROXY}/brand/uploads?limit=50`).then(r => r.json());
+    const items = j.items || [];
+    if (items.length === 0) {
+      $('br-uploads-list').innerHTML = `<div class="empty"><div class="empty-text text-xs">No uploads yet.</div></div>`;
+      return;
+    }
+    $('br-uploads-list').innerHTML = `
+      <table class="text-sm w-full">
+        <thead><tr class="text-left text-slate-400" style="border-bottom:1px solid #e2e8f0;">
+          <th class="py-2">When</th><th>Kind</th><th>Source label</th><th>Rules</th><th>Exemplars</th><th>Fingerprint</th>
+        </tr></thead>
+        <tbody>
+          ${items.map(u => `<tr style="border-bottom:1px solid #f1f5f9;">
+            <td class="py-2 text-xs text-slate-500">${escapeHtml(fmtTime(u.created_at))}</td>
+            <td><span class="mono" style="font-size:10px;background:#ede9fe;color:#5b21b6;padding:2px 6px;border-radius:3px;">${escapeHtml(u.upload_kind)}</span></td>
+            <td class="mono text-xs">${escapeHtml(u.source_label || '-')}</td>
+            <td>${u.intelligence_inserted}</td>
+            <td>${u.exemplars_inserted}</td>
+            <td>${u.fingerprint_inserted}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    `;
+  } catch (e) { $('br-uploads-list').innerHTML = `<div class="empty"><div class="empty-text text-xs">Failed: ${escapeHtml(e.message)}</div></div>`; }
+}
+
+async function brandClearCache() {
+  try {
+    const r = await authFetch(`${PROXY}/brand/cache/clear`, { method: 'POST' });
+    if (r.status === 401) return toast('Sign in required.', 'error');
+    toast('Cache cleared. Next compose run will re-fetch all rules.', 'success');
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 

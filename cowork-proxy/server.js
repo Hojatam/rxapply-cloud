@@ -47,6 +47,7 @@ const watchdog = require('./regulatory-watchdog');              // M46 · regula
 const dmTriage = require('./dm-triage');                        // M47 · DM intent triage + reply draft
 const fanout = require('./fanout');                             // M48 · 1 source → N channel fan-out
 const memMaint = require('./memory-maintenance');               // M51 · memory decay + promotion
+const brandInt = require('./brand-intelligence');               // M55 · dynamic agent training data
 const permissions = require('./permissions');          // K1 · approval matrix + Inbox queue
 const renderers = require('./output-renderers');       // K1 · narrative output formatters
 const agentMemory = require('./agent-memory');         // K2 · per-agent persistent memory
@@ -2000,6 +2001,120 @@ app.get('/memory/maintenance/runs', async (req, res) => {
 app.post('/memory/promotion-score/bump', auth.middleware, async (req, res) => {
   try { res.json(await memMaint.bumpPromotionScore(req.body || {})); }
   catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// ── M55 · Brand intelligence (dynamic agent training) ─────────────────────
+//
+// CRUD on intelligence rules + exemplars + voice fingerprint, plus the
+// bulk-import endpoint for the local analyzer's JSON outputs.
+
+// Rules / intelligence
+app.get('/brand/intelligence', async (req, res) => {
+  try {
+    const items = await brandInt.listIntelligence({
+      kind: req.query.kind || null,
+      target_agent: req.query.agent || null,
+      platform: req.query.platform || null,
+      language: req.query.language || null,
+      enabled: req.query.enabled === 'true' ? true : (req.query.enabled === 'false' ? false : null),
+      limit: parseInt(req.query.limit, 10) || 200,
+    });
+    res.json({ ok: true, items });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post('/brand/intelligence', auth.middleware, async (req, res) => {
+  try { res.json(await brandInt.createIntelligence(req.body || {})); }
+  catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+app.patch('/brand/intelligence/:id', auth.middleware, async (req, res) => {
+  try { res.json(await brandInt.updateIntelligence(req.params.id, req.body || {})); }
+  catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+app.delete('/brand/intelligence/:id', auth.middleware, async (req, res) => {
+  try { res.json(await brandInt.deleteIntelligence(req.params.id)); }
+  catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Exemplars
+app.get('/brand/exemplars', async (req, res) => {
+  try {
+    const items = await brandInt.listExemplars({
+      kind: req.query.kind || null,
+      platform: req.query.platform || null,
+      language: req.query.language || null,
+      limit: parseInt(req.query.limit, 10) || 200,
+    });
+    res.json({ ok: true, items });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post('/brand/exemplars', auth.middleware, async (req, res) => {
+  try { res.json(await brandInt.createExemplar(req.body || {})); }
+  catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+app.patch('/brand/exemplars/:id', auth.middleware, async (req, res) => {
+  try { res.json(await brandInt.updateExemplar(req.params.id, req.body || {})); }
+  catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+app.delete('/brand/exemplars/:id', auth.middleware, async (req, res) => {
+  try { res.json(await brandInt.deleteExemplar(req.params.id)); }
+  catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Voice fingerprint
+app.get('/brand/fingerprint', async (req, res) => {
+  try {
+    const items = await brandInt.listFingerprint({
+      cluster: req.query.cluster || null,
+      language: req.query.language || null,
+      limit: parseInt(req.query.limit, 10) || 200,
+    });
+    res.json({ ok: true, items });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post('/brand/fingerprint', auth.middleware, async (req, res) => {
+  try { res.json(await brandInt.createFingerprint(req.body || {})); }
+  catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+app.patch('/brand/fingerprint/:id', auth.middleware, async (req, res) => {
+  try { res.json(await brandInt.updateFingerprint(req.params.id, req.body || {})); }
+  catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+app.delete('/brand/fingerprint/:id', auth.middleware, async (req, res) => {
+  try { res.json(await brandInt.deleteFingerprint(req.params.id)); }
+  catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Counts + uploads provenance
+app.get('/brand/counts', async (_req, res) => {
+  try { res.json({ ok: true, counts: await brandInt.counts() }); }
+  catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.get('/brand/uploads', async (req, res) => {
+  try {
+    const items = await brandInt.listUploads({ limit: parseInt(req.query.limit, 10) || 50 });
+    res.json({ ok: true, items });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Bulk imports (called by tools/brand-analyzer/upload.js)
+app.post('/brand/archive/upload', auth.middleware, async (req, res) => {
+  try {
+    const r = await brandInt.importPublicArchive(req.body || {});
+    log(`brand.import.public source=${r.source} intelligence=${r.intelligence} exemplars=${r.exemplars} fp=${r.fingerprint}`);
+    res.json(r);
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+app.post('/brand/dm-analysis/upload', auth.middleware, async (req, res) => {
+  try {
+    const r = await brandInt.importDmAnalysis(req.body || {});
+    log(`brand.import.dm source=${r.source} intelligence=${r.intelligence} exemplars=${r.exemplars} fp=${r.fingerprint}`);
+    res.json(r);
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+app.post('/brand/cache/clear', auth.middleware, (_req, res) => {
+  try { brandInt.clearCache(); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 app.post('/dm/inbox/:id/action', auth.middleware, async (req, res) => {
