@@ -42,6 +42,7 @@ const agentModels = require('./agent-models');         // per-agent LLM override
 const brandProfile = require('./brand-profile');       // central brand spec
 const composeStages = require('./compose-stages');     // Pooya brief + Kherad score (legacy IG, deprecated by M24)
 const composeOrchestrator = require('./compose-orchestrator');  // M24 · recipe-driven multi-format orchestrator
+const evalHarness = require('./eval-harness');                  // M43 · pairwise eval judge
 const permissions = require('./permissions');          // K1 · approval matrix + Inbox queue
 const renderers = require('./output-renderers');       // K1 · narrative output formatters
 const agentMemory = require('./agent-memory');         // K2 · per-agent persistent memory
@@ -1753,6 +1754,113 @@ app.post('/compose/runs/:id/publish', auth.middleware, async (req, res) => {
     const responseText = await r.text();
     log(`compose.publish run=${run.id} lang=${lang} → n8n ${r.status}`);
     res.json({ ok: r.ok, status: r.status, response: responseText.slice(0, 500) });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── M43 · Eval harness routes ───────────────────────────────────────────
+//   GET    /evals/golden-prompts                       — list (?country, ?recipe)
+//   GET    /evals/golden-prompts/:id                   — single
+//   POST   /evals/golden-prompts                       — create (auth)
+//   PATCH  /evals/golden-prompts/:id                   — update (auth)
+//   DELETE /evals/golden-prompts/:id                   — archive (auth)
+//   POST   /evals/run-candidate                        — { promptId, options? } → starts a candidate compose run (auth)
+//   POST   /evals/judge                                — { promptId, candidateRunId } → judge & persist (auth)
+//   POST   /evals/run-and-judge                        — convenience: candidate + run-to-block + judge (auth)
+//   GET    /evals/runs                                 — list pairwise runs (?promptId, ?country)
+//   GET    /evals/scoreboard                           — win/loss/tie per country+recipe (?country)
+app.get('/evals/golden-prompts', async (req, res) => {
+  try {
+    const items = await evalHarness.listGoldenPrompts({
+      country: req.query.country || null,
+      recipeId: req.query.recipe || null,
+      limit: parseInt(req.query.limit, 10) || 100,
+    });
+    res.json({ ok: true, items });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.get('/evals/golden-prompts/:id', async (req, res) => {
+  try {
+    const item = await evalHarness.getGoldenPrompt(req.params.id);
+    if (!item) return res.status(404).json({ ok: false, error: 'not found' });
+    res.json({ ok: true, item });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.post('/evals/golden-prompts', auth.middleware, async (req, res) => {
+  try {
+    const r = await evalHarness.createGoldenPrompt(req.body || {});
+    log(`evals.create-prompt id=${r.id}`);
+    res.json(r);
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+app.patch('/evals/golden-prompts/:id', auth.middleware, async (req, res) => {
+  try {
+    const r = await evalHarness.updateGoldenPrompt(req.params.id, req.body || {});
+    res.json(r);
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+app.delete('/evals/golden-prompts/:id', auth.middleware, async (req, res) => {
+  try {
+    const r = await evalHarness.archiveGoldenPrompt(req.params.id);
+    res.json(r);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.post('/evals/run-candidate', auth.middleware, async (req, res) => {
+  try {
+    const { promptId, ...overrides } = req.body || {};
+    if (!promptId) return res.status(400).json({ ok: false, error: 'promptId required' });
+    const r = await evalHarness.runCandidate(promptId, overrides);
+    log(`evals.run-candidate prompt=${promptId} candidate=${r.candidate_run_id}`);
+    res.json(r);
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+app.post('/evals/judge', auth.middleware, async (req, res) => {
+  try {
+    const { promptId, candidateRunId, judgeAgent } = req.body || {};
+    if (!promptId || !candidateRunId) {
+      return res.status(400).json({ ok: false, error: 'promptId + candidateRunId required' });
+    }
+    const r = await evalHarness.judgePairwise(promptId, candidateRunId, { judgeAgent });
+    log(`evals.judge prompt=${promptId} winner=${r.verdict.winner_overall}`);
+    res.json(r);
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// Convenience: start candidate + run-to-block + judge in one POST. Used by the
+// dashboard's eval workflow ("Run + judge").
+app.post('/evals/run-and-judge', auth.middleware, async (req, res) => {
+  try {
+    const { promptId, judgeAgent, ...overrides } = req.body || {};
+    if (!promptId) return res.status(400).json({ ok: false, error: 'promptId required' });
+    const r = await evalHarness.runCandidate(promptId, overrides);
+    // Run candidate to completion (or block) — evals always run end-to-end (no founder gates).
+    await composeOrchestrator.runToBlock(r.candidate_run_id, { maxIterations: 60 });
+    const j = await evalHarness.judgePairwise(promptId, r.candidate_run_id, { judgeAgent });
+    log(`evals.run-and-judge prompt=${promptId} winner=${j.verdict.winner_overall}`);
+    res.json({ ok: true, candidate_run_id: r.candidate_run_id, ...j });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+app.get('/evals/runs', async (req, res) => {
+  try {
+    const items = await evalHarness.listEvalRuns({
+      promptId: req.query.promptId || null,
+      country: req.query.country || null,
+      limit: parseInt(req.query.limit, 10) || 100,
+    });
+    res.json({ ok: true, items });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.get('/evals/scoreboard', async (req, res) => {
+  try {
+    const rows = await evalHarness.scoreboard({ country: req.query.country || null });
+    res.json({ ok: true, rows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
