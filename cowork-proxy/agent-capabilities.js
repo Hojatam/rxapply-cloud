@@ -44,6 +44,10 @@ const CAPABILITY_REGISTRY = {
   // Channel-native adaptation (subject lines, length, hashtags, CTA placement)
   avang:     ['adapt'],
 
+  // M47 · DM triage + reply drafting
+  bineh:     ['triage'],         // Inbound-DM intent classification
+  mehrban:   ['reply-draft'],    // Drafts a reply for hot/qualifying DMs
+
   // Afshin owns visual direction. The 'design' capability is a real LLM
   // stage where Afshin reads the brand profile + topic + Avang's brief,
   // then returns an art-directed prompt with style/composition/palette/

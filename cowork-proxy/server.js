@@ -44,6 +44,7 @@ const composeStages = require('./compose-stages');     // Pooya brief + Kherad s
 const composeOrchestrator = require('./compose-orchestrator');  // M24 · recipe-driven multi-format orchestrator
 const evalHarness = require('./eval-harness');                  // M43 · pairwise eval judge
 const watchdog = require('./regulatory-watchdog');              // M46 · regulatory drift watchdog
+const dmTriage = require('./dm-triage');                        // M47 · DM intent triage + reply draft
 const permissions = require('./permissions');          // K1 · approval matrix + Inbox queue
 const renderers = require('./output-renderers');       // K1 · narrative output formatters
 const agentMemory = require('./agent-memory');         // K2 · per-agent persistent memory
@@ -1931,6 +1932,43 @@ app.post('/watchdog/drift-events/:id/resolve', auth.middleware, async (req, res)
     res.json(await watchdog.resolveDriftEvent(req.params.id, { status, note }));
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
+// ── M47 · DM inbox + triage ────────────────────────────────────────────
+app.get('/dm/inbox', async (req, res) => {
+  try {
+    const items = await dmTriage.listInbox({
+      status: req.query.status || null,
+      untriaged: req.query.untriaged === 'true',
+      source: req.query.source || null,
+      limit: parseInt(req.query.limit, 10) || 100,
+    });
+    res.json({ ok: true, items });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.get('/dm/counts', async (_req, res) => {
+  try { res.json({ ok: true, counts: await dmTriage.counts() }); }
+  catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post('/dm/inbox', auth.middleware, async (req, res) => {
+  try { res.json(await dmTriage.ingest(req.body || {})); }
+  catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+app.post('/dm/inbox/:id/triage', auth.middleware, async (req, res) => {
+  try {
+    const auto = (req.body && req.body.autoDraftReply !== false);
+    res.json(await dmTriage.triage(req.params.id, { autoDraftReply: auto }));
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+app.post('/dm/inbox/:id/draft', auth.middleware, async (req, res) => {
+  try { res.json(await dmTriage.draftReply(req.params.id)); }
+  catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+app.post('/dm/inbox/:id/action', auth.middleware, async (req, res) => {
+  try {
+    const { action, note } = req.body || {};
+    res.json(await dmTriage.setFounderAction(req.params.id, { action, note }));
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 app.get('/watchdog/pending-count', async (_req, res) => {
   try { res.json({ ok: true, pending: await watchdog.pendingCount() }); }
   catch (e) { res.status(500).json({ ok: false, error: e.message }); }
