@@ -149,14 +149,28 @@ async function _genRecraft(prompt, size, apiKey) {
   return Buffer.from(await ir.arrayBuffer());
 }
 
-async function _genIdeogram(prompt, size, apiKey) {
-  // Ideogram V3 uses multipart/form-data.
+async function _genIdeogram(prompt, size, apiKey, referenceUrls = []) {
+  // Ideogram V3 uses multipart/form-data. Supports up to 3 style_reference_images.
   const form = new FormData();
   form.append('prompt', String(prompt).slice(0, 4000));
   form.append('aspect_ratio', size === '1024x1024' ? 'ASPECT_1_1' : 'ASPECT_1_1');
   form.append('rendering_speed', 'DEFAULT');
   form.append('model', 'V_3');
   form.append('num_images', '1');
+  // M56 batch B — fetch each reference URL and attach as a Blob so Ideogram
+  // can use it for style transfer. Cap at 3 (Ideogram's max).
+  if (Array.isArray(referenceUrls) && referenceUrls.length) {
+    for (const url of referenceUrls.slice(0, 3)) {
+      try {
+        const ir = await fetch(url);
+        if (ir.ok) {
+          const ab = await ir.arrayBuffer();
+          const ct = ir.headers.get('content-type') || 'image/jpeg';
+          form.append('style_reference_images', new Blob([ab], { type: ct }), 'reference.jpg');
+        }
+      } catch (_) { /* skip unreachable refs */ }
+    }
+  }
   const r = await fetch('https://api.ideogram.ai/v1/ideogram-v3/generate', {
     method: 'POST',
     headers: { 'Api-Key': apiKey },
@@ -230,6 +244,7 @@ async function generateCover({
   designSuggestion = null, // design stage's recommended_model
   recipeDefault = null,    // recipe.default_image_model
   size = '1024x1024',
+  referenceUrls = [],      // M56 batch B — brand visual reference URLs (when available)
 }) {
   if (!prompt || !prompt.trim()) return { ok: false, error: 'empty image prompt' };
 
@@ -278,11 +293,15 @@ async function generateCover({
   } catch (_) { /* non-fatal */ }
 
   // 3. Call the chosen provider.
+  // referenceUrls → forwarded to providers that support image refs (Ideogram supports
+  // multipart style_reference_images; Recraft supports custom-style via separate endpoint
+  // — for now we anchor descriptively in the prompt, image-to-image lands later). Other
+  // providers ignore the URLs (they're already embedded in the prompt as anchors).
   let buf;
   try {
     if (model.provider === 'openai')   buf = await _genOpenAI(prompt, size, apiKey);
     else if (model.provider === 'recraft')  buf = await _genRecraft(prompt, size, apiKey);
-    else if (model.provider === 'ideogram') buf = await _genIdeogram(prompt, size, apiKey);
+    else if (model.provider === 'ideogram') buf = await _genIdeogram(prompt, size, apiKey, referenceUrls);
     else if (model.provider === 'bfl')      buf = await _genFlux(prompt, size, apiKey, modelId);
     else throw new Error(`unsupported provider: ${model.provider}`);
   } catch (e) {

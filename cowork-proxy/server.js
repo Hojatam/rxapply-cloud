@@ -2112,6 +2112,97 @@ app.post('/brand/dm-analysis/upload', auth.middleware, async (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
+// M56 batch B · Afshin visual reference upload (one image at a time)
+//   Body: { filename, b64, mime, metadata: { post_id, platform, language, layout, style, palette, topic_tags, outcome } }
+//   Side effects:
+//     1. Uploads image bytes to R2 under brand-references/<safeId>.<ext>
+//     2. Inserts media_library row (kind='custom', owner_agent='afshin', approved=true)
+//     3. Inserts brand_exemplars row (kind='design_brief', source=stamp, topic_tags from metadata)
+app.post('/brand/visual-references/upload', auth.middleware, async (req, res) => {
+  try {
+    const { filename, b64, mime = 'image/jpeg', metadata = {}, sourceLabel = null } = req.body || {};
+    if (!filename || !b64) return res.status(400).json({ ok: false, error: 'filename + b64 required' });
+    const buf = Buffer.from(b64, 'base64');
+    if (buf.length < 100 || buf.length > 20 * 1024 * 1024) {
+      return res.status(400).json({ ok: false, error: `image size out of bounds (${buf.length} bytes)` });
+    }
+    const stamp = sourceLabel || `brand_visuals_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
+
+    // Build a deterministic ID so re-uploads of the same filename are idempotent
+    const safeName = filename.replace(/[^A-Za-z0-9._-]/g, '_');
+    const mediaId = require('crypto').createHash('sha1').update(stamp + ':' + safeName).digest('hex').slice(0, 32);
+    const ext = (filename.match(/\.([A-Za-z0-9]+)$/) || [])[1] || (mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg');
+    const r2Key = `brand-references/${mediaId}.${ext}`;
+
+    // 1. Upload to R2
+    const storage = require('./storage');
+    await storage.put({ key: r2Key, body: buf, contentType: mime });
+
+    // 2. media_library row (idempotent on (id))
+    const { query, qJson, q } = require('./db');
+    // Use a deterministic UUID v5-ish: convert sha1 hex to uuid format
+    const u = mediaId.padEnd(32, '0');
+    const uuid = `${u.slice(0,8)}-${u.slice(8,12)}-${u.slice(12,16)}-${u.slice(16,20)}-${u.slice(20,32)}`;
+    await query(`
+      INSERT INTO media_library (id, kind, topic, language, prompt, owner_agent, approved, approved_at, dimensions, metadata)
+      VALUES (${q(uuid)}, 'custom',
+              ${q(metadata.topic || filename)},
+              ${q(metadata.language || 'fa')},
+              ${q(`Brand reference imported from analyzer · ${filename}`)},
+              'afshin', true, NOW(),
+              ${q(metadata.dimensions || '1080x1080')},
+              ${qJson({
+                source: 'brand_visual_references',
+                source_label: stamp,
+                analysis_metadata: metadata,
+                r2_key: r2Key,
+                original_filename: filename,
+              })})
+      ON CONFLICT (id) DO UPDATE SET
+        prompt = EXCLUDED.prompt,
+        metadata = EXCLUDED.metadata;
+    `);
+    // Update render_path so the dashboard's Designs gallery picks it up
+    await query(`UPDATE media_library SET render_path = ${q(r2Key)}, render_cost_usd = 0 WHERE id = ${q(uuid)};`);
+
+    // 3. brand_exemplars row for retrieval at design-stage time
+    const url = (storage.urlFor ? storage.urlFor(r2Key) : null) || `/storage/${r2Key}`;
+    const tags = Array.isArray(metadata.topic_tags) ? metadata.topic_tags.slice(0, 12) : [];
+
+    // The body captures a useful descriptive anchor + the retrievable URL
+    const descParts = [];
+    if (metadata.style)   descParts.push(`Style: ${metadata.style}`);
+    if (metadata.layout)  descParts.push(`Layout: ${metadata.layout}`);
+    if (metadata.subject) descParts.push(`Subject: ${metadata.subject}`);
+    if (Array.isArray(metadata.dominant_colors) && metadata.dominant_colors.length)
+      descParts.push(`Dominant colors: ${metadata.dominant_colors.join(', ')}`);
+    if (metadata.logo && metadata.logo.position)
+      descParts.push(`Logo: ${metadata.logo.position}, ${metadata.logo.size_pct || '?'}% canvas, ${metadata.logo.opacity || '?'}`);
+    if (Array.isArray(metadata.brand_pattern_motifs) && metadata.brand_pattern_motifs.length)
+      descParts.push(`Motifs: ${metadata.brand_pattern_motifs.join('; ')}`);
+    descParts.push(`URL: ${url}`);
+    descParts.push(`(Use this past design as a style reference. When image_model supports reference images (Recraft V3, Ideogram V3), pass this URL via the provider's reference-image parameter. Otherwise, anchor the prompt to its style/layout/palette description above.)`);
+    const body = descParts.join('\n');
+
+    await brandInt.createExemplar({
+      kind: 'design_brief',
+      platform: metadata.platform || null,
+      language: metadata.language || null,
+      body,
+      context: metadata.original_post_url || metadata.post_id || filename,
+      topic_tags: tags,
+      importance: metadata.outcome === 'top_engagement' ? 5 : 4,
+      source: stamp,
+      source_ref: filename,
+      outcome: metadata.outcome || 'brand_reference',
+    });
+
+    res.json({ ok: true, media_id: uuid, r2_key: r2Key, url, source: stamp });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // M56 · DM tone profile import (different shape from dm_question_patterns + dm_objection_playbook)
 app.post('/brand/dm-tone-profile/upload', auth.middleware, async (req, res) => {
   try {

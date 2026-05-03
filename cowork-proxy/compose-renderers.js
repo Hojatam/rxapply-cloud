@@ -453,6 +453,37 @@ async function imageCover({ source, run, recipe, lang }) {
      || (source && source.design_prompt)
      || '';
 
+  // M56 batch B · Retrieve top-3 brand visual references whose topic_tags
+  // best match this run. We embed their URLs + descriptive metadata into
+  // the prompt so the image model has a strong style anchor. When the
+  // selected provider supports a literal reference-image API parameter
+  // (Recraft V3, Ideogram V3, Flux Redux), compose-image.js can pass the
+  // URLs through. For OpenAI / generic, the URLs serve as descriptive
+  // anchors only.
+  let referenceUrls = [];
+  try {
+    const trainingRetrieval = require('./agent-training-retrieval');
+    const topicKw = (run.topic || '').toLowerCase().split(/\s+/).filter(w => w.length >= 4).slice(0, 5);
+    const packet = await trainingRetrieval.getTrainingPacket({
+      agent: 'afshin', stageName: 'design',
+      platform: recipe && recipe.id, language: lang || run.master_lang,
+      topicTags: [...topicKw, 'visual-reference'],
+    });
+    const designBriefs = (packet.exemplars || []).filter(e => e.kind === 'design_brief').slice(0, 3);
+    if (designBriefs.length) {
+      const refLines = ['', '--- BRAND VISUAL REFERENCES (style anchor — match these as closely as the topic allows) ---'];
+      for (const d of designBriefs) {
+        // Each exemplar's body has a `URL: ...` line we can extract
+        const urlMatch = String(d.body || '').match(/URL:\s*(\S+)/);
+        if (urlMatch) referenceUrls.push(urlMatch[1]);
+        refLines.push(d.body);
+        refLines.push('');
+      }
+      // Append the references to the brief so generation considers them
+      brief = brief + refLines.join('\n');
+    }
+  } catch (_) { /* non-fatal — fall back to text-only brief */ }
+
   // If neither Afshin nor Avang produced a brief, build one from the topic
   // + the format hint so we always render *something*.
   if (!brief && run && run.topic) {
@@ -480,6 +511,7 @@ illustration style, clean composition, minimal text overlay, no logo.`;
     runOption,
     designSuggestion,
     recipeDefault,
+    referenceUrls,                             // M56 batch B — passed through to providers that support image refs
   });
   if (!r.ok) throw new Error(r.error || 'image generation failed');
 
