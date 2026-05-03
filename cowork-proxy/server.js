@@ -45,6 +45,7 @@ const composeOrchestrator = require('./compose-orchestrator');  // M24 · recipe
 const evalHarness = require('./eval-harness');                  // M43 · pairwise eval judge
 const watchdog = require('./regulatory-watchdog');              // M46 · regulatory drift watchdog
 const dmTriage = require('./dm-triage');                        // M47 · DM intent triage + reply draft
+const fanout = require('./fanout');                             // M48 · 1 source → N channel fan-out
 const permissions = require('./permissions');          // K1 · approval matrix + Inbox queue
 const renderers = require('./output-renderers');       // K1 · narrative output formatters
 const agentMemory = require('./agent-memory');         // K2 · per-agent persistent memory
@@ -1962,6 +1963,21 @@ app.post('/dm/inbox/:id/draft', auth.middleware, async (req, res) => {
   try { res.json(await dmTriage.draftReply(req.params.id)); }
   catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
+// ── M48 · Fan-out (1 source → N channels) ──────────────────────────────
+//   POST /fanout/expand { sourceRunId, channels[], options?, gateStrategy?, masterLang?, targetLangs?, agentOverrides? }
+//   GET  /fanout/children/:sourceRunId
+app.post('/fanout/expand', auth.middleware, async (req, res) => {
+  try {
+    const r = await fanout.expand(req.body || {});
+    log(`fanout.expand src=${r.source_run_id} channels=${(r.children || []).map(c => c.recipe).join(',')}`);
+    res.json(r);
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+app.get('/fanout/children/:sourceRunId', async (req, res) => {
+  try { res.json({ ok: true, children: await fanout.listChildren(req.params.sourceRunId) }); }
+  catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 app.post('/dm/inbox/:id/action', auth.middleware, async (req, res) => {
   try {
     const { action, note } = req.body || {};
