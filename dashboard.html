@@ -2586,6 +2586,10 @@
         <span class="nav-num" id="inbox-key">4</span>
         <span class="nav-badge" id="inbox-badge" hidden></span>
       </div>
+      <div class="nav-link" data-route="dms" data-tip="DMs">
+        <span class="nav-icon"></span><span class="nav-label">DMs</span>
+        <span class="nav-badge" id="dm-badge" hidden></span>
+      </div>
       <div class="nav-link" data-route="logs" data-tip="Logs">
         <span class="nav-icon"></span><span class="nav-label">Logs</span><span class="nav-num">5</span>
       </div>
@@ -2601,6 +2605,9 @@
       <div class="nav-link" data-route="pipelines" data-tip="Pipelines">
         <span class="nav-icon"></span><span class="nav-label">Pipelines</span><span class="nav-num">8</span>
       </div>
+      <div class="nav-link" data-route="evals" data-tip="Evals">
+        <span class="nav-icon"></span><span class="nav-label">Evals</span>
+      </div>
     </div>
     <div class="nav-divider">Configure</div>
     <div class="nav-group">
@@ -2612,6 +2619,10 @@
       </div>
       <div class="nav-link" data-route="workflows" data-tip="Workflows">
         <span class="nav-icon"></span><span class="nav-label">Workflows</span><span class="nav-num">-</span>
+      </div>
+      <div class="nav-link" data-route="watchdog" data-tip="Watchdog">
+        <span class="nav-icon"></span><span class="nav-label">Watchdog</span>
+        <span class="nav-badge" id="wd-badge" hidden></span>
       </div>
       <div class="nav-link" data-route="settings" data-tip="Settings">
         <span class="nav-icon"></span><span class="nav-label">Settings</span><span class="lock"></span>
@@ -3361,6 +3372,10 @@ const ROUTES = {
   knowledge: renderKnowledge,
   tools: renderTools,
   settings: renderSettings,
+  // M52 · new tabs
+  dms:      () => renderDMs(),
+  evals:    () => renderEvals(),
+  watchdog: () => renderWatchdog(),
   // S3 · Approvals route deleted — legacy approval_queue rows now appear
   // under the Inbox panel as a third "LEGACY APPROVALS" subsection.
   // Keep the slug alive as an alias so any old bookmarks redirect cleanly.
@@ -3454,6 +3469,7 @@ const OV_DEFAULT_SECTIONS = {
   org:        true,
   activity:   true,
   services:   true,
+  memory:     true,    // M52 · memory health widget
 };
 function _ovSections() {
   try {
@@ -3493,6 +3509,7 @@ async function renderOverview() {
               ['org','Org chart'],
               ['activity','Recent activity'],
               ['services','Service health'],
+              ['memory','Memory health'],
             ].map(([k,label]) => `
               <label class="customize-row">
                 <input type="checkbox" ${v[k]?'checked':''} onchange="ovToggleSection('${k}')">
@@ -3660,17 +3677,74 @@ async function renderOverview() {
       `)}
     </div>
     ` : ''}
+
+    ${sec('memory', `
+    <div class="card mt-4">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-semibold">Memory health</h3>
+        <button class="btn btn-ghost btn-xs" onclick="ovMemoryMaintenance()">Run maintenance now</button>
+      </div>
+      <div id="ov-memory" class="text-sm text-slate-500">Loading…</div>
+    </div>
+    ` )}
   `;
 
   // Click-outside closes the customize dropdown
   document.addEventListener('click', _closeCustomize, { once: true });
 
   loadOverviewData();
+  loadMemoryHealth();
 }
 
 function _closeCustomize() {
   const m = document.getElementById('ov-customize');
   if (m) m.classList.remove('open');
+}
+
+// M52 · Memory health widget data + maintenance trigger
+async function loadMemoryHealth() {
+  const el = document.getElementById('ov-memory');
+  if (!el) return;
+  try {
+    const j = await fetch(`${PROXY}/memory/health`).then(r => r.json());
+    if (!j.ok) throw new Error(j.error || 'failed');
+    const c = j.counts || {};
+    const lr = j.last_run;
+    el.innerHTML = `
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+        <div class="card-tight" style="border-top:3px solid #2563eb;text-align:center;">
+          <div class="text-xs text-slate-500">Episodic</div>
+          <div class="text-2xl font-bold mt-1">${c.episodic || 0}</div>
+        </div>
+        <div class="card-tight" style="border-top:3px solid #16a34a;text-align:center;">
+          <div class="text-xs text-slate-500">Semantic</div>
+          <div class="text-2xl font-bold mt-1">${c.semantic || 0}</div>
+        </div>
+        <div class="card-tight" style="border-top:3px solid #d97706;text-align:center;">
+          <div class="text-xs text-slate-500">Procedural</div>
+          <div class="text-2xl font-bold mt-1">${c.procedural || 0}</div>
+        </div>
+        <div class="card-tight" style="border-top:3px solid #94a3b8;text-align:center;">
+          <div class="text-xs text-slate-500">Archived</div>
+          <div class="text-2xl font-bold mt-1">${j.archived || 0}</div>
+        </div>
+      </div>
+      ${lr ? `<div class="text-xs text-slate-400">Last maintenance: ${escapeHtml(fmtTime(lr.ran_at))} · decayed ${lr.decayed_count || 0} · promoted ${lr.promoted_count || 0}</div>` : `<div class="text-xs text-slate-400 italic">Maintenance has never run. Click "Run maintenance now" to start, or wire a nightly cron.</div>`}
+    `;
+  } catch (e) {
+    el.innerHTML = `<div class="empty"><div class="empty-text text-xs">Failed: ${escapeHtml(e.message)}</div></div>`;
+  }
+}
+async function ovMemoryMaintenance() {
+  if (!confirm('Run memory maintenance now?\n• DECAY: episodic items un-used 60+ days + low importance + low score → archive\n• PROMOTE: episodic items with promotion_score ≥ 5 → semantic')) return;
+  try {
+    const r = await authFetch(`${PROXY}/memory/maintenance/run`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    if (r.status === 401) return alert('Sign in required.');
+    const j = await r.json();
+    if (!j.ok) return alert('Failed: ' + (j.error || '?'));
+    alert(`Maintenance done.\n• decayed: ${j.decayed}\n• promoted: ${j.promoted}\n\nBefore: ${JSON.stringify(j.before)}\nAfter: ${JSON.stringify(j.after)}`);
+    loadMemoryHealth();
+  } catch (e) { alert('Error: ' + e.message); }
 }
 
 async function loadOverviewData() {
@@ -7061,15 +7135,47 @@ function coShowPreviewLang(lang, btn) {
   html += '</div></details>';
   $('co-preview-body').innerHTML = html;
 
-  // M30 · Export bar (under the preview).
+  // M30 · Export bar + M52 · Fan-out (under the preview).
   const wrap = document.createElement('div');
   wrap.className = 'flex items-center gap-2 mt-3 flex-wrap';
+  const isDone = run && run.status === 'done';
   wrap.innerHTML = `
     <button class="btn btn-ghost btn-xs" onclick="coExportCopy('${escapeHtml(lang)}')">📋 Copy</button>
     <button class="btn btn-ghost btn-xs" onclick="coExportDownload('${escapeHtml(lang)}')">⤓ Download</button>
     <button class="btn btn-ghost btn-xs" onclick="coExportN8n('${escapeHtml(lang)}')" title="POST to N8N_PUBLISH_WEBHOOK">📤 Publish via n8n</button>
+    ${isDone ? `<button class="btn btn-xs" onclick="coFanout('${run.id}')" title="Expand this output to N other channels">↪ Fan out</button>` : ''}
   `;
   $('co-preview-body').appendChild(wrap);
+}
+
+// M52 · Fan-out · pick channels to expand a finished compose run into.
+async function coFanout(sourceRunId) {
+  try {
+    // Fetch recipes to know which channels are available
+    const j = await fetch(`${PROXY}/compose/recipes`).then(r => r.json());
+    const recipes = (j.recipes || []).map(r => r.id);
+    // Strip the source's own recipe from the list (don't fan out to self)
+    const run = _coState.currentRun;
+    const sourceId = run && run.recipe_id;
+    const candidates = recipes.filter(r => r !== sourceId);
+    if (candidates.length === 0) return alert('No other recipes installed to fan out to.');
+
+    const picked = prompt(`Fan out to which channels? Comma-separated.\nAvailable: ${candidates.join(', ')}`);
+    if (!picked || !picked.trim()) return;
+    const channels = picked.split(',').map(s => s.trim()).filter(Boolean).filter(c => candidates.includes(c));
+    if (channels.length === 0) return alert('No valid channels picked.');
+    if (!confirm(`Spawn ${channels.length} new compose run(s): ${channels.join(', ')}?\nEach runs end-to-end (no founder gates) and shows up in Recent runs.`)) return;
+
+    const r = await authFetch(`${PROXY}/fanout/expand`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sourceRunId, channels, gateStrategy: 'none' }),
+    });
+    if (r.status === 401) return alert('Sign in required.');
+    const out = await r.json();
+    if (!out.ok) return alert('Failed: ' + (out.error || '?'));
+    alert(`Fanned out to ${out.children.length} runs. Check Recent runs for progress.`);
+    coLoadRecent();
+  } catch (e) { alert('Error: ' + e.message); }
 }
 
 // Export: copy primary text payload to clipboard.
@@ -7678,6 +7784,460 @@ async function approve(id, ok) {
   });
   renderApprovals();
 }
+
+// =====================================================================
+// M52 · DMs · Evals · Watchdog tabs (UI for M43 + M46 + M47)
+// =====================================================================
+
+// ── DMs tab (M47) ──────────────────────────────────────────────────────
+async function renderDMs() {
+  $('main').innerHTML = `
+    <div class="section-h">
+      <div><h1>DMs</h1><div class="breadcrumb">Inbound DMs · auto-triaged · hot/qualifying get a draft reply</div></div>
+      <div class="flex gap-2">
+        <button class="btn btn-ghost btn-xs" onclick="renderDMs()">↻ Refresh</button>
+        <button class="btn btn-xs" onclick="dmAddManual()">+ Add manually</button>
+      </div>
+    </div>
+    <div id="dm-counts-strip" class="grid grid-cols-2 md:grid-cols-6 gap-2 mb-4"></div>
+    <div class="card mb-4">
+      <div class="flex gap-2 flex-wrap mb-3">
+        <button class="btn btn-xs co-segmented-btn dm-filter-btn" data-filter="" onclick="dmSetFilter('', this)">All</button>
+        <button class="btn btn-xs dm-filter-btn" data-filter="untriaged" onclick="dmSetFilter('untriaged', this)">Untriaged</button>
+        <button class="btn btn-xs dm-filter-btn" data-filter="hot" onclick="dmSetFilter('hot', this)">🔥 Hot</button>
+        <button class="btn btn-xs dm-filter-btn" data-filter="qualifying" onclick="dmSetFilter('qualifying', this)">Qualifying</button>
+        <button class="btn btn-xs dm-filter-btn" data-filter="curious" onclick="dmSetFilter('curious', this)">Curious</button>
+        <button class="btn btn-xs dm-filter-btn" data-filter="off-topic" onclick="dmSetFilter('off-topic', this)">Off-topic</button>
+        <button class="btn btn-xs dm-filter-btn" data-filter="complaint" onclick="dmSetFilter('complaint', this)">Complaint</button>
+      </div>
+      <div id="dm-list" class="space-y-3">Loading…</div>
+    </div>
+  `;
+  _coState._dmFilter = _coState._dmFilter || '';
+  dmLoadCounts();
+  dmLoadList();
+}
+
+async function dmLoadCounts() {
+  try {
+    const j = await fetch(`${PROXY}/dm/counts`).then(r => r.json());
+    if (!j.ok) return;
+    const c = j.counts || {};
+    const cells = [
+      ['Untriaged', c.untriaged || 0, '#64748b'],
+      ['Hot',       c.hot || 0,        '#dc2626'],
+      ['Qualifying', c.qualifying || 0, '#d97706'],
+      ['Curious',   c.curious || 0,    '#2563eb'],
+      ['Off-topic', c['off-topic'] || 0, '#94a3b8'],
+      ['Complaint', c.complaint || 0,  '#7c2d12'],
+    ];
+    $('dm-counts-strip').innerHTML = cells.map(([label, n, color]) => `
+      <div class="card-tight" style="border-top:3px solid ${color};text-align:center;">
+        <div class="text-xs text-slate-500">${escapeHtml(label)}</div>
+        <div class="text-2xl font-bold mt-1">${n}</div>
+      </div>
+    `).join('');
+  } catch (_) {}
+}
+
+function dmSetFilter(filter, btn) {
+  _coState._dmFilter = filter;
+  document.querySelectorAll('.dm-filter-btn').forEach(b =>
+    b.classList.toggle('btn-primary', b.getAttribute('data-filter') === filter));
+  dmLoadList();
+}
+
+async function dmLoadList() {
+  const filter = _coState._dmFilter || '';
+  let qs = '';
+  if (filter === 'untriaged') qs = '?untriaged=true';
+  else if (filter)             qs = `?status=${encodeURIComponent(filter)}`;
+  try {
+    const j = await fetch(`${PROXY}/dm/inbox${qs}&limit=200`.replace('?&', '?')).then(r => r.json());
+    if (!j.ok) throw new Error(j.error || 'failed');
+    const items = j.items || [];
+    if (items.length === 0) {
+      $('dm-list').innerHTML = `<div class="empty"><div class="empty-text text-xs">No DMs ${filter ? 'in this filter' : 'yet'}.</div></div>`;
+      return;
+    }
+    $('dm-list').innerHTML = items.map(d => _dmRowHtml(d)).join('');
+  } catch (e) {
+    $('dm-list').innerHTML = `<div class="empty"><div class="empty-text text-xs">Failed: ${escapeHtml(e.message)}</div></div>`;
+  }
+}
+
+function _dmRowHtml(d) {
+  const statusColor = {
+    'hot': '#dc2626', 'qualifying': '#d97706', 'curious': '#2563eb',
+    'off-topic': '#94a3b8', 'complaint': '#7c2d12',
+  }[d.triage_status] || '#64748b';
+  const statusBg = {
+    'hot': '#fee2e2', 'qualifying': '#fef3c7', 'curious': '#dbeafe',
+    'off-topic': '#f1f5f9', 'complaint': '#fed7aa',
+  }[d.triage_status] || '#f1f5f9';
+  const conf = Number(d.triage_confidence) || 0;
+  return `
+    <div class="card-tight" style="${d.triage_status === 'hot' ? 'border-left:4px solid #dc2626;' : ''}">
+      <div class="flex items-start gap-3 flex-wrap">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 mb-1 flex-wrap">
+            ${d.triage_status ? `<span class="mono" style="font-size:10px;font-weight:700;text-transform:uppercase;color:${statusColor};background:${statusBg};padding:2px 8px;border-radius:3px;">${escapeHtml(d.triage_status)} · ${Math.round(conf * 100)}%</span>` : `<span class="mono" style="font-size:10px;color:#64748b;">UNTRIAGED</span>`}
+            <span class="text-xs text-slate-400">${escapeHtml(d.source)}${d.source_user ? ' · @' + escapeHtml(d.source_user) : ''}</span>
+            <span class="text-xs text-slate-400">${escapeHtml(d.language || '?')}</span>
+            <span class="text-xs text-slate-400">${escapeHtml(fmtTime(d.received_at))}</span>
+          </div>
+          <div class="text-sm" style="white-space:pre-wrap;">${escapeHtml(d.body)}</div>
+          ${d.triage_reasoning ? `<div class="text-xs text-slate-500 mt-1 italic">${escapeHtml(d.triage_reasoning)}</div>` : ''}
+        </div>
+        <div class="flex flex-col gap-1 shrink-0">
+          ${!d.triage_status ? `<button class="btn btn-primary btn-xs" onclick="dmTriage('${d.id}')">Triage</button>` : ''}
+          ${(d.triage_status === 'hot' || d.triage_status === 'qualifying') && !d.draft_reply ? `<button class="btn btn-xs" onclick="dmDraft('${d.id}')">Draft reply</button>` : ''}
+          ${!d.founder_action ? `
+            <button class="btn btn-ghost btn-xs" onclick="dmAction('${d.id}', 'archived')">Archive</button>
+            <button class="btn btn-ghost btn-xs" onclick="dmAction('${d.id}', 'flagged')">Flag</button>
+          ` : `<span class="text-xs text-slate-400 mono">${escapeHtml(d.founder_action)}</span>`}
+        </div>
+      </div>
+      ${d.draft_reply ? `
+        <div class="mt-3 p-3 rounded" style="background:#dcfce7;color:#14532d;">
+          <div class="text-xs uppercase tracking-wider font-semibold mb-1" style="color:#15803d;">Draft reply (${escapeHtml(d.draft_reply_agent || '?')})</div>
+          <div class="text-sm" style="white-space:pre-wrap;">${escapeHtml(d.draft_reply)}</div>
+          <div class="flex gap-2 mt-2">
+            <button class="btn btn-primary btn-xs" onclick="dmCopyReply('${escapeHtml(d.draft_reply.replace(/'/g, '&apos;').replace(/\n/g, '\\n'))}')">📋 Copy</button>
+            <button class="btn btn-xs" onclick="dmAction('${d.id}', 'replied')">Mark replied</button>
+          </div>
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+async function dmTriage(id) {
+  try {
+    const r = await authFetch(`${PROXY}/dm/inbox/${id}/triage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    if (r.status === 401) return alert('Sign in required.');
+    const j = await r.json();
+    if (!j.ok) return alert('Failed: ' + (j.error || '?'));
+    dmLoadCounts(); dmLoadList();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+async function dmDraft(id) {
+  try {
+    const r = await authFetch(`${PROXY}/dm/inbox/${id}/draft`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    if (r.status === 401) return alert('Sign in required.');
+    const j = await r.json();
+    if (!j.ok) return alert('Failed: ' + (j.error || '?'));
+    dmLoadList();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+async function dmAction(id, action) {
+  try {
+    const r = await authFetch(`${PROXY}/dm/inbox/${id}/action`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) });
+    if (r.status === 401) return alert('Sign in required.');
+    dmLoadCounts(); dmLoadList();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+async function dmCopyReply(escaped) {
+  try { await navigator.clipboard.writeText(escaped.replace(/&apos;/g, "'").replace(/\\n/g, '\n')); }
+  catch (e) { alert('Copy failed: ' + e.message); }
+}
+async function dmAddManual() {
+  const body = prompt('Paste the DM body:');
+  if (!body || !body.trim()) return;
+  const sourceUser = prompt('From (handle, optional):') || null;
+  try {
+    const r = await authFetch(`${PROXY}/dm/inbox`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: 'manual', sourceUser, body: body.trim() }),
+    });
+    if (r.status === 401) return alert('Sign in required.');
+    const j = await r.json();
+    if (!j.ok) return alert('Failed: ' + (j.error || '?'));
+    if (confirm('DM ingested. Triage now?')) await dmTriage(j.id);
+    else { dmLoadCounts(); dmLoadList(); }
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+// ── Evals tab (M43) ───────────────────────────────────────────────────
+async function renderEvals() {
+  $('main').innerHTML = `
+    <div class="section-h">
+      <div><h1>Evals</h1><div class="breadcrumb">Country-cohort eval harness · pairwise judge (Bidar) on candidate vs baseline</div></div>
+      <div class="flex gap-2">
+        <button class="btn btn-ghost btn-xs" onclick="renderEvals()">↻ Refresh</button>
+        <button class="btn btn-xs" onclick="evNewPrompt()">+ New golden prompt</button>
+      </div>
+    </div>
+    <div class="card mb-4">
+      <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Scoreboard</div>
+      <div id="ev-scoreboard">Loading…</div>
+    </div>
+    <div class="card">
+      <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">Golden prompts</div>
+      <div id="ev-prompts">Loading…</div>
+    </div>
+  `;
+  evLoadScoreboard();
+  evLoadPrompts();
+}
+async function evLoadScoreboard() {
+  try {
+    const j = await fetch(`${PROXY}/evals/scoreboard`).then(r => r.json());
+    const rows = (j.rows || []);
+    if (rows.length === 0) {
+      $('ev-scoreboard').innerHTML = `<div class="empty"><div class="empty-text text-xs">No evals run yet. Add a golden prompt + run.</div></div>`;
+      return;
+    }
+    $('ev-scoreboard').innerHTML = `
+      <table class="text-sm w-full">
+        <thead><tr class="text-left text-slate-400" style="border-bottom:1px solid #e2e8f0;">
+          <th class="py-2">Country</th><th>Recipe</th><th>Wins</th><th>Losses</th><th>Ties</th><th>Total</th>
+        </tr></thead>
+        <tbody>
+          ${rows.map(r => `<tr style="border-bottom:1px solid #f1f5f9;">
+            <td class="py-2">${escapeHtml(r.country || 'multi')}</td>
+            <td>${escapeHtml(r.recipe_id)}</td>
+            <td style="color:#16a34a;font-weight:600;">${r.wins || 0}</td>
+            <td style="color:#dc2626;font-weight:600;">${r.losses || 0}</td>
+            <td>${r.ties || 0}</td>
+            <td class="text-slate-400">${r.total || 0}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    `;
+  } catch (e) { $('ev-scoreboard').innerHTML = `<div class="empty"><div class="empty-text text-xs">Failed: ${escapeHtml(e.message)}</div></div>`; }
+}
+async function evLoadPrompts() {
+  try {
+    const j = await fetch(`${PROXY}/evals/golden-prompts?limit=200`).then(r => r.json());
+    const items = j.items || [];
+    if (items.length === 0) {
+      $('ev-prompts').innerHTML = `<div class="empty"><div class="empty-text text-xs">No golden prompts yet. Click + to add one.</div></div>`;
+      return;
+    }
+    $('ev-prompts').innerHTML = items.map(p => `
+      <div class="card-tight mb-2">
+        <div class="flex items-start justify-between gap-3 flex-wrap">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-1">
+              <span class="mono" style="font-size:10px;font-weight:600;background:#ede9fe;color:#5b21b6;padding:2px 6px;border-radius:3px;">${escapeHtml(p.country || 'multi')}</span>
+              <span class="mono" style="font-size:10px;font-weight:600;background:#dbeafe;color:#1e40af;padding:2px 6px;border-radius:3px;">${escapeHtml(p.recipe_id)}</span>
+              <span class="text-xs text-slate-400">${escapeHtml((p.target_langs || []).join(', '))}</span>
+            </div>
+            <div class="text-sm font-semibold">${escapeHtml(p.topic)}</div>
+            ${p.audience ? `<div class="text-xs text-slate-500 mt-0.5">${escapeHtml(p.audience)}</div>` : ''}
+            <div class="text-xs text-slate-400 mt-1">
+              ${p.baseline_run_id ? `baseline: <span class="mono">${escapeHtml(p.baseline_run_id.slice(0, 8))}</span>` : '<span style="color:#dc2626;">⚠ no baseline set</span>'}
+            </div>
+          </div>
+          <div class="flex flex-col gap-1 shrink-0">
+            <button class="btn btn-primary btn-xs" onclick="evRunAndJudge('${p.id}')" ${!p.baseline_run_id ? 'disabled' : ''}>▶ Run + judge</button>
+            <button class="btn btn-ghost btn-xs" onclick="evSetBaseline('${p.id}')">Set baseline</button>
+            <button class="btn btn-ghost btn-xs" onclick="evDelete('${p.id}')">Archive</button>
+          </div>
+        </div>
+      </div>
+    `).join('');
+  } catch (e) { $('ev-prompts').innerHTML = `<div class="empty"><div class="empty-text text-xs">Failed: ${escapeHtml(e.message)}</div></div>`; }
+}
+async function evNewPrompt() {
+  const recipeId = prompt('Recipe (telegram / email / seo-article / facebook / x-thread / ig):');
+  if (!recipeId) return;
+  const country = prompt('Country code (uk / us / de / au / ca / uae / sa) or blank for multi:') || null;
+  const topic = prompt('Topic:');
+  if (!topic || topic.trim().length < 4) return alert('Topic too short.');
+  const audience = prompt('Audience (optional):') || null;
+  try {
+    const r = await authFetch(`${PROXY}/evals/golden-prompts`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipeId: recipeId.trim(), country: country ? country.trim() : null, topic: topic.trim(), audience }),
+    });
+    if (r.status === 401) return alert('Sign in required.');
+    const j = await r.json();
+    if (!j.ok) return alert('Failed: ' + (j.error || '?'));
+    evLoadPrompts();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+async function evSetBaseline(promptId) {
+  const runId = prompt('Compose run ID to use as baseline (the canonical reference output):');
+  if (!runId) return;
+  try {
+    const r = await authFetch(`${PROXY}/evals/golden-prompts/${promptId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ baseline_run_id: runId.trim() }),
+    });
+    if (r.status === 401) return alert('Sign in required.');
+    evLoadPrompts();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+async function evRunAndJudge(promptId) {
+  if (!confirm('Run a candidate compose + pairwise judge against baseline?\nThis spends compose-run cost + ~$0.01 for the judge.')) return;
+  try {
+    const r = await authFetch(`${PROXY}/evals/run-and-judge`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ promptId }),
+    });
+    if (r.status === 401) return alert('Sign in required.');
+    const j = await r.json();
+    if (!j.ok) return alert('Failed: ' + (j.error || '?'));
+    alert(`Judge verdict: ${j.verdict.winner_overall}\non-brand: ${j.verdict.winner_on_brand}\naccuracy: ${j.verdict.winner_accuracy}\nformat: ${j.verdict.winner_format}`);
+    evLoadScoreboard();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+async function evDelete(promptId) {
+  if (!confirm('Archive this golden prompt?')) return;
+  try {
+    const r = await authFetch(`${PROXY}/evals/golden-prompts/${promptId}`, { method: 'DELETE' });
+    if (r.status === 401) return alert('Sign in required.');
+    evLoadPrompts();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+// ── Watchdog tab (M46) ────────────────────────────────────────────────
+async function renderWatchdog() {
+  $('main').innerHTML = `
+    <div class="section-h">
+      <div><h1>Watchdog</h1><div class="breadcrumb">Regulator-page drift detection · daily fetch + diff</div></div>
+      <div class="flex gap-2">
+        <button class="btn btn-ghost btn-xs" onclick="renderWatchdog()">↻ Refresh</button>
+        <button class="btn btn-xs" onclick="wdAddWatchpoint()">+ Add watchpoint</button>
+        <button class="btn btn-primary btn-xs" onclick="wdRunCheckAll()">▶ Check all now</button>
+      </div>
+    </div>
+    <div class="card mb-4">
+      <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">Pending drift events</div>
+      <div id="wd-events">Loading…</div>
+    </div>
+    <div class="card">
+      <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">Watchpoints</div>
+      <div id="wd-watchpoints">Loading…</div>
+    </div>
+  `;
+  wdLoadEvents();
+  wdLoadWatchpoints();
+}
+async function wdLoadEvents() {
+  try {
+    const j = await fetch(`${PROXY}/watchdog/drift-events?status=pending&limit=50`).then(r => r.json());
+    const items = j.items || [];
+    if (items.length === 0) {
+      $('wd-events').innerHTML = `<div class="empty"><div class="empty-text text-xs">No pending drift events. KB is in sync.</div></div>`;
+      return;
+    }
+    $('wd-events').innerHTML = items.map(e => `
+      <div class="card-tight mb-2" style="border-left:4px solid #dc2626;background:#fef2f2;">
+        <div class="flex items-start justify-between gap-3 flex-wrap">
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-semibold">${escapeHtml(e.watchpoint_label || e.url || 'unknown')}</div>
+            <div class="text-xs text-slate-500 mt-1">${escapeHtml(e.country || '?')} · ${escapeHtml(e.regulator || '?')} · detected ${escapeHtml(fmtTime(e.detected_at))}</div>
+            ${e.diff_excerpt ? `<pre class="text-xs mono mt-2 p-2 rounded" style="background:#fff;max-height:200px;overflow:auto;white-space:pre-wrap;color:#7f1d1d;">${escapeHtml(e.diff_excerpt.slice(0, 1000))}</pre>` : ''}
+          </div>
+          <div class="flex flex-col gap-1 shrink-0">
+            <a href="${escapeHtml(e.url)}" target="_blank" rel="noopener" class="btn btn-ghost btn-xs">Open URL ↗</a>
+            <button class="btn btn-primary btn-xs" onclick="wdResolve('${e.id}', 'kb-updated')">KB updated</button>
+            <button class="btn btn-xs" onclick="wdResolve('${e.id}', 'reviewed')">Reviewed</button>
+            <button class="btn btn-ghost btn-xs" onclick="wdResolve('${e.id}', 'dismissed')">Dismiss</button>
+          </div>
+        </div>
+      </div>
+    `).join('');
+  } catch (e) { $('wd-events').innerHTML = `<div class="empty"><div class="empty-text text-xs">Failed: ${escapeHtml(e.message)}</div></div>`; }
+}
+async function wdLoadWatchpoints() {
+  try {
+    const j = await fetch(`${PROXY}/watchdog/watchpoints`).then(r => r.json());
+    const items = j.items || [];
+    if (items.length === 0) {
+      $('wd-watchpoints').innerHTML = `<div class="empty"><div class="empty-text text-xs">No watchpoints yet. Click + to add a regulator URL to monitor.</div></div>`;
+      return;
+    }
+    $('wd-watchpoints').innerHTML = `
+      <table class="text-sm w-full">
+        <thead><tr class="text-left text-slate-400" style="border-bottom:1px solid #e2e8f0;">
+          <th class="py-2">Label</th><th>Country</th><th>Regulator</th><th>URL</th><th>Last check</th><th>Last change</th><th></th>
+        </tr></thead>
+        <tbody>
+          ${items.map(w => `<tr style="border-bottom:1px solid #f1f5f9;">
+            <td class="py-2">${escapeHtml(w.label || '—')}</td>
+            <td>${escapeHtml(w.country || '?')}</td>
+            <td>${escapeHtml(w.regulator || '?')}</td>
+            <td class="mono text-xs"><a href="${escapeHtml(w.url)}" target="_blank" class="text-indigo-600 underline">${escapeHtml((w.url || '').slice(0, 60))}${(w.url || '').length > 60 ? '…' : ''}</a></td>
+            <td class="text-xs text-slate-400">${escapeHtml(w.last_check_at ? fmtTime(w.last_check_at) : 'never')}</td>
+            <td class="text-xs text-slate-400">${escapeHtml(w.last_change_at ? fmtTime(w.last_change_at) : '—')}</td>
+            <td><button class="btn btn-ghost btn-xs" onclick="wdCheckOne('${w.id}')">Check now</button></td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    `;
+  } catch (e) { $('wd-watchpoints').innerHTML = `<div class="empty"><div class="empty-text text-xs">Failed: ${escapeHtml(e.message)}</div></div>`; }
+}
+async function wdAddWatchpoint() {
+  const url = prompt('URL to monitor (e.g. https://www.ndeb-bned.ca/en/ade/fees):');
+  if (!url || !url.trim()) return;
+  const label = prompt('Label (e.g. NDEB Part 1 fees):') || null;
+  const country = prompt('Country code (ca / uk / us / de / au / uae / sa):') || null;
+  const regulator = prompt('Regulator (NDEB / GDC / ORE / ADC / AHPRA / DHA):') || null;
+  const selector = prompt('CSS selector to scope (e.g. #fees, blank for whole page):') || null;
+  try {
+    const r = await authFetch(`${PROXY}/watchdog/watchpoints`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: url.trim(), label, country, regulator, selector }),
+    });
+    if (r.status === 401) return alert('Sign in required.');
+    wdLoadWatchpoints();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+async function wdRunCheckAll() {
+  if (!confirm('Run a fresh check on all active watchpoints? Polite 500ms gap per request.')) return;
+  try {
+    const r = await authFetch(`${PROXY}/watchdog/check`, { method: 'POST' });
+    if (r.status === 401) return alert('Sign in required.');
+    const j = await r.json();
+    alert(`Checked ${j.checked || 0} · changed ${j.changed || 0} · errors ${j.errors || 0}`);
+    wdLoadEvents(); wdLoadWatchpoints();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+async function wdCheckOne(id) {
+  try {
+    const r = await authFetch(`${PROXY}/watchdog/check/${id}`, { method: 'POST' });
+    if (r.status === 401) return alert('Sign in required.');
+    wdLoadEvents(); wdLoadWatchpoints();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+async function wdResolve(id, status) {
+  let note = null;
+  if (status === 'kb-updated' || status === 'reviewed') note = prompt('Resolution note (optional):') || null;
+  try {
+    const r = await authFetch(`${PROXY}/watchdog/drift-events/${id}/resolve`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, note }),
+    });
+    if (r.status === 401) return alert('Sign in required.');
+    wdLoadEvents();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+// Sidebar badge pollers — DM hot+qualifying count, Watchdog pending count
+async function _pollNewBadges() {
+  try {
+    const dm = await fetch(`${PROXY}/dm/counts`).then(r => r.json());
+    if (dm.ok) {
+      const c = dm.counts || {};
+      const total = (c.hot || 0) + (c.qualifying || 0);
+      const el = $('dm-badge');
+      if (el) { if (total > 0) { el.textContent = total; el.hidden = false; } else { el.hidden = true; } }
+    }
+  } catch (_) {}
+  try {
+    const wd = await fetch(`${PROXY}/watchdog/pending-count`).then(r => r.json());
+    if (wd.ok) {
+      const el = $('wd-badge');
+      if (el) { if (wd.pending > 0) { el.textContent = wd.pending; el.hidden = false; } else { el.hidden = true; } }
+    }
+  } catch (_) {}
+}
+setInterval(_pollNewBadges, 30000);
+setTimeout(_pollNewBadges, 1500);
 
 // ── K1 · Inbox ────────────────────────────────────────────────────────
 // Single feed of pending approval requests + recent decisions.
