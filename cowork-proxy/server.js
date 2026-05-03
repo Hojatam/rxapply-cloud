@@ -37,6 +37,7 @@ const n8nCtl = require('./n8n-control');               // F4 · n8n workflow con
 const anthropicChat = require('./anthropic-chat');     // F5 · agent chat
 const cost = require('./cost');                        // F9 · cost telemetry + cap
 const afshin   = require('./afshin-router');            // F8 · design pipeline
+const unsplash = require('./unsplash');                 // M64 · Unsplash stock photos
 const pipelineRunner = require('./pipeline-runner');  // F6 · visual pipeline editor
 const agentModels = require('./agent-models');         // per-agent LLM overrides
 const brandProfile = require('./brand-profile');       // central brand spec
@@ -2210,6 +2211,82 @@ app.post('/brand/dm-tone-profile/upload', auth.middleware, async (req, res) => {
     log(`brand.import.dm-tone source=${r.source} intelligence=${r.intelligence} exemplars=${r.exemplars}`);
     res.json(r);
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// ── M64 · Unsplash stock photos ──────────────────────────────────────
+//
+// GET  /unsplash/status                  → { ok, has_key }
+// GET  /unsplash/search?query=...&orientation=&per_page=
+//        Search; returns up to 30 photos with photographer attribution.
+//        Read-only for the founder's "Browse stock" UI; no auth required
+//        (read-only public search).
+// POST /unsplash/import   (auth)
+//        Body: { photo_id, download_location, url_to_fetch, photographer,
+//                topic, language, topic_tags }
+//        Downloads the photo to R2, registers in media_library with
+//        attribution metadata, and triggers Unsplash's download counter
+//        for the photographer (compliance — required by their API terms).
+// POST /unsplash/quick-pick   (auth)
+//        Body: { query, orientation?, topic?, language?, topic_tags? }
+//        Searches + imports the top result in one shot. For Afshin's
+//        automated "give me a hero photo about X" flow.
+app.get('/unsplash/status', (_, res) => {
+  res.json({ ok: true, has_key: unsplash.hasKey() });
+});
+
+app.get('/unsplash/search', async (req, res) => {
+  if (!unsplash.hasKey()) {
+    return res.status(503).json({ ok: false, error: 'UNSPLASH_ACCESS_KEY not set on server' });
+  }
+  const r = await unsplash.searchPhotos({
+    query: req.query.query || req.query.q,
+    perPage: parseInt(req.query.per_page, 10) || 12,
+    orientation: req.query.orientation || null,
+    contentFilter: req.query.content_filter === 'high' ? 'high' : 'low',
+  });
+  if (!r.ok) return res.status(400).json(r);
+  res.json(r);
+});
+
+app.post('/unsplash/import', auth.middleware, async (req, res) => {
+  if (!unsplash.hasKey()) {
+    return res.status(503).json({ ok: false, error: 'UNSPLASH_ACCESS_KEY not set on server' });
+  }
+  try {
+    const { photo_id, download_location, url_to_fetch, photographer,
+            topic, language, topic_tags } = req.body || {};
+    const r = await unsplash.importPhoto({
+      photoId: photo_id,
+      downloadLocation: download_location,
+      urlToFetch: url_to_fetch,
+      photographer,
+      topic, language,
+      topicTags: Array.isArray(topic_tags) ? topic_tags : [],
+    });
+    if (!r.ok) return res.status(400).json(r);
+    log(`unsplash.import id=${photo_id} → media ${r.media_id.slice(0, 8)} by ${photographer && photographer.name || '?'}`);
+    res.json(r);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.post('/unsplash/quick-pick', auth.middleware, async (req, res) => {
+  if (!unsplash.hasKey()) {
+    return res.status(503).json({ ok: false, error: 'UNSPLASH_ACCESS_KEY not set on server' });
+  }
+  try {
+    const { query: qText, orientation, topic, language, topic_tags } = req.body || {};
+    if (!qText) return res.status(400).json({ ok: false, error: 'query required' });
+    const r = await unsplash.quickPick({
+      query: qText,
+      orientation: orientation || null,
+      topic: topic || qText,
+      language: language || null,
+      topicTags: Array.isArray(topic_tags) ? topic_tags : [],
+    });
+    if (!r.ok) return res.status(400).json(r);
+    log(`unsplash.quickPick "${qText.slice(0,60)}" → media ${r.media_id.slice(0, 8)} by ${r.photographer && r.photographer.name || '?'}`);
+    res.json(r);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 // M56 · Per-agent training packet preview (what the agent will SEE on next call)

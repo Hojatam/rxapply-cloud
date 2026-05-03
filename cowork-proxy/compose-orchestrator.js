@@ -555,6 +555,28 @@ Pick the model per slide:
   - Photoreal hero with NO text overlay       → bfl/flux-pro-1.1
   - Single-word legibility focus              → ideogram/ideogram-v3
 
+M64 · Stock photos (Unsplash) — when to use instead of generating:
+  Some slides are best served by a REAL photo, not a generated one. If
+  the slide concept is a generic, high-realism scene (a doctor at a
+  desk, a clinic interior, a student studying, a city skyline), prefer
+  a stock photo and overlay your text/brand block on top. Generating
+  these from scratch is wasteful and often less convincing.
+
+  Set `image_source: "unsplash"` in your output and provide a clean
+  English search query in `unsplash_query`. The system will pick the
+  top-relevance photo, attribute the photographer per Unsplash terms,
+  and store it in media_library. You then design the text overlay on
+  top of that photo at render time.
+
+  Use stock photos for: clinical settings, real-world subjects, generic
+  professional scenes, cityscapes/landmarks, hands-at-keyboard study.
+  DO NOT use stock for: brand-specific layouts, on-image text designs,
+  watercolor occasion days, any slide where the visual identity matters
+  more than the photo subject.
+
+  When `image_source: "unsplash"`, you don't need `recommended_model`
+  for that slide — just the search query.
+
 Return ONLY this JSON:
 
 {
@@ -566,13 +588,16 @@ Return ONLY this JSON:
     "<a brand element to reference, e.g. 'RxApply teal accent', 'flat-illustration of a dental hygienist'>"
   ],
   "must_avoid": ["<anything the image should NOT contain — text overlays / logos / specific imagery>"],
-  "recommended_model": "<one of the available model IDs above>",
-  "model_reasoning": "<one sentence — why you picked this model>",
-  "final_prompt": "<the COMPLETE prompt to send to the chosen image model. Synthesise everything above into a clear, vivid paragraph. No model-specific syntax — just plain art-direction language.>",
+  "image_source": "generated | unsplash",
+  "unsplash_query": "<English search terms ONLY when image_source is 'unsplash'; clean and specific, e.g. 'female dentist clinic modern' — null otherwise>",
+  "unsplash_orientation": "landscape | portrait | squarish",
+  "recommended_model": "<one of the available model IDs above; ignored when image_source is 'unsplash'>",
+  "model_reasoning": "<one sentence — why you picked this model OR why you chose stock>",
+  "final_prompt": "<for image_source='generated': the COMPLETE prompt to send to the chosen image model, 60-160 words. For image_source='unsplash': a short note describing the text overlay you'll later compose on top of the stock photo.>",
   "handoff_intent": null
 }
 
-The final_prompt should be 60-160 words, vivid and specific.`,
+The final_prompt should be 60-160 words, vivid and specific (for generated). For unsplash mode, it's a short overlay-design note.`,
 };
 
 // Tiny mustache-style template renderer (no external dep).

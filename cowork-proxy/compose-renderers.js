@@ -438,6 +438,48 @@ function instagram({ source, run, lang }) {
 async function imageCover({ source, run, recipe, lang }) {
   const f = _fields(source);
 
+  // M64 · Stock-photo path — when Afshin's design output sets
+  // `image_source: "unsplash"`, fetch a real photo from Unsplash instead
+  // of generating from a model. Photographer attribution is stored on
+  // the resulting media_library row per Unsplash terms.
+  const imageSource = (source && source.image_source) || (f && f.image_source) || 'generated';
+  if (imageSource === 'unsplash') {
+    const unsplash = require('./unsplash');
+    if (!unsplash.hasKey()) {
+      throw new Error('image_source=unsplash requested but UNSPLASH_ACCESS_KEY is not set on the server');
+    }
+    const qText = (source && source.unsplash_query) || (f && f.unsplash_query) || run.topic;
+    const orientation = (source && source.unsplash_orientation) || (f && f.unsplash_orientation) || null;
+    const topicKw = (run.topic || '').toLowerCase().split(/\s+/).filter(w => w.length >= 4).slice(0, 5);
+    const r = await unsplash.quickPick({
+      query: qText,
+      orientation,
+      topic: run.topic,
+      language: lang || run.master_lang,
+      topicTags: topicKw,
+    });
+    if (!r.ok) throw new Error(`Unsplash failed: ${r.error}`);
+    return {
+      _renderer: 'image-cover',
+      _source: 'unsplash',
+      lang: lang || run.master_lang,
+      url: r.url,
+      key: r.r2_key,
+      media_id: r.media_id,
+      model: 'unsplash-stock',
+      size: null,
+      cost_usd: 0,
+      attribution: r.attribution_text,
+      photographer: r.photographer,
+      design_context: source && (source.style || source.composition) ? {
+        style: source.style || null,
+        composition: source.composition || null,
+        color_palette: source.color_palette || null,
+        mood: source.mood || null,
+      } : null,
+    };
+  }
+
   // Source-priority for the final image prompt:
   //   1. Afshin's design stage final_prompt (M37 — full art direction)
   //   2. Avang's adapt fields design_brief / image_brief / design_prompt
