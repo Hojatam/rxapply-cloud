@@ -2213,18 +2213,53 @@ app.post('/brand/dm-tone-profile/upload', auth.middleware, async (req, res) => {
 });
 
 // M56 · Per-agent training packet preview (what the agent will SEE on next call)
+// M58 · Now also returns the SKILL.md excerpt + KPIs so the founder sees all
+//       four training surfaces (skill, brand, train-tab memory, scores) in one view.
 app.get('/training/preview', async (req, res) => {
   try {
     const trainingRetrieval = require('./agent-training-retrieval');
+    const agent = req.query.agent || null;
+    const stage = req.query.stage || 'draft';
     const packet = await trainingRetrieval.getTrainingPacket({
-      agent: req.query.agent || null,
-      stageName: req.query.stage || 'draft',
+      agent,
+      stageName: stage,
       platform: req.query.platform || null,
       language: req.query.language || null,
       topicTags: (req.query.topics || '').split(',').map(s => s.trim()).filter(Boolean),
     });
+
+    // Pull SKILL.md (block 1 of every system prompt — what the founder edits in
+    // the Prompt tab). Stripped of YAML frontmatter for the preview.
+    let skill_md = null;
+    if (agent && AGENT_NAME_RE.test(agent)) {
+      try {
+        const p = path.join(AGENTS_DIR, agent, 'SKILL.md');
+        if (fs.existsSync(p)) {
+          const raw = fs.readFileSync(p, 'utf8');
+          skill_md = raw.length > 4000 ? raw.slice(0, 4000) + '\n…(truncated)' : raw;
+        }
+      } catch (_) {}
+    }
+
+    // Pull recent KPIs (the founder's stars from the rating sub-tab) so the
+    // preview reflects all four sources, not just the three retrieved ones.
+    let kpis = null;
+    if (agent) {
+      try { kpis = await agentEvals.getKPIsForAgent(agent, 14); } catch (_) {}
+    }
+
     res.json({
       ok: true,
+      agent, stage,
+      sources: {
+        skill_md_present: !!skill_md,
+        rules_count:      (packet.rules || []).length,
+        exemplars_count:  (packet.exemplars || []).length,
+        memories_count:   (packet.memories || []).length,
+        rating_signal:    packet.rating_signal || null,
+      },
+      skill_md,
+      kpis,
       packet,
       rendered: trainingRetrieval.renderUnifiedBlock(packet),
     });

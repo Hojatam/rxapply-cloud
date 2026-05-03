@@ -151,13 +151,60 @@ function _wordOverlap(a, b) {
   return n;
 }
 
+// ── Recent rating signal (M58) ───────────────────────────────────────
+// Pulls last-N-day founder star ratings for this (agent, stage) and
+// surfaces them in the prompt so the AGENT itself reacts to its scores —
+// not just the cost-router. Triggered only when the rolling avg dips
+// below CARE_THRESHOLD; an in-spec agent doesn't need the noise.
+const RATING_LOOKBACK_DAYS = 14;
+const RATING_CARE_THRESHOLD = 3.5;     // below this, surface the signal
+const RATING_LOW_BAR = 2;              // ≤ this is "low rating"
+
+async function _loadRatingSignal({ agent, stageName }) {
+  if (!agent) return null;
+  try {
+    // Aggregate stats — agent-wide. Stage filter is best-effort: agent_evals
+    // doesn't store stage, but `dimension` often holds it. Fall back to overall.
+    const stats = await queryRows(`
+      SELECT
+        COUNT(*)::int                       AS n,
+        AVG(score)::float                   AS avg,
+        SUM(CASE WHEN score <= ${RATING_LOW_BAR} THEN 1 ELSE 0 END)::int AS low_count
+      FROM agent_evals
+      WHERE agent = '${agent.replace(/'/g, "''")}'
+        AND kind = 'rating'
+        AND created_at >= NOW() - INTERVAL '${RATING_LOOKBACK_DAYS} days';
+    `);
+    const s = stats && stats[0];
+    if (!s || !s.n || s.n < 2) return null;          // not enough signal
+    if (s.avg == null || s.avg >= RATING_CARE_THRESHOLD) return null; // doing fine
+
+    // Pull up to 2 most-recent low-rated runs with notes (so the agent
+    // sees what specifically dropped its score)
+    const recentLow = await queryRows(`
+      SELECT score, dimension, note, created_at::text
+        FROM agent_evals
+       WHERE agent = '${agent.replace(/'/g, "''")}'
+         AND kind = 'rating' AND score <= ${RATING_LOW_BAR}
+         AND created_at >= NOW() - INTERVAL '${RATING_LOOKBACK_DAYS} days'
+       ORDER BY created_at DESC LIMIT 2;
+    `);
+    return {
+      n: s.n, avg: Math.round(s.avg * 10) / 10,
+      low_count: s.low_count || 0,
+      window_days: RATING_LOOKBACK_DAYS,
+      recent_low: recentLow || [],
+    };
+  } catch (_) { return null; }
+}
+
 // ── Public: assemble training packet ─────────────────────────────────
 
 async function getTrainingPacket({
   agent, stageName, platform = null, language = null,
   topicTags = [], recipe = null,
 } = {}) {
-  if (!agent) return { rules: [], exemplars: [], memories: [], conflicts: [], budget: _budgetFor(stageName) };
+  if (!agent) return { rules: [], exemplars: [], memories: [], conflicts: [], rating_signal: null, budget: _budgetFor(stageName) };
 
   const budget = _budgetFor(stageName);
 
@@ -223,14 +270,35 @@ async function getTrainingPacket({
   // 4. Detect cross-source conflicts
   const conflicts = _detectConflicts(rules, memories);
 
-  return { rules, exemplars, memories, conflicts, budget };
+  // 5. M58 · recent founder-rating signal (only if avg dipped below threshold)
+  const rating_signal = await _loadRatingSignal({ agent, stageName });
+
+  return { rules, exemplars, memories, conflicts, rating_signal, budget };
 }
 
 // ── Format packet as a system-prompt block ───────────────────────────
 function renderUnifiedBlock(packet) {
   if (!packet) return '';
-  const { rules, exemplars, memories, conflicts } = packet;
+  const { rules, exemplars, memories, conflicts, rating_signal } = packet;
   const lines = [];
+
+  // M58 · Surface recent founder feedback FIRST so it sets the frame
+  if (rating_signal) {
+    lines.push(`# 📊 Recent founder feedback`);
+    lines.push(
+      `Last ${rating_signal.window_days} days: ${rating_signal.n} ratings · avg ${rating_signal.avg}/5` +
+      (rating_signal.low_count ? ` · ${rating_signal.low_count} low-rated (≤2)` : '')
+    );
+    if (rating_signal.recent_low && rating_signal.recent_low.length) {
+      lines.push(`Examples to learn from:`);
+      for (const r of rating_signal.recent_low) {
+        const note = r.note ? ` — "${String(r.note).replace(/\s+/g, ' ').slice(0, 200)}"` : '';
+        lines.push(`  · ${r.score}/5${r.dimension && r.dimension !== 'overall' ? ` (${r.dimension})` : ''}${note}`);
+      }
+    }
+    lines.push(`Raise quality on this run; address the patterns above.`);
+    lines.push('');
+  }
 
   if (rules && rules.length > 0) {
     lines.push(`# Brand intelligence (${rules.length} most-relevant rules)`);
