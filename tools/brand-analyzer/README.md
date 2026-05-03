@@ -1,53 +1,61 @@
-# Brand Voice Archive — Claude-Code-driven analyzer
+# Brand Voice Archive — Cowork-driven analyzer
 
-Two-step local analysis of your published content. **Uses your Claude Max plan** via Claude Code — zero API tokens spent.
+Local analysis of your published content using **Claude Cowork** (the agentic surface inside Claude Desktop). **Uses your Claude Max plan** — zero API tokens.
 
 ```
-┌────────────────────┐    ┌────────────────────────┐    ┌────────────────┐
-│  Telegram +        │    │  parse-archive.js      │    │ Claude Code    │
-│  Instagram exports │ ─▶ │  (parses → JSON)       │ ─▶ │ (analyzes)     │
-└────────────────────┘    │  no LLM, no API cost   │    │ uses Max plan  │
-                          └────────────────────────┘    └───────┬────────┘
-                                                                ▼
-                                                      ┌──────────────────┐
-                                                      │ output/          │
-                                                      │ ├ brand_voice…   │
-                                                      │ ├ exemplars…     │
-                                                      │ ├ voice_finger…  │
-                                                      │ ├ visual_style…  │
-                                                      │ └ style_refs/    │
-                                                      └────────┬─────────┘
-                                                               ▼
-                                                      ┌──────────────────┐
-                                                      │ upload.js        │
-                                                      │ → control plane  │
-                                                      └──────────────────┘
+┌────────────────────┐    ┌────────────────────────┐    ┌────────────────────┐
+│  Telegram +        │    │  parse-archive.js      │    │ Claude Cowork      │
+│  Instagram exports │ ─▶ │  (parses + palette)    │ ─▶ │ (text analysis)    │
+└────────────────────┘    │  no LLM, no API cost   │    │ Max plan, no API   │
+                          └────────────────────────┘    └─────────┬──────────┘
+                                       │                          │
+                                       │   (optional vision)      │
+                                       ▼                          ▼
+                            ┌──────────────────────┐    ┌──────────────────┐
+                            │ vision-fallback.js   │    │ output/          │
+                            │ ~$0.20 for 200 imgs  │    │ ├ brand_voice…   │
+                            │ adds layout/logo/    │ ─▶ │ ├ exemplars…     │
+                            │ motif analysis       │    │ ├ voice_finger…  │
+                            └──────────────────────┘    │ ├ visual_style…  │
+                                                        │ └ SUMMARY.md     │
+                                                        └────────┬─────────┘
+                                                                 ▼
+                                                        ┌────────────────┐
+                                                        │ upload.js      │
+                                                        │ → control plane│
+                                                        └────────────────┘
 ```
+
+## What is Claude Cowork?
+
+The agentic surface inside Claude Desktop (Mac + Windows). Reads/writes files in folders you grant access to, executes scripts in a sandbox VM, uses your **paid Claude.ai subscription quota** (not API tokens).
+
+It's perfect for our text-heavy analysis pass — but it currently **doesn't view images directly**. So image-derived signals (palette, layout, logo, motifs) come from the local script + an optional ~$0.20 vision fallback.
+
+Anthropic docs: https://www.anthropic.com/product/claude-cowork
 
 ## What you get out
 
 | File | Purpose |
 |---|---|
-| `output/brand_voice_profile.json` | Structural patterns: opener templates, body shapes, CTA forms, length stats per platform per language, emoji + hashtag patterns, voice signature words, banned phrases inferred |
+| `output/brand_voice_profile.json` | Structural patterns: opener templates, body shapes, CTA forms, length stats per platform per language, emoji + hashtag patterns, voice signature words |
 | `output/exemplars.json` | Top exemplar captions (last-30 per platform + engagement-top) tagged with importance |
-| `output/voice_fingerprint.json` | The 30-50 paragraphs Claude judged most-canonical (used by the future voice-critic agent) |
-| `output/visual_style_profile.json` | Color palette, layout taxonomy, typography rules, logo placement patterns, motif library, **brand rules inferred** |
+| `output/voice_fingerprint.json` | The 30-50 paragraphs Cowork judged most-canonical |
+| `output/visual_style_profile.json` | Color palette + (optionally) layout/logo/motif aggregate |
 | `output/style_references/` | Top-50 reference images, ordered by importance (Afshin uses these) |
-| `output/SUMMARY.md` | One-page plain-English review for you to read before uploading |
+| `output/SUMMARY.md` | One-page plain-English review |
 
 ## Prerequisites
 
-- Node 20+
-- **Claude Code** desktop app (you already have this — it's what you call "Cowork")
-- Active **Claude Max** subscription (or Pro)
-- Your archive data (see below)
+- **Node 20+** (for parse-archive.js)
+- **Claude Desktop** with Cowork enabled (Mac or Windows): https://claude.com/download
+- An active **Claude Pro / Max / Team / Enterprise** plan
+- Your archive data (see "Getting your data" below)
 
 ```bash
 cd rxapply-cloud/tools/brand-analyzer
 npm install
 ```
-
-`npm install` only needs `yauzl` (for IG zip extraction). The Anthropic + OpenAI SDKs are still in `package.json` for the optional `analyze.js` API-driven path; if you don't plan to use that, you can safely ignore them.
 
 ## Getting your data
 
@@ -60,37 +68,35 @@ Telegram **Desktop** → your channel → **⋮ More** → **Export channel hist
 
 You'll have a folder with `result.json` + `photos/` subfolder.
 
-### Instagram — if you can't sign in
+### Instagram — you need to recover account access first
 
-You currently can't export from IG because you're not logged in. **Recover IG access first**, in priority order:
+You said you can't sign in to Instagram, which is blocking the export. There's no legitimate workaround:
 
 1. https://www.instagram.com/accounts/password/reset/ — email reset
 2. https://help.instagram.com/contact/740949042640030 — Meta's account-recovery form
 3. https://help.instagram.com/686598299863572 — trusted-contact recovery
 
-Don't use third-party scrapers — they violate IG TOS and get accounts banned.
+Don't use third-party scrapers — they violate IG TOS and get accounts banned. Your account is too valuable to risk.
 
-**Until you regain access, run on Telegram alone.** Telegram has captions + view counts (which is engagement). It's enough to extract solid patterns. Add IG later as a second pass when access is restored.
+**Until you recover access, run on Telegram alone.** It has captions + view counts (engagement). It's enough. Add IG as a second pass when access is restored — the analyzer is incremental.
 
 ### Instagram — once you can sign in
 
 1. https://accountscenter.instagram.com → **Your information and permissions** → **Download your information**
 2. **Some of your information** → tick **Posts** + optionally **Stories** + **Reels**
-3. Format: **JSON**
-4. Media quality: **High**
-5. Date range: **All time** (or last 18-24 months)
-6. Submit. Email arrives in 1-48 hours with the .zip
-7. Optionally: also export the Meta Business Suite engagement CSV from `https://business.facebook.com/latest/insights` (gives likes/saves/comments/reach)
+3. Format: **JSON** · Media quality: **High** · Date range: **All time**
+4. Submit. Email arrives in 1-48 hours with the .zip.
+5. Optionally also export the Meta Business Suite engagement CSV for likes/saves/comments/reach.
 
-## Run it · Step 1 — Parse
+## Run it · Step 1 — Parse (always free)
 
 ```bash
-# Telegram only:
+# Telegram only — what you can do today:
 node parse-archive.js \
   --telegram "C:\path\to\Telegram-export-folder" \
   --output ./output
 
-# With Instagram once you have it:
+# Once you have IG too:
 node parse-archive.js \
   --telegram "C:\path\to\Telegram-export-folder" \
   --instagram "C:\path\to\instagram-archive.zip" \
@@ -103,39 +109,56 @@ Flags:
 
 | Flag | What |
 |---|---|
-| `--telegram <folder>` | Telegram export folder (with `result.json` + `photos/`) |
+| `--telegram <folder>` | Telegram export folder |
 | `--instagram <zip-or-folder>` | IG archive (.zip or extracted folder) |
 | `--instagram-csv <path>` | Optional: Meta Business Suite engagement CSV |
-| `--max-images <N>` | Cap how many images to copy (default 200; prioritises last-30 + engagement-top) |
+| `--max-images <N>` | Cap how many images to copy + extract palette from (default 200) |
 | `--output <folder>` | Output folder (default `./output`) |
 
-The parser produces:
-- `output/archive-input.json` — every post normalised
-- `output/archive-input-images/` — flat folder of priority images
-- `output/posts.csv` — for spot-checking
+This pre-pass:
+- Parses both archives into a single `archive-input.json`
+- Copies the top-N images (last-30 + engagement-prioritised) into `archive-input-images/`
+- **Extracts a brand color palette locally** with `node-vibrant` (no LLM, no API) → `palette.json`
+- Dumps `posts.csv` for spot-checking
 
-**Zero API cost. Zero LLM calls.** Just parsing.
+## Run it · Step 2 — Open Cowork
 
-## Run it · Step 2 — Open Claude Code in this folder
-
-```bash
-cd tools/brand-analyzer
-claude
-```
-
-Then say to Claude:
+1. Open **Claude Desktop**
+2. Switch to the **Cowork** tab
+3. **Add this folder** to Cowork's allowed paths: `tools/brand-analyzer/` (or its parent)
+4. In a new Cowork chat, paste:
 
 > Run the brand analysis using INSTRUCTIONS.md
 
-Claude Code reads `INSTRUCTIONS.md`, processes the archive, looks at the images, and writes the 5 output JSONs + `SUMMARY.md`. Uses your Max-plan quota; **no API tokens billed**.
+That's it. Cowork:
+- Reads `archive-input.json`, `posts.csv`, `palette.json`
+- Runs the 6 stages described in `INSTRUCTIONS.md`
+- Writes `brand_voice_profile.json`, `exemplars.json`, `voice_fingerprint.json`, `visual_style_profile.json`, `SUMMARY.md`
+- Asks you to review along the way (you can interrupt or correct)
 
-This typically takes 10-30 minutes depending on archive size. You can interrupt + resume by saying "continue from stage 4" etc.
+This typically takes 10-30 minutes depending on archive size, and counts against your **Max-plan usage allocation** — no API tokens billed.
 
-## Run it · Step 3 — Review
+## Run it · Step 3 — (optional) Add layout/logo/motif analysis
 
-Open `output/SUMMARY.md` first — Claude's plain-English summary of what was found. If it matches your sense of the brand, move on. If something is off (e.g. it picked a phrase you'd never use as a "favored phrase"), you can hand-edit the JSON files before uploading.
+If you want layout / logo placement / motif analysis (in addition to palette), run the **vision fallback** script. Cost: about $0.20 for 200 images using OpenAI's `gpt-4o-mini` vision.
 
-## Run it · Step 4 — Upload to control plane
+```bash
+# Set OPENAI_API_KEY in .env (only used by this optional script)
+copy .env.example .env
+notepad .env
+
+node vision-fallback.js --max-images 200
+```
+
+This writes `output/visual_style_samples.json`. When Cowork runs Stage 5, it'll automatically pick up this file and produce a richer `visual_style_profile.json`. If the file isn't there, Cowork falls back to palette-only analysis (still useful, just less detailed).
+
+You can run this BEFORE or AFTER opening Cowork — either order works.
+
+## Run it · Step 4 — Review
+
+Open `output/SUMMARY.md` first — Cowork's plain-English summary of what was found. If it matches your sense of the brand, move on. If something is off (e.g. Cowork picked a phrase you'd never use as a "favored phrase"), you can hand-edit the JSON files before uploading. The patterns are yours.
+
+## Run it · Step 5 — Upload to control plane
 
 ```bash
 node upload.js \
@@ -143,36 +166,45 @@ node upload.js \
   --token <YOUR_FOUNDER_API_TOKEN>
 ```
 
-(Get the token by logging into the dashboard, opening DevTools → Application → Local Storage → copy `rxapply-auth-token`.)
+(Get the token from your dashboard's localStorage → `rxapply-auth-token`.)
 
-The control plane consumes the 5 JSONs and:
-- Updates `brand_profile.tone_patterns` + `visual_patterns` jsonb columns
-- Seeds `agent_memory` exemplars for Sepehr, Avang, Goyesh, Bidar (importance 4-5)
-- Writes the voice fingerprint to a new `brand_voice_fingerprint` table
+The control-plane endpoint (M39 part 2, shipping next) consumes the 5 JSONs and:
+- Updates `brand_profile.tone_patterns` + `visual_patterns` JSONB columns
+- Seeds Sepehr / Avang / Goyesh / Bidar `agent_memory` with exemplars (importance 4-5)
+- Stores the voice fingerprint in a new `brand_voice_fingerprint` table
 - Uploads style references to R2 + creates `media_library` entries (so they appear in Designs)
-
-(The control-plane endpoint ships in M39 part 2.)
-
-## Resume + iterate
-
-- Hand-edit any JSON before uploading. The patterns are yours; if Claude misread something, fix it.
-- Re-run `parse-archive.js` any time — it's deterministic, so it just regenerates the same input.
-- After upload, you can re-analyze with new posts (incremental ingest) — the upload endpoint will be idempotent for exemplar IDs.
 
 ## Files in this folder
 
 ```
 tools/brand-analyzer/
-├── README.md                    ← this file
-├── INSTRUCTIONS.md              ← the prompt Claude Code follows
+├── README.md                  ← this file
+├── INSTRUCTIONS.md            ← what Cowork follows
 ├── package.json
-├── .env.example                 ← only needed for the optional API-driven analyze.js
-├── .gitignore                   ← keeps output/ + .env out of git
-├── parsers.js                   ← pure JS: telegram + instagram parsing
-├── parse-archive.js             ← CLI: parse + dump archive-input.json (no LLM)
-├── pipelines.js                 ← optional API-driven analysis pipelines (not used in Claude Code path)
-├── analyze.js                   ← optional API-driven CLI (alternative to Claude Code)
-└── upload.js                    ← post the 5 JSONs to /brand/archive/upload
+├── .env.example               ← only needed for vision-fallback.js
+├── .gitignore
+├── parsers.js                 ← pure-JS Telegram + IG parsing
+├── parse-archive.js           ← CLI: parse + palette + flat image dump (no LLM, free)
+├── vision-fallback.js         ← OPTIONAL: ~$0.20 layout/logo/motif via gpt-4o-mini
+├── pipelines.js               ← (legacy) full API-driven pipelines, only if you don't have Max
+├── analyze.js                 ← (legacy) API-driven CLI, only if you don't have Max
+└── upload.js                  ← POST 5 JSONs to /brand/archive/upload
 ```
 
-You only need: `parsers.js` + `parse-archive.js` + `INSTRUCTIONS.md` + `upload.js` for the Claude Code workflow. The `analyze.js` + `pipelines.js` are kept in the repo as an alternative for users who don't have a Max plan — they cost ~$5 in API tokens.
+For the Cowork workflow you only use: `parsers.js` + `parse-archive.js` + `INSTRUCTIONS.md` + (optional) `vision-fallback.js` + `upload.js`. The `analyze.js` + `pipelines.js` are kept for users without a Max plan.
+
+## Resume / iterate
+
+- All output files are JSON — you can hand-edit any of them before uploading.
+- `parse-archive.js` is deterministic — re-run any time.
+- `vision-fallback.js` caches per-image results in `output/.cache-vision/` — interrupting + re-running is free.
+- After upload, you can re-run with new posts later — the upload endpoint is idempotent on exemplar IDs.
+
+## Privacy
+
+Nothing leaves your computer except:
+- Cowork uses your Claude.ai subscription (Anthropic's servers, but no API key in your code)
+- (Optional) `vision-fallback.js` calls OpenAI for image analysis
+- The final upload to your own control plane (one HTTP call when you're ready)
+
+`output/` is gitignored. Don't commit it.

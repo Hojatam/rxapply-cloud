@@ -144,8 +144,21 @@ async function main() {
   }
   console.log(`[ok] copied ${copied} images to ${imagesOutDir}`);
 
+  // ── Local palette extraction (free, no LLM) ─────────────────────
+  console.log(`\n[3/4] Extracting color palette from copied images (local, no LLM)...`);
+  const palette = await _extractPalette(imageManifest.map(m => path.join(imagesOutDir, m.file)).slice(0, 100));
+  const paletteOutPath = path.join(outDir, 'palette.json');
+  fs.writeFileSync(paletteOutPath, JSON.stringify({
+    generated_at: new Date().toISOString(),
+    method: 'node-vibrant local extraction',
+    n_images: palette.n_images,
+    palette: palette.top,
+    note: 'This is the dominant color palette extracted locally from the top-N images. Cowork (text-only) reads this directly when building visual_style_profile.json.',
+  }, null, 2));
+  console.log(`[ok] wrote ${paletteOutPath} (${palette.top.length} colors)`);
+
   // ── Write archive-input.json ────────────────────────────────────
-  console.log(`\n[3/3] Writing archive-input.json ...`);
+  console.log(`\n[4/4] Writing archive-input.json ...`);
   const archiveInput = {
     generated_at: new Date().toISOString(),
     counts: {
@@ -178,12 +191,55 @@ async function main() {
   fs.writeFileSync(csvPath, _toCsv(allPosts));
 
   console.log(`\n══════════════════════════════════════════════════════════════════`);
-  console.log(`✓ Archive parsed. Now open Claude Code in this folder and run:`);
+  console.log(`✓ Archive parsed. Now open Claude Cowork (Claude Desktop) and:`);
   console.log(`══════════════════════════════════════════════════════════════════`);
-  console.log(`  "Run the brand analysis using INSTRUCTIONS.md"`);
+  console.log(`  1. Open Claude Desktop, switch to the Cowork tab`);
+  console.log(`  2. Grant access to this folder: ${path.resolve(outDir, '..')}`);
+  console.log(`  3. Tell Cowork: "Run the brand analysis using INSTRUCTIONS.md"`);
   console.log(``);
-  console.log(`Claude Code will read archive-input.json + the images, then write the 5 output JSONs.`);
-  console.log(`Cost: zero API tokens — uses your Claude Max plan via Claude Code.`);
+  console.log(`Cowork will read archive-input.json + posts.csv + palette.json (text only)`);
+  console.log(`and write the 4 output JSONs. Cost: zero API tokens — uses your Max plan.`);
+  console.log(``);
+  console.log(`Optional (for layout/logo/motif analysis, ~$0.20):`);
+  console.log(`  node vision-fallback.js`);
+}
+
+// ── Palette extraction via node-vibrant ─────────────────────────────
+async function _extractPalette(imagePaths) {
+  let Vibrant;
+  try {
+    Vibrant = require('node-vibrant');
+  } catch (_) {
+    console.log('[warn] node-vibrant not installed — skipping palette extraction. Run npm install.');
+    return { n_images: 0, top: [] };
+  }
+  const bucket = {};
+  let processed = 0;
+  for (const ip of imagePaths) {
+    if (!fs.existsSync(ip)) continue;
+    try {
+      const palette = await Vibrant.from(ip).getPalette();
+      for (const swatch of Object.values(palette)) {
+        if (!swatch) continue;
+        const hex = swatch.getHex().toLowerCase();
+        // Quantize to 4-bit per channel so similar colors merge.
+        const r = Math.round(parseInt(hex.slice(1, 3), 16) / 16) * 16;
+        const g = Math.round(parseInt(hex.slice(3, 5), 16) / 16) * 16;
+        const b = Math.round(parseInt(hex.slice(5, 7), 16) / 16) * 16;
+        const key = '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
+        const weight = swatch.getPopulation();
+        bucket[key] = (bucket[key] || 0) + weight;
+      }
+      processed++;
+    } catch (e) {
+      // skip unreadable
+    }
+  }
+  const top = Object.entries(bucket)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 12)
+    .map(([color, weight]) => ({ color, weight }));
+  return { n_images: processed, top };
 }
 
 function _rankByEngagement(posts) {

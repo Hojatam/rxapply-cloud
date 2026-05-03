@@ -1,54 +1,57 @@
-# Brand Voice Archive — Claude Code instructions
+# Brand Voice Archive — Claude Cowork instructions
 
-This is a self-contained set of instructions Claude Code follows to run a one-shot brand-voice analysis on a parsed archive. Read this whole file first, then execute the steps in order.
+This file is read by **Claude Cowork** (the agentic surface inside Claude Desktop). When the human says "Run the brand analysis using INSTRUCTIONS.md", follow these stages in order. Use your Max-plan quota; do not call external APIs.
 
-**Goal**: produce 5 output files that capture the brand's voice and visual identity, so the production agents can be seeded with them.
+**Goal**: produce 4 output files that capture the brand's voice + visual identity, so the production agents can be seeded with them.
 
 ---
 
 ## Pre-flight check
 
-Before running anything, confirm these files exist (the human ran `node parse-archive.js` first):
+The human ran `node parse-archive.js` first. Confirm these files exist in `./output/`:
 
-- `output/archive-input.json` — every post normalised
-- `output/archive-input-images/` — top-N images copied flat
-- `output/posts.csv` — flat dump for spot-checking
+| File | What it has |
+|---|---|
+| `archive-input.json` | Every post normalised: id, platform, language, post_date, caption, hashtags, engagement, image_files |
+| `posts.csv` | Flat dump for spot-checking |
+| `palette.json` | Local palette extraction (no LLM, free) — top-12 quantized colors with weights |
+| `archive-input-images/` | The top-N images copied flat (last-30 + engagement-prioritised) |
+| `visual_style_samples.json` | **Optional**: per-image layout/logo/motif analysis from `vision-fallback.js`. May be missing — that's OK. |
 
-If they're missing, tell the user to run:
-```
-node parse-archive.js --telegram <path> [--instagram <path>] [--instagram-csv <path>]
-```
+If any required file is missing, tell the human to run `node parse-archive.js` first and stop.
+
+**Important about Cowork**: you can read text/JSON/CSV files but you cannot directly view images. All image-derived signals must come from `palette.json` (local extraction) and optionally `visual_style_samples.json` (if the human ran the optional vision-fallback script). Do NOT try to look at the .jpg/.png files directly.
 
 ---
 
 ## Outputs to produce
 
-By the end you must have written, into `output/`:
+By the end you must have written, into `./output/`:
 
 1. **`brand_voice_profile.json`** — structural patterns per platform per language
 2. **`exemplars.json`** — the canonical exemplar set (last-30 + engagement-top per group)
-3. **`voice_fingerprint.json`** — the 30-60 paragraphs most representative of the voice (the cluster centroid, picked qualitatively since we're not embedding)
-4. **`visual_style_profile.json`** — palette + layout taxonomy + logo patterns + motifs
-5. **`style_references/`** — folder with the top-50 reference images copied + renamed
+3. **`voice_fingerprint.json`** — the 30-50 paragraphs you judge most-canonical
+4. **`visual_style_profile.json`** — built from palette.json + (if available) visual_style_samples.json
+5. **`SUMMARY.md`** — one-page plain-English summary for the human to read before uploading
 
-Plus a one-page **`SUMMARY.md`** at the end summarising what you found, in plain English, for the human to review before uploading to the control plane.
+You'll also see `style_references/` — that's already populated by `parse-archive.js`. Don't touch it.
 
 ---
 
 ## Stage 1 — Read and understand the archive
 
-Read `output/archive-input.json`. Note:
-- The `counts` block tells you how many posts per (platform, language)
-- `posts[]` has captions + hashtags + engagement + which images belong to each post
-- `images_manifest[]` maps copied filenames back to post metadata
+Read `output/archive-input.json` and `output/posts.csv`. Verify:
+- Total post count matches between the two
+- Languages and platforms look right (e.g. you'd expect `telegram:fa`, `telegram:en`, maybe `instagram:fa`)
+- Date range is reasonable (no obvious missing months)
 
-Read `output/posts.csv` for a sanity check — does the data look right? If something obvious is wrong (e.g. all captions are empty), stop and tell the user.
+If something looks wrong, stop and tell the human.
 
 ---
 
 ## Stage 2 — Text pattern analysis (per platform per language)
 
-For each (platform, language) group with at least 5 posts, group all the captions together and extract structured voice patterns. Output goes into `output/brand_voice_profile.json` under `patterns[<platform>:<language>]`.
+For each (platform, language) group with at least 5 posts, group all the captions together and extract structured voice patterns. Write the result into `output/brand_voice_profile.json` under `patterns[<platform>:<language>]`.
 
 For each group, produce this JSON shape:
 
@@ -109,38 +112,51 @@ For each group, produce this JSON shape:
 }
 ```
 
-**Important:**
+**Important**:
 - Be PRECISE — don't invent patterns. Only list what you can verify in the captions.
 - For each `frequency`, count actual occurrences across the captions, not your impression.
-- If a section is genuinely sparse (e.g. only 3 CTAs found), still report what's there but say `"n_samples": 3` so the human knows.
-- Pay special attention to the **openers + closers + CTA forms** — that's what the user explicitly cares about most.
+- If a section is sparse (e.g. only 3 CTAs found), still report what's there; just say `"n_samples": 3`.
+- The user explicitly cares about **openers + body shapes + closers + CTAs + length per platform**. Pay extra attention to those.
+- If a group has fewer than 5 posts, set `"insufficient_data": true` and skip detailed extraction.
 
-If a group has fewer than 5 posts, set `"insufficient_data": true` and skip detailed extraction for that group.
+When done, write `output/brand_voice_profile.json`:
+```json
+{
+  "generated_at": "<ISO>",
+  "n_posts": <total>,
+  "patterns": {
+    "telegram:fa": { ... },
+    "telegram:en": { ... },
+    "instagram:fa": { ... }
+  }
+}
+```
 
 ---
 
 ## Stage 3 — Pick exemplars
 
 For each (platform, language) group, pick:
-- The **last 30 posts by `post_date`** — these match the user's "current desired tone"
-- The **top 30 by engagement** (excluding any already in the last-30) — these match "what works"
+- The **last 30 posts by `post_date`** — these match "current desired tone"
+- The **top 30 by engagement** (excluding any already in the last-30) — what works
 
 Tag each:
-- `importance: 5, source: "last-30"` for recency-picked
-- `importance: 4, source: "engagement-top"` for performance-picked
+- `importance: 5, source: "last-30"`
+- `importance: 4, source: "engagement-top"`
 
-Write to `output/exemplars.json`:
+If `engagement` is null for everything in a group (no metrics), substitute the second batch with `posts 31-60 by date` and tag as `source: "recency-second-pass"`.
 
+Write `output/exemplars.json`:
 ```json
 {
-  "generated_at": "<ISO timestamp>",
+  "generated_at": "<ISO>",
   "exemplars": [
     {
       "id": "tg-1234",
       "platform": "telegram",
       "language": "fa",
       "caption": "<full caption>",
-      "hashtags": ["#tag1", "#tag2"],
+      "hashtags": ["#tag1"],
       "post_date": "2026-04-15T10:30:00Z",
       "engagement": { "views": 4200 },
       "importance": 5,
@@ -150,24 +166,21 @@ Write to `output/exemplars.json`:
 }
 ```
 
-If `engagement` is null for everything (no metrics), just use last-30 + recency-2nd-pass (posts 31-60 by date) and tag the second batch as `source: "recency-second-pass"`.
-
 ---
 
 ## Stage 4 — Voice fingerprint (qualitative cluster)
 
-Without embeddings, we pick the cluster qualitatively. Read the last-30 from each (platform, language) group and pick the **30-50 paragraphs that most represent the brand's typical voice**. Look for:
+Without embeddings, you pick the cluster qualitatively. Read the last-30 from each (platform, language) group and pick the **30-50 paragraphs that most represent the brand's typical voice**. Look for:
 
 - Recurring tone (which paragraphs sound MOST like the brand?)
 - Diversity across topics (don't pick 30 IELTS posts; cover the topic spread)
-- Both languages represented proportionally
+- Both languages represented proportionally to their volume
 - Skip outliers (one-off announcements, repost shoutouts, very short posts)
 
-Write to `output/voice_fingerprint.json`:
-
+Write `output/voice_fingerprint.json`:
 ```json
 {
-  "generated_at": "<ISO timestamp>",
+  "generated_at": "<ISO>",
   "method": "qualitative-cluster",
   "n_total_considered": 240,
   "n_picked": 42,
@@ -184,58 +197,53 @@ Write to `output/voice_fingerprint.json`:
 }
 ```
 
-Each cluster item gets a `why_picked` field — one short sentence about what makes it canonical. This becomes the seed for the future voice-critic agent.
+Each cluster item gets a `why_picked` field — one short sentence explaining why it's canonical. This becomes the seed for the future voice-critic agent in the production app.
 
 ---
 
-## Stage 5 — Vision analysis (look at every image in the manifest)
+## Stage 5 — Visual style profile
 
-For every image in `output/archive-input-images/`, look at it directly (Claude Code can read images). For each image, produce:
+Two paths depending on whether the human ran `vision-fallback.js`:
 
-```json
-{
-  "file": "001-tg-1234.jpg",
-  "post_id": "tg-1234",
-  "platform": "telegram",
-  "language": "fa",
-  "style": "illustration | photoreal | minimal-vector | mixed-media | data-viz | quote-card | poster | meme",
-  "layout": "hero | carousel-slide | grid | split | list | stack | quote | infographic",
-  "subject": "<short — people | places | object | abstract | data | scene>",
-  "dominant_colors": ["#1a4d4d", "#f4a261"],
-  "accent_colors": ["#e76f51"],
-  "typography": {
-    "present": true,
-    "weight": "heavy | medium | light | mixed",
-    "size_relative_to_canvas": "tiny | small | medium | large | hero",
-    "position": "top | center | bottom | left | right | overlaid | split"
-  },
-  "logo": {
-    "present": true,
-    "position": "TL | TR | BL | BR | center | none",
-    "size_pct": 8,
-    "opacity": "solid | semi | watermark | none"
-  },
-  "brand_pattern_motifs": ["thin teal frame around content", "lower-third caption strip"],
-  "mood": "calm + authoritative"
-}
-```
+### Path A — palette only (if `visual_style_samples.json` is missing)
 
-Be **specific** about colors — extract them from what you actually see, not generic guesses.
-
-For **logo position** especially: if you see the same wordmark/icon recurring at the same spot (e.g. always TR with low opacity), say so — that's a brand rule we want to capture.
-
-For **brand_pattern_motifs**: look for recurring graphic elements (frames, lines, divider styles, icon styles, gradient directions). These are what make the brand recognizable.
-
-After processing all images, aggregate into `output/visual_style_profile.json`:
+Read `output/palette.json`. Build a minimal `visual_style_profile.json`:
 
 ```json
 {
   "generated_at": "<ISO>",
-  "n_images": 200,
+  "method": "palette-only (no per-image vision analysis)",
+  "n_images_in_palette": <from palette.json n_images>,
   "aggregate": {
     "palette": [
-      { "color": "#1a4d4d", "weight": 380, "role": "primary brand teal" },
-      { "color": "#f4a261", "weight": 145, "role": "warm accent" }
+      { "color": "#1a4d4d", "weight": 12345, "role": "primary brand color (most-frequent across N images)" },
+      { "color": "#f4a261", "weight":  4321, "role": "warm accent" }
+    ],
+    "style_distribution": null,
+    "layout_distribution": null,
+    "logo_position_distribution": null,
+    "motif_frequency": null,
+    "brand_rules_inferred": [
+      "Primary palette anchored on #1a4d4d (teal). Secondary accent #f4a261.",
+      "Per-image visual analysis not run; only palette extracted locally."
+    ]
+  }
+}
+```
+
+### Path B — full analysis (if `visual_style_samples.json` exists)
+
+Read both `output/palette.json` AND `output/visual_style_samples.json`. The samples file has per-image data: style, layout, subject, dominant_colors, accent_colors, typography, logo, brand_pattern_motifs, mood.
+
+Aggregate into:
+```json
+{
+  "generated_at": "<ISO>",
+  "method": "palette + per-image vision (gpt-4o-mini)",
+  "n_images": <from samples>,
+  "aggregate": {
+    "palette": [
+      { "color": "#1a4d4d", "weight": 380, "role": "primary brand teal" }
     ],
     "style_distribution": { "illustration": 110, "photoreal": 50, "quote-card": 40 },
     "layout_distribution": { "carousel-slide": 80, "hero": 60, "quote": 40, "infographic": 20 },
@@ -249,49 +257,77 @@ After processing all images, aggregate into `output/visual_style_profile.json`:
     },
     "brand_rules_inferred": [
       "Logo placed top-right at ~8% size, semi-opacity, in 85% of designs",
-      "Primary teal #1a4d4d appears in 85% of posts; secondary accent #f4a261 in ~30%",
+      "Primary teal #1a4d4d appears in 85% of posts; warm accent #f4a261 in ~30%",
       "Carousel slides use a thin teal frame with 24px padding",
       "Quote cards always have hero-size typography centered"
     ]
   },
-  "samples": [ /* the per-image JSONs from above */ ]
+  "samples": [ /* keep the per-image array as-is */ ]
 }
 ```
 
-The `brand_rules_inferred` array is the most important section — it's what Afshin (the design agent) will read on every image generation.
+The `brand_rules_inferred` array is the most important section — Afshin (the design agent) will read it on every image generation. Be specific: "Logo at TR in 85%" beats "Logo usually appears."
+
+Write `output/visual_style_profile.json`.
 
 ---
 
-## Stage 6 — Style references
+## Stage 6 — Summary for the human
 
-Pick the **top 50 images** to keep as the style reference library. Criteria, in order:
+Write `output/SUMMARY.md` — a one-page plain-English summary for the human to read in 2 minutes:
 
-1. Posts in the last-30 group (most recent + on-current-tone)
-2. Posts with high engagement
-3. Diversity of layouts (not all carousel-slides; include hero shots, quote cards, infographics)
-4. Each image must be brand-consistent (skip outliers, reposts of others' content)
+```markdown
+# Brand Voice Archive · Summary
 
-Copy them to `output/style_references/` with names like `01-telegram-tg-1234.jpg`, `02-telegram-tg-9876.jpg`, etc. (preserving order of importance — `01` is the most canonical).
+**Analyzed**: 487 posts across telegram (FA/EN) and instagram (FA)
+**Date range**: 2024-08 to 2026-04
+**Top exemplars picked**: 124 (60 last-30, 64 engagement-top)
+**Voice fingerprint cluster**: 42 paragraphs
+
+## Top 5 voice rules
+
+1. **Telegram-FA captions** average 142 words (range 98-240). Always end with a soft question CTA.
+2. **Openers** are 60% questions ("آیا می‌دانستید…"), 25% direct address.
+3. **CTAs** rotate between soft-question (50%), imperative + emoji (30%), DM invitation (20%).
+4. **Hashtags**: 8-14 per post, 60% FA / 30% EN / 10% AR.
+5. **Em-dashes** are a strong voice signature — appear in 70% of captions.
+
+## Top 5 visual rules
+
+1. Primary teal #1a4d4d in 85% of posts.
+2. Logo at top-right, ~8% size, semi-opacity, in 85% of designs.
+3. Carousel slides use a thin teal frame with 24px padding.
+4. Quote cards: hero-size typography, centered.
+5. 78% of designs have on-image typography.
+
+## Surprises
+
+- Hashtag #AGAM appears in 40% of FA posts — strong brand-anchor term.
+- "based on years of helping dentists" recurs 12 times — could be an unintentional crutch.
+- Engagement is highest on infographic-layout posts (avg 2.3× the views of quote cards).
+
+## Gaps
+
+- Only 4 instagram-EN posts — too sparse to extract reliable patterns.
+- No engagement metrics on instagram posts.
 
 ---
 
-## Stage 7 — Summary for the human
+Review the JSON files. If the patterns match your sense of the brand, run:
 
-Write `output/SUMMARY.md` — a one-page plain-English summary the human can read in 2 minutes. Include:
+    node upload.js --to https://rxapply.com --token <YOUR_TOKEN>
+```
 
-- **Counts**: how many posts per platform per language; date range
-- **Top 5 voice rules** (e.g. "Captions on Telegram-FA are 120-180 words, always end with a soft question CTA, and use 8-12 hashtags split FA/EN.")
-- **Top 5 visual rules** (e.g. "Brand teal #1a4d4d primary, sand #f4a261 accent. Logo top-right at 8% size in 85% of posts. Carousel slides have thin teal frame with 24px padding.")
-- **Anything surprising** — patterns you found that the user might not have noticed
-- **Anything missing** — gaps you'd want more data on (e.g. "Only 3 X/Twitter posts found — won't be able to extract reliable patterns for that platform.")
-
-End the summary with: "Review the JSON files. If the patterns match your sense of the brand, run `node upload.js` to seed the agents."
+Make this CONCRETE. Use real numbers from the data. The user is going to skim this in 30 seconds and decide whether to upload or to ask you to redo a stage. Make it scannable.
 
 ---
 
 ## Working tips
 
-- **Process in chunks.** If there are 500 posts, don't try to read them all in one read. Use Grep / Read with offsets to sample.
-- **Cache your work.** Write each output file as soon as it's complete, so you can resume if something goes wrong.
-- **Be honest about uncertainty.** If the data is sparse, say so. Don't pad with invented patterns.
-- **Keep extractions concrete.** "Uses authoritative voice" is too vague. "Refers to regulators by full name in 92% of FA posts; uses 'NDEB' / 'ORE' / 'AGAM' as primary anchor terms" is useful.
+- **Process in chunks.** If there are 500 posts, don't try to read them all in one Read call. Use offsets.
+- **Save progress as you go.** Write each output file as soon as the relevant stage completes.
+- **Be honest about uncertainty.** If the data is sparse, say so. Don't pad.
+- **Keep extractions concrete.** "Uses authoritative voice" is too vague. "Refers to regulators by full name (NDEB, ORE, GDC, AGAM) in 92% of FA captions" is useful.
+- **Don't try to look at images.** You can't. Use `palette.json` for color and `visual_style_samples.json` for layout/logo/motif (only if it's there).
+
+When all 5 output files + `SUMMARY.md` are written, tell the human you're done and what to read first (`SUMMARY.md`).
