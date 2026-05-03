@@ -46,7 +46,57 @@ const { encryptSqlExpr, decryptSqlExpr } = require('./tools/crypto');
 const SCRYPT_KEYLEN = 64;
 const SCRYPT_SALT_BYTES = 16;
 const TOKEN_BYTES = 32;
-const sessions = new Map();   // token -> { expiresAt, createdAt, csrfToken }
+// M57 · Sessions persisted in Postgres (auth_sessions table) so they
+// survive Railway redeploys. We keep a tiny in-memory cache (60s TTL)
+// for hot reads — every request hits the auth middleware, so an
+// uncached DB roundtrip per request would be wasteful.
+const _sessionCache = new Map();   // token → { value: { expiresAt, csrfToken } | null, until: ms }
+const SESSION_CACHE_TTL_MS = 60_000;
+function _cacheGet(token) {
+  const entry = _sessionCache.get(token);
+  if (!entry) return undefined;
+  if (Date.now() > entry.until) { _sessionCache.delete(token); return undefined; }
+  return entry.value;
+}
+function _cacheSet(token, value) {
+  _sessionCache.set(token, { value, until: Date.now() + SESSION_CACHE_TTL_MS });
+}
+function _cacheDelete(token) { _sessionCache.delete(token); }
+async function _loadSession(token) {
+  if (!token) return null;
+  const cached = _cacheGet(token);
+  if (cached !== undefined) return cached;
+  try {
+    const row = await queryValue(`
+      SELECT row_to_json(s) FROM (
+        SELECT token, csrf_token, expires_at FROM auth_sessions WHERE token = ${q(token)} LIMIT 1
+      ) s;`);
+    if (!row) { _cacheSet(token, null); return null; }
+    const parsed = JSON.parse(row);
+    const value = {
+      expiresAt: new Date(parsed.expires_at).getTime(),
+      csrfToken: parsed.csrf_token,
+    };
+    _cacheSet(token, value);
+    return value;
+  } catch (_) { return null; }
+}
+async function _persistSession(token, csrfToken, expiresAtMs, meta = {}) {
+  await query(`
+    INSERT INTO auth_sessions (token, csrf_token, expires_at, user_agent, ip)
+    VALUES (${q(token)}, ${q(csrfToken)}, to_timestamp(${expiresAtMs} / 1000.0),
+            ${q(meta.user_agent || null)}, ${q(meta.ip || null)})
+    ON CONFLICT (token) DO UPDATE SET
+      csrf_token = EXCLUDED.csrf_token,
+      expires_at = EXCLUDED.expires_at,
+      last_used_at = NOW();`);
+  _cacheSet(token, { expiresAt: expiresAtMs, csrfToken });
+}
+async function _deleteSession(token) {
+  try { await query(`DELETE FROM auth_sessions WHERE token = ${q(token)};`); }
+  catch (_) {}
+  _cacheDelete(token);
+}
 
 // otplib config — 30s window, 6 digits.
 authenticator.options = { window: 1, digits: 6, step: 30 };
@@ -163,7 +213,7 @@ async function login(plaintext, totpCode = null) {
   const token     = crypto.randomBytes(TOKEN_BYTES).toString('base64url');
   const csrfToken = crypto.randomBytes(24).toString('base64url');
   const expiresAt = Date.now() + hours * 3600_000;
-  sessions.set(token, { expiresAt, createdAt: Date.now(), csrfToken });
+  await _persistSession(token, csrfToken, expiresAt);
   return { ok: true, token, expiresAt, csrfToken };
 }
 
@@ -195,23 +245,23 @@ async function _verifyTotp(code) {
   } catch (_) { return false; }
 }
 
-function logout(token) { if (token) sessions.delete(token); }
+async function logout(token) { if (token) await _deleteSession(token); }
 
-function verifyToken(token) {
+// async because it may hit Postgres on cache miss. Callers updated.
+async function verifyToken(token) {
   if (!token) return { ok: false };
-  const s = sessions.get(token);
+  const s = await _loadSession(token);
   if (!s) return { ok: false };
-  if (s.expiresAt < Date.now()) { sessions.delete(token); return { ok: false }; }
+  if (s.expiresAt < Date.now()) { await _deleteSession(token); return { ok: false }; }
   return { ok: true, expiresAt: s.expiresAt };
 }
 
-function pruneExpired() {
-  const now = Date.now();
-  let removed = 0;
-  for (const [token, s] of sessions) {
-    if (s.expiresAt < now) { sessions.delete(token); removed++; }
-  }
-  return removed;
+// Periodic cleanup of expired sessions. Safe to call from a cron / on-boot.
+async function pruneExpired() {
+  try {
+    const v = await queryValue(`WITH d AS (DELETE FROM auth_sessions WHERE expires_at < NOW() RETURNING 1) SELECT COUNT(*)::int FROM d;`);
+    return parseInt(v, 10) || 0;
+  } catch (_) { return 0; }
 }
 
 function _readToken(req) {
@@ -224,7 +274,7 @@ function _readToken(req) {
   return null;
 }
 
-function middleware(req, res, next) {
+async function middleware(req, res, next) {
   if (process.env.AUTH_DISABLED === '1' || process.env.AUTH_DISABLED === 'true') {
     req.auth = { disabled: true };
     return next();
@@ -234,7 +284,7 @@ function middleware(req, res, next) {
     return next();
   }
   const token = _readToken(req);
-  const v = verifyToken(token);
+  const v = await verifyToken(token);
   if (!v.ok) {
     return res.status(401).json({ ok: false, error: 'auth required', initialized: true });
   }
@@ -247,9 +297,9 @@ function isDisabled() {
 }
 
 // ── CSRF ────────────────────────────────────────────────────────────
-function verifyCsrf(token, providedCsrf) {
+async function verifyCsrf(token, providedCsrf) {
   if (!token || !providedCsrf) return false;
-  const s = sessions.get(token);
+  const s = await _loadSession(token);
   if (!s || !s.csrfToken) return false;
   // Constant-time compare to defeat timing attacks.
   const a = Buffer.from(s.csrfToken);
@@ -270,14 +320,15 @@ function verifyCsrf(token, providedCsrf) {
 // we still enforce CSRF.
 const CSRF_EXEMPT_PREFIXES = ['/setup/', '/auth/'];
 
-function csrfMiddleware(req, res, next) {
+async function csrfMiddleware(req, res, next) {
   if (isDisabled() || !isInitialized()) return next();
   if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
   if (CSRF_EXEMPT_PREFIXES.some(p => req.path.startsWith(p))) return next();
   const token = _readToken(req);
   if (!token) return next();   // no auth cookie → other middleware will reject
   const provided = req.headers['x-csrf-token'] || (req.body && req.body._csrf);
-  if (!verifyCsrf(token, provided)) {
+  const ok = await verifyCsrf(token, provided);
+  if (!ok) {
     return res.status(403).json({ ok: false, error: 'csrf_token_required' });
   }
   next();

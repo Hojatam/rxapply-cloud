@@ -548,11 +548,11 @@ app.post('/auth/login', auth.loginRateLimiter, async (req, res) => {
   res.json({ ok: true, token: r.token, csrfToken: r.csrfToken, expiresAt: r.expiresAt });
 });
 
-app.post('/auth/logout', (req, res) => {
+app.post('/auth/logout', async (req, res) => {
   const cookieHeader = req.headers.cookie || '';
   const m = /(?:^|;\s*)rxapply_session=([^;]+)/.exec(cookieHeader);
   const token = (m && decodeURIComponent(m[1])) || (req.headers.authorization || '').replace(/^Bearer\s+/, '') || null;
-  auth.logout(token);
+  await auth.logout(token);
   res.setHeader('Set-Cookie', auth.buildSessionCookie('rxapply_session', '', { clear: true }));
   res.json({ ok: true });
 });
