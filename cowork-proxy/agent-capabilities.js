@@ -33,7 +33,7 @@ const CAPABILITY_REGISTRY = {
 
   // Critique / scoring
   kherad:    ['critique'],
-  bidar:     ['critique', 'audit', 'judge'],   // M43 · pairwise eval judge
+  bidar:     ['critique', 'audit', 'judge', 'voice-critic'],   // M43 · pairwise eval judge · M50 · voice fingerprint critic
 
   // Adversarial audit (escalation when critique flags red)
   davari:    ['audit'],

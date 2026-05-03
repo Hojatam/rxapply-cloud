@@ -117,7 +117,7 @@ function _parseJsonOrThrow(text, contextLabel) {
 //   • KB block (for research / draft / critique)
 //   • per-agent memory
 //   • the stage-specific instruction template
-async function _buildSystemPrompt({ agent, stageName, recipe, run, masterDraft, lang, protectedTermsBlock = null }) {
+async function _buildSystemPrompt({ agent, stageName, recipe, run, masterDraft, lang, protectedTermsBlock = null, fingerprintBlock = null }) {
   const blocks = [];
 
   // The agent's own SKILL is loaded from disk (agents/<agent>/SKILL.md).
@@ -156,6 +156,12 @@ async function _buildSystemPrompt({ agent, stageName, recipe, run, masterDraft, 
   // sees the protected list before it's checked against). Empty on first run; grows as KB grows.
   if (protectedTermsBlock && ['verify-translation', 'translate'].includes(stageName)) {
     blocks.push(protectedTermsBlock);
+  }
+
+  // M50 · Voice fingerprint cluster — injected ONLY for the voice-critic stage.
+  // Empty cluster → orchestrator skips this stage entirely (handled upstream).
+  if (fingerprintBlock && stageName === 'voice-critic') {
+    blocks.push(fingerprintBlock);
   }
 
   // Per-agent memory (top procedural + relevant semantic).
@@ -443,6 +449,64 @@ Return ONLY this JSON:
 
 Pass requires: zero high-severity issues AND no protected-term violations.
 A medium-severity meaning drift is OK to flag but does NOT fail the run.`,
+
+  'voice-critic':
+`You are Bidar, performing M50 voice-fingerprint check. The brand's
+canonical voice is captured in the FINGERPRINT block in your system
+prompt — those paragraphs are real published posts the founder marked
+as canonical. Score the CANDIDATE draft below for voice match against
+that cluster.
+
+You are NOT judging quality, accuracy, or topic. You are judging
+**voice match** — does this read like an RxApply post or could it
+be from any other Persian dental-education account?
+
+Look for:
+  • Opener pattern (bullet-emoji lead vs question vs plain — match the
+    cluster's distribution)
+  • Sentence rhythm + length (short statements vs long sweeping claims)
+  • Punctuation tics (em-dash, dot-on-its-own-line, ellipsis, line-break density)
+  • Voice-signature words (recurring phrases the brand uses)
+  • Tone register (restrained / authoritative / warm / clinical)
+  • What's MISSING — banned phrases, hype words, first-person, clickbait
+
+If the FINGERPRINT block is empty (no exemplars provided), return
+verdict="skipped" with reason="no fingerprint data yet".
+
+Return ONLY this JSON:
+
+{
+  "verdict": "pass" | "needs_voice_polish" | "block" | "skipped",
+  "voice_match_score": 0.00,
+  "n_fingerprint_compared": <int>,
+  "matches": [
+    "<aspect of the candidate that aligns with the cluster, one short bullet>",
+    "<...>"
+  ],
+  "drift_concerns": [
+    {
+      "aspect": "opener | rhythm | punctuation | signature_words | tone | banned_phrase | other",
+      "observed": "<what the candidate did>",
+      "expected": "<what the cluster does>",
+      "severity": "high | medium | low",
+      "fix": "<one short suggestion>"
+    }
+  ],
+  "canonical_examples_referenced": ["<short quote from a fingerprint exemplar that anchors your judgement>"],
+  "summary": "<one sentence>",
+  "skipped_reason": null,
+  "handoff_intent": null
+}
+
+Verdict thresholds:
+  • pass               — voice_match_score >= 0.80, no high-severity drift
+  • needs_voice_polish — score 0.60-0.79 OR exactly one high-severity drift
+  • block              — score < 0.60 OR ≥2 high-severity drifts (e.g. used
+                          a banned phrase + first-person, or hype + clickbait)
+  • skipped            — fingerprint empty
+
+Be DECISIVE about scoring. A vague "pretty close" verdict isn't useful — pick
+a number based on actual voice fidelity to the cluster.`,
 
   design:
 `You are Afshin, the visual director for the RxApply brand. Avang has
@@ -853,8 +917,51 @@ async function _executeLlmStage({ runId, run, recipe, stage, stageIndex, lang, p
     catch (_) { /* non-fatal — KB may not be reachable; verify still runs without the block */ }
   }
 
+  // M50 · Pre-fetch voice fingerprint for the voice-critic stage.
+  // If the founder hasn't uploaded fingerprint data yet (or the cluster
+  // for this language is empty), short-circuit the stage as 'skipped' so
+  // the run continues and we don't burn tokens on a no-op LLM call.
+  let fingerprintBlock = null;
+  if (stageName === 'voice-critic') {
+    try {
+      const cluster = await brandInt.getVoiceFingerprint({
+        cluster: 'broadcast',
+        language: lang || run.master_lang,
+        limit: 8,
+      });
+      if (!cluster || cluster.length < 3) {
+        // Not enough fingerprint data — skip this stage cleanly.
+        await _writeStage({
+          runId, stageIndex, stageName, capability, lang: lang || null,
+          agent, model: null,
+          input: { skipped_because: 'fingerprint_empty', cluster_size: cluster ? cluster.length : 0 },
+          output: { verdict: 'skipped', skipped_reason: 'fingerprint cluster has fewer than 3 paragraphs for this language; upload more brand-voice exemplars to enable.', voice_match_score: null, drift_concerns: [], summary: 'voice critic skipped' },
+          status: 'skipped',
+        });
+        return await getRun(runId);
+      }
+      const lines = [`# Voice fingerprint (canonical brand voice · ${cluster.length} exemplars)`];
+      for (const c of cluster) {
+        lines.push(`\n--- canonical exemplar (${c.language}) ---`);
+        lines.push(c.body);
+        if (c.why_picked) lines.push(`(why canonical: ${c.why_picked})`);
+      }
+      fingerprintBlock = lines.join('\n');
+    } catch (_) {
+      // DB hiccup — also skip rather than emit garbage
+      await _writeStage({
+        runId, stageIndex, stageName, capability, lang: lang || null,
+        agent, model: null,
+        input: { skipped_because: 'fingerprint_fetch_error' },
+        output: { verdict: 'skipped', skipped_reason: 'fingerprint fetch failed', voice_match_score: null, drift_concerns: [] },
+        status: 'skipped',
+      });
+      return await getRun(runId);
+    }
+  }
+
   const systemPrompt = await _buildSystemPrompt({
-    agent, stageName, recipe, run, masterDraft, lang, protectedTermsBlock,
+    agent, stageName, recipe, run, masterDraft, lang, protectedTermsBlock, fingerprintBlock,
   });
 
   // Open an agent_runs row so this stage execution shows up in the agent's
@@ -954,9 +1061,11 @@ async function _executeLlmStage({ runId, run, recipe, stage, stageIndex, lang, p
   // M45 · audit verdict=block ALWAYS forces a gate, regardless of gate_strategy.
   // Same for verify when passed=false. Red-team output is a hard stop unless
   // the founder explicitly approves to override.
+  // M50 · voice-critic verdict=block also forces a gate.
   let forceGate = false;
   if (stageName === 'audit' && parsed && parsed.verdict === 'block') forceGate = true;
   if (stageName === 'verify' && parsed && parsed.passed === false) forceGate = true;
+  if (stageName === 'voice-critic' && parsed && parsed.verdict === 'block') forceGate = true;
   const gateHere = forceGate || _shouldGate(stageName, recipe, run.gate_strategy);
   const finalStatus = gateHere ? 'gated' : 'done';
 

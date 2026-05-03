@@ -11,6 +11,7 @@
     { "name": "draft",    "capability": "draft",    "params": { "length_words": [1200, 2000] } },
     { "name": "critique", "capability": "critique" },
     { "name": "verify",   "capability": "verify" },
+    { "name": "voice-critic", "capability": "voice-critic" },
     { "name": "audit",    "capability": "audit",    "if_complexity_at_least": "deep" },
     { "name": "adapt",    "capability": "adapt",
       "params": { "produce": ["title", "slug", "meta_description", "outline", "body_md", "design_brief"] } },
@@ -19,7 +20,7 @@
     { "name": "image",    "renderer": "image-cover", "if_option": "with_image" }
   ],
 
-  "gateable_stages": ["critique", "verify", "audit", "adapt", "design"],
+  "gateable_stages": ["critique", "verify", "voice-critic", "audit", "adapt", "design"],
 
   "translate": {
     "capability": "translate",

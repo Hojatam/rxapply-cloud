@@ -120,6 +120,20 @@ const SCHEMAS = {
     },
   },
 
+  // M50 · Voice fingerprint critic
+  'voice-critic': {
+    type: 'object',
+    properties: {
+      verdict: { type: 'string', required: true,
+                  enum: ['pass', 'needs_voice_polish', 'block', 'skipped'] },
+      voice_match_score: { type: ['number', 'null'] },
+      n_fingerprint_compared: { type: 'number' },
+      matches:        { type: 'array',  items: { type: 'string' } },
+      drift_concerns: { type: 'array',  items: { type: 'object' } },
+      summary:        { type: 'string' },
+    },
+  },
+
   // Eval harness · pairwise judge
   judge: {
     type: 'object',
