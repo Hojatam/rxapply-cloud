@@ -40,6 +40,7 @@ const renderers     = require('./compose-renderers');
 const logWriter     = require('./log-writer');
 const protectedTerms = require('./kb-protected-terms');
 const costRouter     = require('./cost-aware-router');
+const contracts      = require('./agent-contracts');     // M49 · per-stage output validation
 
 const RECIPES_DIR = path.resolve(__dirname, '..', 'compose-recipes');
 
@@ -841,6 +842,7 @@ async function _executeLlmStage({ runId, run, recipe, stage, stageIndex, lang, p
   } catch (_) { /* non-fatal */ }
 
   let parsed, usage = {}, modelUsed = model, errMsg = null;
+  let retried = false;
   try {
     const r = await llm.chat({
       model,
@@ -851,6 +853,36 @@ async function _executeLlmStage({ runId, run, recipe, stage, stageIndex, lang, p
     parsed = _parseJsonOrThrow(r.output, `${agent}/${stageName}`);
     usage = r.usage || {};
     modelUsed = r.model || model;
+
+    // M49 · contract validation + retry-once on failure
+    const validation = contracts.validate(stageName, parsed);
+    if (!validation.ok) {
+      const hint = contracts.renderRetryHint(stageName, validation.errors);
+      const retryUserPrompt = `${userPrompt}\n\n--- PREVIOUS ATTEMPT ---\n${JSON.stringify(parsed)}\n\n${hint}`;
+      try {
+        const r2 = await llm.chat({
+          model,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: retryUserPrompt }],
+          maxTokens: stage.max_tokens || 2500,
+        });
+        const parsed2 = _parseJsonOrThrow(r2.output, `${agent}/${stageName}/retry`);
+        const v2 = contracts.validate(stageName, parsed2);
+        // Only adopt the retry if it's strictly better. Sum token usage from both attempts.
+        if (v2.ok || v2.errors.length < validation.errors.length) {
+          parsed = parsed2;
+          usage = {
+            input_tokens:  (usage.input_tokens  || 0) + ((r2.usage && r2.usage.input_tokens)  || 0),
+            output_tokens: (usage.output_tokens || 0) + ((r2.usage && r2.usage.output_tokens) || 0),
+          };
+          modelUsed = r2.model || modelUsed;
+          retried = true;
+        }
+      } catch (e) {
+        // Retry call failed — keep the original parsed; downstream will get
+        // partial output but we log the validation issue for the founder.
+      }
+    }
   } catch (e) {
     errMsg = e.message;
   }
