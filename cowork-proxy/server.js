@@ -1699,6 +1699,15 @@ app.post('/compose/runs/:id/cancel', auth.middleware, async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// M44 · Fork from stage. Body: { stageIndex, options?, agentOverrides?, topic?, audience?, gateStrategy? }
+app.post('/compose/runs/:id/fork-from', auth.middleware, async (req, res) => {
+  try {
+    const r = await composeOrchestrator.forkFromStage(req.params.id, req.body || {});
+    log(`compose.fork-from src=${req.params.id} stageIndex=${(req.body || {}).stageIndex} new=${r.id}`);
+    res.json(r);
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 // M30 · Publish a finished render to the n8n publish webhook.
 //   Body: { lang }
 //   Env:  N8N_PUBLISH_WEBHOOK  — full URL to n8n's webhook node

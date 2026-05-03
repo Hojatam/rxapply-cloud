@@ -6650,6 +6650,14 @@ function coRenderRun(run) {
               <button class="btn btn-ghost btn-xs" onclick="coCancel('${run.id}')">Cancel run</button>
             </div>
           ` : ''}
+          ${(isDone && s.lang == null && typeof s.stage_index === 'number') ? `
+            <div class="mt-2 text-xs">
+              <a href="#" onclick="coForkFrom('${run.id}', ${s.stage_index + 1});return false;"
+                 class="text-indigo-600 underline" title="Reuse this stage's output and continue from after it. Tweak agent overrides or options on the new run.">
+                ↳ fork from after this stage
+              </a>
+            </div>
+          ` : ''}
         </div>
         <div class="co-stage-status">
           ${cost ? `<span class="co-stage-cost">${cost}</span>` : ''}
@@ -7086,6 +7094,30 @@ async function coExportN8n(lang) {
     const j = await r.json();
     if (!j.ok) return alert('Publish failed: ' + (j.error || '?') + (j.hint ? '\n\n' + j.hint : ''));
     alert(`Published. n8n responded ${j.status}.`);
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+// M44 · Fork an existing run from after a given stage index. The new run
+// inherits every stage [0..stageIndex-1] from the source as already-done,
+// then continues from there. Founder is prompted for any overrides.
+async function coForkFrom(sourceRunId, stageIndex) {
+  if (!confirm(`Fork from stage ${stageIndex}?\n\nThe new run will reuse every stage before this one (no extra cost) and re-run from this point onwards. You can change options/topic/agents on the next prompt.`)) return;
+  // Optional override for topic — quick one-line tweak path.
+  const newTopic = prompt('Tweak the topic for the fork (leave blank to keep the same):') || null;
+  try {
+    const body = { stageIndex };
+    if (newTopic && newTopic.trim()) body.topic = newTopic.trim();
+    const r = await authFetch(`${PROXY}/compose/runs/${sourceRunId}/fork-from`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (r.status === 401) return alert('Sign in required.');
+    const j = await r.json();
+    if (!j.ok) return alert('Fork failed: ' + (j.error || '?'));
+    // Open the new run + immediately kick off run-to-block
+    coOpenRun(j.id);
+    authFetch(`${PROXY}/compose/runs/${j.id}/run`, { method: 'POST' }).catch(() => {});
   } catch (e) { alert('Error: ' + e.message); }
 }
 

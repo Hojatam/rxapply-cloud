@@ -1029,6 +1029,97 @@ async function approve(runId, note = null, decidedBy = 'founder') {
   return await getRun(runId);
 }
 
+// M44 · Checkpointed pipeline state — fork a run from stage N.
+//
+// Creates a NEW compose_runs row with the same recipe + inputs (with optional
+// overrides), then COPIES master-phase stages [0 .. stageIndex-1] from the
+// source run as already-'done' rows in the new run. The new run is left in
+// 'queued' status; the caller triggers tick/runToBlock to continue.
+//
+// Use cases:
+//   • Founder didn't like the adapt output → fork from stage `adapt-1` (so
+//     plan/research/draft/critique/verify carry over) → re-run with a different
+//     adapt agent or topic tweak. No re-spending on the upstream stages.
+//   • A/B-ing the design stage with different brand briefs.
+//   • Iterating on a specific stage's prompt without paying for the whole pipeline.
+//
+// Only master-phase stages are forked. If you want to re-translate, fork from
+// the master 'render' index — translate fan-out re-runs in the new run because
+// no per-target-lang stages get cloned.
+async function forkFromStage(sourceRunId, { stageIndex, options: overrideOptions = null,
+                                            agentOverrides: overrideAgents = null,
+                                            topic: overrideTopic = null,
+                                            audience: overrideAudience = null,
+                                            gateStrategy: overrideGate = null } = {}) {
+  if (typeof stageIndex !== 'number' || stageIndex < 0) {
+    throw new Error('stageIndex must be a non-negative integer (0 = re-run from scratch)');
+  }
+  const source = await getRun(sourceRunId);
+  if (!source) throw new Error('source run not found');
+  const recipe = getRecipe(source.recipe_id);
+  const masterStages = recipe.stages || [];
+  if (stageIndex > masterStages.length) {
+    throw new Error(`stageIndex ${stageIndex} exceeds recipe master stages (${masterStages.length})`);
+  }
+
+  // 1. Create a new run with merged inputs
+  const newId = await queryReturning(`
+    INSERT INTO compose_runs
+      (recipe_id, recipe_version, topic, audience, master_lang, target_langs,
+        options, gate_strategy, agent_overrides, status, started_at)
+    VALUES (
+      ${q(source.recipe_id)}, ${q(String(source.recipe_version || '1'))},
+      ${q(overrideTopic   != null ? overrideTopic   : source.topic)},
+      ${q(overrideAudience!= null ? overrideAudience: source.audience)},
+      ${q(source.master_lang)},
+      ${qArr(source.target_langs || [])},
+      ${qJson(overrideOptions != null ? { ...(source.options || {}), ...overrideOptions } : (source.options || {}))},
+      ${q(overrideGate || source.gate_strategy || 'none')},
+      ${qJson(overrideAgents != null ? { ...(source.agent_overrides || {}), ...overrideAgents } : (source.agent_overrides || {}))},
+      'queued', NOW()
+    ) RETURNING id::text;`);
+
+  // 2. Clone master-phase stages [0..stageIndex-1] from the source as done
+  let totalCost = 0, totalIn = 0, totalOut = 0;
+  for (const s of (source.stages || [])) {
+    if (s.lang != null) continue;             // skip per-target-lang stages — re-run from scratch
+    if (s.stage_index >= stageIndex) continue; // anything from forkPoint onwards is fresh
+    if (s.status !== 'done' && s.status !== 'skipped') continue;
+
+    await query(`
+      INSERT INTO compose_stages
+        (run_id, stage_index, stage_name, capability, lang, agent, model,
+          input, output, status, approval_required,
+          input_tokens, output_tokens, cost_usd, error, handoff_id,
+          started_at, finished_at, created_at)
+      VALUES (
+        ${q(newId)}, ${s.stage_index}, ${q(s.stage_name)}, ${q(s.capability)},
+        NULL, ${q(s.agent)}, ${q(s.model)},
+        ${qJson({ ...(s.input || {}), forked_from_run_id: sourceRunId, forked_from_stage_id: s.id })},
+        ${qJson(s.output)},
+        ${q(s.status)}, FALSE,
+        ${s.input_tokens || 0}, ${s.output_tokens || 0}, ${s.cost_usd || 0},
+        NULL, NULL,
+        NOW(), NOW(), NOW()
+      )
+      ON CONFLICT (run_id, stage_index, lang) DO NOTHING;
+    `);
+    totalCost += Number(s.cost_usd) || 0;
+    totalIn   += s.input_tokens  || 0;
+    totalOut  += s.output_tokens || 0;
+  }
+
+  // 3. Roll up cost on the new run so the HUD shows the inherited spend
+  await query(`UPDATE compose_runs
+                  SET total_cost_usd = ${totalCost},
+                      total_input_tokens = ${totalIn},
+                      total_output_tokens = ${totalOut}
+                WHERE id = ${q(newId)};`);
+
+  return { ok: true, id: newId, source_run_id: sourceRunId, fork_stage_index: stageIndex,
+           inherited_cost_usd: totalCost };
+}
+
 async function cancel(runId, note = null) {
   await query(`UPDATE compose_runs
                   SET status = 'cancelled', error = ${q(note)}, finished_at = NOW()
@@ -1051,4 +1142,6 @@ module.exports = {
   listRecipes, getRecipe,
   // run lifecycle
   start, getRun, listRuns, tick, runToBlock, approve, cancel,
+  // M44 · checkpointed state
+  forkFromStage,
 };
