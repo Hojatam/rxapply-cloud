@@ -43,6 +43,7 @@ const brandProfile = require('./brand-profile');       // central brand spec
 const composeStages = require('./compose-stages');     // Pooya brief + Kherad score (legacy IG, deprecated by M24)
 const composeOrchestrator = require('./compose-orchestrator');  // M24 · recipe-driven multi-format orchestrator
 const evalHarness = require('./eval-harness');                  // M43 · pairwise eval judge
+const watchdog = require('./regulatory-watchdog');              // M46 · regulatory drift watchdog
 const permissions = require('./permissions');          // K1 · approval matrix + Inbox queue
 const renderers = require('./output-renderers');       // K1 · narrative output formatters
 const agentMemory = require('./agent-memory');         // K2 · per-agent persistent memory
@@ -1871,6 +1872,68 @@ app.get('/evals/scoreboard', async (req, res) => {
     const rows = await evalHarness.scoreboard({ country: req.query.country || null });
     res.json({ ok: true, rows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── M46 · Regulatory watchdog ───────────────────────────────────────────
+//   GET    /watchdog/watchpoints                  — list (?country, ?active)
+//   POST   /watchdog/watchpoints                  — create (auth)
+//   PATCH  /watchdog/watchpoints/:id              — update (auth)
+//   DELETE /watchdog/watchpoints/:id              — archive (auth)
+//   POST   /watchdog/check/:id                    — check one (auth)
+//   POST   /watchdog/check                        — check all (auth) — call from Railway cron / n8n
+//   GET    /watchdog/drift-events                 — list (?status)
+//   POST   /watchdog/drift-events/:id/resolve     — { status: reviewed|dismissed|kb-updated, note? } (auth)
+//   GET    /watchdog/pending-count                — for the Inbox badge
+app.get('/watchdog/watchpoints', async (req, res) => {
+  try {
+    const items = await watchdog.listWatchpoints({
+      country: req.query.country || null,
+      active: req.query.active === 'true' ? true : (req.query.active === 'false' ? false : null),
+    });
+    res.json({ ok: true, items });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post('/watchdog/watchpoints', auth.middleware, async (req, res) => {
+  try { res.json(await watchdog.createWatchpoint(req.body || {})); }
+  catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+app.patch('/watchdog/watchpoints/:id', auth.middleware, async (req, res) => {
+  try { res.json(await watchdog.updateWatchpoint(req.params.id, req.body || {})); }
+  catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+app.delete('/watchdog/watchpoints/:id', auth.middleware, async (req, res) => {
+  try { res.json(await watchdog.archiveWatchpoint(req.params.id)); }
+  catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post('/watchdog/check/:id', auth.middleware, async (req, res) => {
+  try { res.json(await watchdog.checkOne(req.params.id)); }
+  catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post('/watchdog/check', auth.middleware, async (_req, res) => {
+  try {
+    const r = await watchdog.checkAll();
+    log(`watchdog.check-all checked=${r.checked} changed=${r.changed} errors=${r.errors}`);
+    res.json(r);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.get('/watchdog/drift-events', async (req, res) => {
+  try {
+    const items = await watchdog.listDriftEvents({
+      status: req.query.status || null,
+      limit: parseInt(req.query.limit, 10) || 100,
+    });
+    res.json({ ok: true, items });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post('/watchdog/drift-events/:id/resolve', auth.middleware, async (req, res) => {
+  try {
+    const { status, note } = req.body || {};
+    res.json(await watchdog.resolveDriftEvent(req.params.id, { status, note }));
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+app.get('/watchdog/pending-count', async (_req, res) => {
+  try { res.json({ ok: true, pending: await watchdog.pendingCount() }); }
+  catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 // GET /compose/recent — last 10 compose runs (for the "Recent posts" strip)
