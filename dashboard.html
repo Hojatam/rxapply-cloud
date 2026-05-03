@@ -6494,20 +6494,67 @@ function coRenderStageOutput(stage, expandedByDefault) {
         `;
       }
       case 'audit': {
-        const issues = Array.isArray(out.issues) ? out.issues : [];
-        const verdictColor = out.verdict === 'pass' ? '#16a34a' : '#dc2626';
+        // M45 · Red-team output. Claim-by-claim KB citation table.
+        const claims = Array.isArray(out.claims) ? out.claims : [];
+        const verdict = out.verdict || '?';
+        const verdictColor =
+          verdict === 'pass' ? '#16a34a' :
+          verdict === 'pass_with_flags' ? '#d97706' : '#dc2626';
+        const verdictBg =
+          verdict === 'pass' ? '#dcfce7' :
+          verdict === 'pass_with_flags' ? '#fef3c7' : '#fee2e2';
+        const counts = {
+          cited:       Number(out.cited_count)       || 0,
+          partial:     Number(out.partial_count)     || 0,
+          uncited:     Number(out.uncited_count)     || 0,
+          conflicting: Number(out.conflicting_count) || 0,
+        };
+        const statusBadge = (st) => {
+          const color = st === 'cited' ? '#16a34a'
+                      : st === 'partial' ? '#d97706'
+                      : st === 'conflicting' ? '#7c3aed'
+                      : '#dc2626'; // uncited
+          const bg    = st === 'cited' ? '#dcfce7'
+                      : st === 'partial' ? '#fef3c7'
+                      : st === 'conflicting' ? '#ede9fe'
+                      : '#fee2e2';
+          return `<span class="mono" style="font-size:10px;font-weight:700;text-transform:uppercase;color:${color};background:${bg};padding:2px 6px;border-radius:3px;letter-spacing:.05em;">${escapeHtml(st || '?')}</span>`;
+        };
+        // Sort: conflicting → uncited → partial → cited (most-urgent first)
+        const sortRank = { conflicting: 0, uncited: 1, partial: 2, cited: 3 };
+        const sorted = claims.slice().sort((a, b) => (sortRank[a.status] ?? 9) - (sortRank[b.status] ?? 9));
         return `
-          <div class="mt-2 flex items-center gap-2">
-            <span class="text-xs uppercase tracking-wider" style="color:${verdictColor};font-weight:600;">${escapeHtml(out.verdict || '?')}</span>
-            <span class="text-sm">${escapeHtml(out.summary || '')}</span>
+          <div class="mt-2 p-2 rounded" style="background:${verdictBg};">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-xs uppercase tracking-wider" style="color:${verdictColor};font-weight:700;">${escapeHtml(verdict.replace(/_/g, ' '))}</span>
+              <span class="text-sm" style="color:${verdictColor};">${escapeHtml(out.summary || '')}</span>
+            </div>
+            <div class="mt-2 text-xs flex gap-3 flex-wrap" style="color:var(--text-muted, #64748b);">
+              <span><strong style="color:#16a34a;">${counts.cited}</strong> cited</span>
+              <span><strong style="color:#d97706;">${counts.partial}</strong> partial</span>
+              <span><strong style="color:#dc2626;">${counts.uncited}</strong> uncited</span>
+              <span><strong style="color:#7c3aed;">${counts.conflicting}</strong> conflicting</span>
+            </div>
           </div>
-          ${issues.length ? `
-            <div class="mt-2 space-y-2">
-              ${issues.map(i => {
-                const sev = String(i.severity || 'low').toLowerCase();
-                const sc = sev === 'high' ? '#dc2626' : sev === 'medium' ? '#d97706' : '#64748b';
-                return `<div class="text-xs"><span class="mono" style="color:${sc};font-weight:600;">[${escapeHtml(sev)}]</span> ${escapeHtml(i.issue || '')}<div class="text-slate-500 mt-1">→ ${escapeHtml(i.fix || '')}</div></div>`;
-              }).join('')}
+          ${sorted.length ? `
+            <div class="mt-3">
+              <div class="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-2">Claims</div>
+              <div class="space-y-2">
+                ${sorted.map(c => {
+                  const sev = (c.severity || 'low').toLowerCase();
+                  const sevColor = sev === 'high' ? '#dc2626' : sev === 'medium' ? '#d97706' : '#94a3b8';
+                  return `<div class="text-xs p-2 rounded" style="background:#f8fafc;border-left:3px solid ${sevColor};">
+                    <div class="flex items-center gap-2 flex-wrap mb-1">
+                      ${statusBadge(c.status)}
+                      <span class="mono" style="color:${sevColor};font-size:10px;font-weight:600;">[${escapeHtml(sev)}]</span>
+                      ${c.kind ? `<span class="text-slate-400">${escapeHtml(c.kind)}</span>` : ''}
+                    </div>
+                    <div style="color:var(--text, #0f172a);"><strong>Claim:</strong> ${escapeHtml(c.claim || '')}</div>
+                    ${c.kb_fragment ? `<div class="mt-1" style="color:#16a34a;"><strong>KB cite:</strong> ${escapeHtml(c.kb_fragment.slice(0, 240))}${c.kb_fragment.length > 240 ? '…' : ''}${c.kb_section_ref ? ` <em>(${escapeHtml(c.kb_section_ref)})</em>` : ''}</div>` : ''}
+                    ${c.fix ? `<div class="mt-1" style="color:var(--text-muted, #64748b);"><strong>Fix:</strong> ${escapeHtml(c.fix)}</div>` : ''}
+                  </div>`;
+                }).join('')}
+              </div>
             </div>` : ''}
         `;
       }
