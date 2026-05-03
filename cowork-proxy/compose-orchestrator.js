@@ -39,6 +39,7 @@ const capabilities  = require('./agent-capabilities');
 const renderers     = require('./compose-renderers');
 const logWriter     = require('./log-writer');
 const protectedTerms = require('./kb-protected-terms');
+const costRouter     = require('./cost-aware-router');
 
 const RECIPES_DIR = path.resolve(__dirname, '..', 'compose-recipes');
 
@@ -714,7 +715,20 @@ async function _executeLlmStage({ runId, run, recipe, stage, stageIndex, lang, p
     return await getRun(runId);
   }
 
-  const { id: model } = agentModels.resolveModel(agent);
+  // M42 · Cost-aware router. The router only fires when no founder pin is set
+  // for this agent + the capability isn't in the NEVER_AUTO_PICK list (verify,
+  // verify-translation, image). Falls back to agentModels.resolveModel cleanly.
+  let model;
+  try {
+    const routerPick = await costRouter.pickModelFor({ agent, capability });
+    if (routerPick) {
+      model = routerPick;
+    } else {
+      ({ id: model } = agentModels.resolveModel(agent));
+    }
+  } catch (_) {
+    ({ id: model } = agentModels.resolveModel(agent));
+  }
 
   // Build context from prior stages.
   const priorMaster = {};

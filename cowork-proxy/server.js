@@ -728,6 +728,36 @@ app.get('/agent-models', (_, res) => {
     overrides: agentModels.getOverrides(),
   });
 });
+// M42 · Cost-aware router diagnostic — what would the router pick + why?
+//   GET /agent-models/router-status?agent=<name>&capability=<cap>
+app.get('/agent-models/router-status', async (req, res) => {
+  try {
+    const router = require('./cost-aware-router');
+    const agent = req.query.agent || null;
+    const capability = req.query.capability || null;
+    if (!agent || !capability) {
+      return res.json({
+        ok: true,
+        floors: router.FLOORS,
+        quality_bar: router.QUALITY_BAR,
+        window_days: router.WINDOW_DAYS,
+        usage: 'pass ?agent=...&capability=... for an explanation of the router pick',
+      });
+    }
+    const r = await router.reasonFor({ agent, capability });
+    res.json({ ok: true, ...r });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Force a refresh of the router's rolling-stats cache (call after rating bursts).
+app.post('/agent-models/router-refresh', auth.middleware, (_req, res) => {
+  try {
+    const router = require('./cost-aware-router');
+    router.refresh();
+    res.json({ ok: true, refreshed_at: new Date().toISOString() });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 app.patch('/agent-models/defaults', auth.middleware, async (req, res) => {
   const { agent, model_key } = req.body || {};
   if (!agent) return res.status(400).json({ error: 'send {agent, model_key}' });
