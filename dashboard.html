@@ -775,6 +775,122 @@
   }
   .co-recent-icon svg { width: 16px; height: 16px; }
 
+  /* M53 · Hint button + tab help panel + toast --------------------- */
+
+  /* Help "?" button next to a tab title */
+  .help-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: var(--surface-sunken, #f1f5f9);
+    color: var(--text-muted, #64748b);
+    border: 1px solid var(--border, #e2e8f0);
+    font-size: 12px; font-weight: 700;
+    cursor: help; transition: all .15s;
+  }
+  .help-btn:hover {
+    background: var(--accent, #4f46e5); color: #fff; border-color: var(--accent, #4f46e5);
+  }
+
+  /* Help panel — collapsible explainer at the top of a tab */
+  .help-panel {
+    background: linear-gradient(135deg, rgba(79,70,229,.04), rgba(124,58,237,.04));
+    border: 1px solid rgba(79,70,229,.15);
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin-bottom: 16px;
+    position: relative;
+    animation: helpFadeIn .25s ease;
+  }
+  @keyframes helpFadeIn { from{opacity:0; transform:translateY(-4px);} to{opacity:1; transform:translateY(0);} }
+  .help-panel h3 {
+    font-size: 13px; font-weight: 700; margin: 0 0 8px;
+    color: var(--accent, #4f46e5); text-transform: uppercase; letter-spacing: .05em;
+  }
+  .help-panel p {
+    font-size: 13px; line-height: 1.6; color: var(--text, #0f172a);
+    margin: 0 0 10px;
+  }
+  .help-panel ul {
+    font-size: 12.5px; line-height: 1.6; color: var(--text-muted, #64748b);
+    margin: 0; padding-left: 20px;
+  }
+  .help-panel ul li { margin-bottom: 4px; }
+  .help-panel-close {
+    position: absolute; top: 10px; right: 10px;
+    width: 22px; height: 22px;
+    background: transparent; border: 0; cursor: pointer;
+    color: var(--text-faint, #94a3b8); font-size: 14px;
+    border-radius: 4px;
+  }
+  .help-panel-close:hover { background: rgba(0,0,0,.05); color: var(--text); }
+
+  /* Toast notifications — top-right, auto-dismiss */
+  .toast-container {
+    position: fixed; top: 20px; right: 20px;
+    z-index: 2000;
+    display: flex; flex-direction: column; gap: 8px;
+    pointer-events: none;
+  }
+  .toast {
+    background: var(--surface, #fff);
+    border: 1px solid var(--border, #e2e8f0);
+    border-left-width: 4px;
+    border-radius: 8px;
+    padding: 12px 16px 12px 14px;
+    min-width: 280px; max-width: 420px;
+    box-shadow: 0 10px 25px rgba(0,0,0,.12);
+    pointer-events: auto;
+    animation: toastIn .25s cubic-bezier(.16,1.2,.3,1);
+    display: flex; align-items: center; gap: 10px;
+    font-size: 13px;
+  }
+  @keyframes toastIn { from { opacity:0; transform:translateX(20px); } to { opacity:1; transform:translateX(0); } }
+  .toast.toast-success { border-left-color: #16a34a; }
+  .toast.toast-error   { border-left-color: #dc2626; }
+  .toast.toast-info    { border-left-color: #4f46e5; }
+  .toast.toast-warn    { border-left-color: #d97706; }
+  .toast-icon { width: 18px; height: 18px; flex-shrink: 0; font-size: 16px; }
+  .toast-msg { flex: 1; line-height: 1.45; color: var(--text, #0f172a); }
+  .toast-close { background:transparent; border:0; cursor:pointer; color:var(--text-faint, #94a3b8); padding:0 0 0 8px; font-size: 16px; }
+
+  /* Form modal · per-field rows */
+  .form-row { margin-bottom: 14px; }
+  .form-row label {
+    display: block;
+    font-size: 12px; font-weight: 600;
+    color: var(--text-muted, #64748b);
+    text-transform: uppercase; letter-spacing: .05em;
+    margin-bottom: 6px;
+  }
+  .form-row input[type="text"],
+  .form-row input[type="url"],
+  .form-row input[type="email"],
+  .form-row textarea,
+  .form-row select {
+    width: 100%;
+    background: var(--surface, #fff);
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 7px;
+    padding: 9px 12px;
+    font-size: 13.5px;
+    color: var(--text, #0f172a);
+    transition: border-color .15s, box-shadow .15s;
+    font-family: inherit;
+  }
+  .form-row input:focus,
+  .form-row textarea:focus,
+  .form-row select:focus {
+    outline: none;
+    border-color: var(--accent, #4f46e5);
+    box-shadow: 0 0 0 3px rgba(79,70,229,.12);
+  }
+  .form-row textarea { min-height: 80px; resize: vertical; line-height: 1.5; }
+  .form-hint {
+    font-size: 11.5px; color: var(--text-muted, #94a3b8);
+    margin-top: 4px; line-height: 1.4;
+  }
+
   /* M34 · Compose platform mockups -------------------------------------- */
   .co-mockup-wrap { display:flex; justify-content:center; padding:8px 0 16px; }
 
@@ -3736,15 +3852,21 @@ async function loadMemoryHealth() {
   }
 }
 async function ovMemoryMaintenance() {
-  if (!confirm('Run memory maintenance now?\n• DECAY: episodic items un-used 60+ days + low importance + low score → archive\n• PROMOTE: episodic items with promotion_score ≥ 5 → semantic')) return;
+  const ok = await confirmModal({
+    title: 'Run memory maintenance now?',
+    sub: 'DECAY: episodic items un-used 60+ days + low importance + low score → archived. PROMOTE: episodic items with promotion_score ≥ 5 → semantic. Both passes are reversible (archived rows stay in DB, can be un-archived later).',
+    confirmLabel: '▶ Run maintenance',
+  });
+  if (!ok) return;
+  toast('Running memory maintenance…', 'info', { duration: 3000 });
   try {
     const r = await authFetch(`${PROXY}/memory/maintenance/run`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-    if (r.status === 401) return alert('Sign in required.');
+    if (r.status === 401) return toast('Sign in required.', 'error');
     const j = await r.json();
-    if (!j.ok) return alert('Failed: ' + (j.error || '?'));
-    alert(`Maintenance done.\n• decayed: ${j.decayed}\n• promoted: ${j.promoted}\n\nBefore: ${JSON.stringify(j.before)}\nAfter: ${JSON.stringify(j.after)}`);
+    if (!j.ok) return toast('Failed: ' + (j.error || '?'), 'error');
+    toast(`Decayed ${j.decayed} · promoted ${j.promoted}`, 'success', { duration: 5000 });
     loadMemoryHealth();
-  } catch (e) { alert('Error: ' + e.message); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function loadOverviewData() {
@@ -7153,29 +7275,42 @@ async function coFanout(sourceRunId) {
   try {
     // Fetch recipes to know which channels are available
     const j = await fetch(`${PROXY}/compose/recipes`).then(r => r.json());
-    const recipes = (j.recipes || []).map(r => r.id);
+    const recipes = j.recipes || [];
     // Strip the source's own recipe from the list (don't fan out to self)
     const run = _coState.currentRun;
     const sourceId = run && run.recipe_id;
-    const candidates = recipes.filter(r => r !== sourceId);
-    if (candidates.length === 0) return alert('No other recipes installed to fan out to.');
+    const candidates = recipes.filter(r => r.id !== sourceId);
+    if (candidates.length === 0) return toast('No other recipes installed to fan out to.', 'warn');
 
-    const picked = prompt(`Fan out to which channels? Comma-separated.\nAvailable: ${candidates.join(', ')}`);
-    if (!picked || !picked.trim()) return;
-    const channels = picked.split(',').map(s => s.trim()).filter(Boolean).filter(c => candidates.includes(c));
-    if (channels.length === 0) return alert('No valid channels picked.');
-    if (!confirm(`Spawn ${channels.length} new compose run(s): ${channels.join(', ')}?\nEach runs end-to-end (no founder gates) and shows up in Recent runs.`)) return;
+    // Modal with checkbox-style toggles for channels
+    // Implemented as a select with multi-comma — but a richer multi-pick form would be nicer.
+    // For this round, use the form modal with one boolean field per recipe.
+    const fields = candidates.map(c => ({
+      key: `pick_${c.id}`, label: `Include ${c.label}`, type: 'select',
+      options: [{ value: '', label: 'No' }, { value: 'yes', label: 'Yes' }],
+      default: '',
+    }));
+    const data = await formModal({
+      title: 'Fan out to channels',
+      sub: 'Spawns one compose run per selected channel. Each runs end-to-end (no founder gates) using this output as its source. Children show up in Recent runs.',
+      fields,
+      submitLabel: 'Fan out',
+    });
+    if (!data) return;
+    const channels = candidates.map(c => c.id).filter(id => data[`pick_${id}`] === 'yes');
+    if (channels.length === 0) return toast('No channels picked.', 'warn');
 
+    toast(`Fanning out to ${channels.length} channels…`, 'info');
     const r = await authFetch(`${PROXY}/fanout/expand`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sourceRunId, channels, gateStrategy: 'none' }),
     });
-    if (r.status === 401) return alert('Sign in required.');
+    if (r.status === 401) return toast('Sign in required.', 'error');
     const out = await r.json();
-    if (!out.ok) return alert('Failed: ' + (out.error || '?'));
-    alert(`Fanned out to ${out.children.length} runs. Check Recent runs for progress.`);
+    if (!out.ok) return toast('Failed: ' + (out.error || '?'), 'error');
+    toast(`Spawned ${out.children.length} runs. Check Recent runs for progress.`, 'success', { duration: 5000 });
     coLoadRecent();
-  } catch (e) { alert('Error: ' + e.message); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 // Export: copy primary text payload to clipboard.
@@ -7787,18 +7922,219 @@ async function approve(id, ok) {
 
 // =====================================================================
 // M52 · DMs · Evals · Watchdog tabs (UI for M43 + M46 + M47)
+// M53 · Help panels + form modals + toast notifications
 // =====================================================================
+
+// ── Toast notification helper (M53) ───────────────────────────────────
+function _ensureToastContainer() {
+  let c = document.getElementById('toast-container');
+  if (!c) {
+    c = document.createElement('div');
+    c.id = 'toast-container';
+    c.className = 'toast-container';
+    document.body.appendChild(c);
+  }
+  return c;
+}
+function toast(message, kind = 'info', { duration = 3500 } = {}) {
+  const c = _ensureToastContainer();
+  const t = document.createElement('div');
+  t.className = `toast toast-${kind}`;
+  const icons = { success: '✓', error: '✕', info: 'ℹ', warn: '⚠' };
+  t.innerHTML = `
+    <span class="toast-icon" style="color:${
+      kind === 'success' ? '#16a34a' : kind === 'error' ? '#dc2626' : kind === 'warn' ? '#d97706' : '#4f46e5'};">
+      ${icons[kind] || 'ℹ'}
+    </span>
+    <span class="toast-msg">${escapeHtml(String(message || ''))}</span>
+    <button class="toast-close" aria-label="Dismiss">×</button>
+  `;
+  c.appendChild(t);
+  const close = () => { t.style.opacity = '0'; t.style.transform = 'translateX(20px)'; setTimeout(() => t.remove(), 200); };
+  t.querySelector('.toast-close').addEventListener('click', close);
+  setTimeout(close, duration);
+  return t;
+}
+
+// ── Form modal helper (M53) ───────────────────────────────────────────
+//
+// Usage:
+//   const result = await formModal({
+//     title: 'New thing',
+//     sub:   'A short subtitle',
+//     fields: [
+//       { key: 'topic',  label: 'Topic',  type: 'text', required: true, placeholder: '...' },
+//       { key: 'audience', label: 'Audience', type: 'textarea' },
+//       { key: 'recipe', label: 'Recipe', type: 'select', options: [{ value: 'email', label: 'Email' }, ...] },
+//     ],
+//     submitLabel: 'Create',
+//   });
+//   if (!result) return;   // user cancelled
+//   // result is an object keyed by field.key
+function formModal({ title, sub = null, fields = [], submitLabel = 'Submit', size = '' }) {
+  return new Promise((resolve) => {
+    const id = 'fm-' + Math.random().toString(36).slice(2, 8);
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-backdrop';
+    overlay.id = id;
+    overlay.innerHTML = `
+      <div class="modal-card ${size}">
+        <div class="modal-head">
+          <div>
+            <h3>${escapeHtml(title)}</h3>
+            ${sub ? `<div class="modal-sub">${escapeHtml(sub)}</div>` : ''}
+          </div>
+          <button class="modal-close" aria-label="Close" data-fm-close>${ICONS.x}</button>
+        </div>
+        <div class="modal-body">
+          ${fields.map(f => {
+            const fid = `${id}-${f.key}`;
+            const ph = f.placeholder ? ` placeholder="${escapeHtml(f.placeholder)}"` : '';
+            let input;
+            if (f.type === 'textarea') {
+              input = `<textarea id="${fid}" data-key="${escapeHtml(f.key)}" rows="3"${ph}>${escapeHtml(f.default || '')}</textarea>`;
+            } else if (f.type === 'select') {
+              input = `<select id="${fid}" data-key="${escapeHtml(f.key)}">
+                ${(f.options || []).map(o => `<option value="${escapeHtml(o.value)}" ${o.value === f.default ? 'selected' : ''}>${escapeHtml(o.label)}</option>`).join('')}
+              </select>`;
+            } else {
+              input = `<input type="${f.type || 'text'}" id="${fid}" data-key="${escapeHtml(f.key)}" value="${escapeHtml(f.default || '')}"${ph}>`;
+            }
+            return `
+              <div class="form-row">
+                <label for="${fid}">${escapeHtml(f.label)}${f.required ? ' *' : ''}</label>
+                ${input}
+                ${f.hint ? `<div class="form-hint">${escapeHtml(f.hint)}</div>` : ''}
+              </div>
+            `;
+          }).join('')}
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-ghost btn-xs" data-fm-cancel>Cancel</button>
+          <button class="btn btn-primary btn-xs" data-fm-submit>${escapeHtml(submitLabel)}</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const cleanup = (val) => { overlay.remove(); resolve(val); };
+
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(null); });
+    overlay.querySelector('[data-fm-close]').addEventListener('click', () => cleanup(null));
+    overlay.querySelector('[data-fm-cancel]').addEventListener('click', () => cleanup(null));
+    overlay.querySelector('[data-fm-submit]').addEventListener('click', () => {
+      const out = {};
+      let missing = null;
+      for (const f of fields) {
+        const el = overlay.querySelector(`[data-key="${f.key}"]`);
+        if (!el) continue;
+        let v = el.value;
+        if (typeof v === 'string') v = v.trim();
+        if (f.required && !v) { missing = f.label; break; }
+        if (v !== '' && v != null) out[f.key] = v;
+      }
+      if (missing) { toast(`${missing} is required`, 'warn'); return; }
+      cleanup(out);
+    });
+
+    // Esc to cancel
+    const onKey = (e) => { if (e.key === 'Escape') { cleanup(null); document.removeEventListener('keydown', onKey); } };
+    document.addEventListener('keydown', onKey);
+
+    // Autofocus first field
+    setTimeout(() => {
+      const first = overlay.querySelector('[data-key]');
+      if (first && first.focus) first.focus();
+    }, 50);
+  });
+}
+
+// ── Confirm modal (M53) — replaces native confirm() ──────────────────
+function confirmModal({ title, sub = null, danger = false, confirmLabel = 'Confirm', cancelLabel = 'Cancel' }) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-backdrop';
+    overlay.innerHTML = `
+      <div class="modal-card sm">
+        <div class="modal-head">
+          <div>
+            <h3>${escapeHtml(title)}</h3>
+            ${sub ? `<div class="modal-sub">${escapeHtml(sub)}</div>` : ''}
+          </div>
+          <button class="modal-close" aria-label="Close" data-c-close>${ICONS.x}</button>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-ghost btn-xs" data-c-cancel>${escapeHtml(cancelLabel)}</button>
+          <button class="btn ${danger ? 'btn-danger' : 'btn-primary'} btn-xs" data-c-ok>${escapeHtml(confirmLabel)}</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    const cleanup = (v) => { overlay.remove(); resolve(v); };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(false); });
+    overlay.querySelector('[data-c-close]').addEventListener('click', () => cleanup(false));
+    overlay.querySelector('[data-c-cancel]').addEventListener('click', () => cleanup(false));
+    overlay.querySelector('[data-c-ok]').addEventListener('click', () => cleanup(true));
+    setTimeout(() => overlay.querySelector('[data-c-ok]').focus(), 50);
+  });
+}
+
+// ── Help panel helper (M53) ──────────────────────────────────────────
+//
+// Creates a dismissable explainer at the top of a tab. Hidden state
+// persists per-tab via localStorage so the founder doesn't re-see it
+// after they've dismissed it. The "?" button in the section header
+// re-opens it.
+function helpPanel({ key, title, paragraphs = [], bullets = [] }) {
+  const dismissedKey = `rxapply-help-dismissed-${key}`;
+  if (localStorage.getItem(dismissedKey) === '1') return '';
+  const idAttr = `help-panel-${key}`;
+  return `
+    <div class="help-panel" id="${idAttr}">
+      <button class="help-panel-close" onclick="document.getElementById('${idAttr}').remove(); localStorage.setItem('${dismissedKey}', '1');" aria-label="Dismiss">×</button>
+      <h3>${escapeHtml(title)}</h3>
+      ${paragraphs.map(p => `<p>${escapeHtml(p)}</p>`).join('')}
+      ${bullets.length ? `<ul>${bullets.map(b => `<li>${escapeHtml(b)}</li>`).join('')}</ul>` : ''}
+    </div>
+  `;
+}
+// Re-show a dismissed help panel for a tab
+function helpReshow(key) {
+  localStorage.removeItem(`rxapply-help-dismissed-${key}`);
+  // Trigger the current route to re-render
+  const cur = (location.hash.replace('#/', '') || 'overview').trim();
+  if (typeof ROUTES[cur] === 'function') ROUTES[cur]();
+}
 
 // ── DMs tab (M47) ──────────────────────────────────────────────────────
 async function renderDMs() {
   $('main').innerHTML = `
     <div class="section-h">
-      <div><h1>DMs</h1><div class="breadcrumb">Inbound DMs · auto-triaged · hot/qualifying get a draft reply</div></div>
+      <div class="flex items-center gap-2">
+        <h1>DMs</h1>
+        <button class="help-btn" onclick="helpReshow('dms')" title="What does this tab do?">?</button>
+      </div>
       <div class="flex gap-2">
         <button class="btn btn-ghost btn-xs" onclick="renderDMs()">↻ Refresh</button>
-        <button class="btn btn-xs" onclick="dmAddManual()">+ Add manually</button>
+        <button class="btn btn-xs" onclick="dmAddManual()">+ Add DM</button>
       </div>
     </div>
+    <div class="breadcrumb mb-4">Inbound DMs · auto-triaged · hot/qualifying get a draft reply</div>
+    ${helpPanel({
+      key: 'dms',
+      title: 'What this tab does',
+      paragraphs: [
+        'Inbound DMs from Instagram or Telegram land here automatically (when you wire your IG webhook to POST /dm/inbox in n8n). Bineh classifies each one into 5 buckets, and Mehrban auto-drafts a reply for hot / qualifying leads in the source language.',
+        'You triage them faster than reading every DM yourself, and never miss a hot lead buried in noise.',
+      ],
+      bullets: [
+        '🔥 Hot — sender shows commitment signals (regulator number, exam date, "how do I sign up"). Get a draft reply.',
+        'Qualifying — sender is comparing options, asking specifics. Gets a draft reply.',
+        'Curious — generic interest, broad questions. No auto-draft.',
+        'Off-topic / Complaint — surfaced for review; auto-archive or escalate.',
+        'Click "+ Add DM" to test the flow with a manual paste, or wire your IG webhook to /dm/inbox for live ingestion.',
+      ],
+    })}
     <div id="dm-counts-strip" class="grid grid-cols-2 md:grid-cols-6 gap-2 mb-4"></div>
     <div class="card mb-4">
       <div class="flex gap-2 flex-wrap mb-3">
@@ -7913,61 +8249,104 @@ function _dmRowHtml(d) {
 }
 
 async function dmTriage(id) {
+  const t = toast('Triaging...', 'info', { duration: 2000 });
   try {
     const r = await authFetch(`${PROXY}/dm/inbox/${id}/triage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-    if (r.status === 401) return alert('Sign in required.');
+    if (r.status === 401) return toast('Sign in required.', 'error');
     const j = await r.json();
-    if (!j.ok) return alert('Failed: ' + (j.error || '?'));
+    if (!j.ok) return toast('Failed: ' + (j.error || '?'), 'error');
+    toast(`Triaged as ${j.triage.status} (${Math.round((j.triage.confidence||0)*100)}%)`, 'success');
     dmLoadCounts(); dmLoadList();
-  } catch (e) { alert('Error: ' + e.message); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 async function dmDraft(id) {
+  toast('Drafting reply...', 'info', { duration: 2000 });
   try {
     const r = await authFetch(`${PROXY}/dm/inbox/${id}/draft`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-    if (r.status === 401) return alert('Sign in required.');
+    if (r.status === 401) return toast('Sign in required.', 'error');
     const j = await r.json();
-    if (!j.ok) return alert('Failed: ' + (j.error || '?'));
+    if (!j.ok) return toast('Failed: ' + (j.error || '?'), 'error');
+    toast('Draft reply ready below.', 'success');
     dmLoadList();
-  } catch (e) { alert('Error: ' + e.message); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 async function dmAction(id, action) {
   try {
     const r = await authFetch(`${PROXY}/dm/inbox/${id}/action`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) });
-    if (r.status === 401) return alert('Sign in required.');
+    if (r.status === 401) return toast('Sign in required.', 'error');
+    toast(`Marked as ${action}`, 'success');
     dmLoadCounts(); dmLoadList();
-  } catch (e) { alert('Error: ' + e.message); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 async function dmCopyReply(escaped) {
-  try { await navigator.clipboard.writeText(escaped.replace(/&apos;/g, "'").replace(/\\n/g, '\n')); }
-  catch (e) { alert('Copy failed: ' + e.message); }
+  try {
+    await navigator.clipboard.writeText(escaped.replace(/&apos;/g, "'").replace(/\\n/g, '\n'));
+    toast('Reply copied to clipboard', 'success', { duration: 2000 });
+  } catch (e) { toast('Copy failed: ' + e.message, 'error'); }
 }
 async function dmAddManual() {
-  const body = prompt('Paste the DM body:');
-  if (!body || !body.trim()) return;
-  const sourceUser = prompt('From (handle, optional):') || null;
+  const data = await formModal({
+    title: 'Add a DM manually',
+    sub: 'Paste an inbound DM to test the triage flow. For live DMs, wire your Instagram webhook to POST /dm/inbox in n8n.',
+    fields: [
+      { key: 'body',       label: 'DM body',          type: 'textarea', required: true,
+        placeholder: 'Paste the DM message exactly as the sender wrote it...',
+        hint: 'Bineh will detect the language and classify intent.' },
+      { key: 'sourceUser', label: 'From (handle)',    type: 'text',
+        placeholder: '@user_handle (optional)' },
+      { key: 'source',     label: 'Source platform',  type: 'select',
+        options: [
+          { value: 'manual',    label: 'Manual paste (testing)' },
+          { value: 'instagram', label: 'Instagram' },
+          { value: 'telegram',  label: 'Telegram' },
+        ],
+        default: 'manual' },
+    ],
+    submitLabel: 'Ingest + triage',
+  });
+  if (!data) return;
   try {
     const r = await authFetch(`${PROXY}/dm/inbox`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ source: 'manual', sourceUser, body: body.trim() }),
+      body: JSON.stringify({ source: data.source || 'manual', sourceUser: data.sourceUser || null, body: data.body }),
     });
-    if (r.status === 401) return alert('Sign in required.');
+    if (r.status === 401) return toast('Sign in required.', 'error');
     const j = await r.json();
-    if (!j.ok) return alert('Failed: ' + (j.error || '?'));
-    if (confirm('DM ingested. Triage now?')) await dmTriage(j.id);
-    else { dmLoadCounts(); dmLoadList(); }
-  } catch (e) { alert('Error: ' + e.message); }
+    if (!j.ok) return toast('Failed: ' + (j.error || '?'), 'error');
+    toast('DM ingested. Triaging now...', 'info');
+    await dmTriage(j.id);
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 // ── Evals tab (M43) ───────────────────────────────────────────────────
 async function renderEvals() {
   $('main').innerHTML = `
     <div class="section-h">
-      <div><h1>Evals</h1><div class="breadcrumb">Country-cohort eval harness · pairwise judge (Bidar) on candidate vs baseline</div></div>
+      <div class="flex items-center gap-2">
+        <h1>Evals</h1>
+        <button class="help-btn" onclick="helpReshow('evals')" title="What does this tab do?">?</button>
+      </div>
       <div class="flex gap-2">
         <button class="btn btn-ghost btn-xs" onclick="renderEvals()">↻ Refresh</button>
         <button class="btn btn-xs" onclick="evNewPrompt()">+ New golden prompt</button>
       </div>
     </div>
+    <div class="breadcrumb mb-4">Country-cohort eval harness · pairwise judge (Bidar) on candidate vs baseline</div>
+    ${helpPanel({
+      key: 'evals',
+      title: 'Why this exists',
+      paragraphs: [
+        'Before each country launch (UK → USA → DE → AU → CA → UAE → SA), you need to know whether your latest recipe / agent / model changes are actually IMPROVING quality or quietly regressing it. "It feels good" doesn\'t scale to 7 launches.',
+        'This tab runs a small set of golden prompts through your current Compose pipeline as a "candidate," then has Bidar judge it pairwise vs an approved "baseline" output across 3 axes: on-brand voice, KB-grounded accuracy, format fit.',
+      ],
+      bullets: [
+        '1. Add 5-30 golden prompts per country (real topics you publish about).',
+        '2. For each prompt, set a baseline run — point at an approved Compose run you trust as the canonical output.',
+        '3. Click "Run + judge" to spawn a fresh candidate run and have Bidar compare them.',
+        'When candidate wins ≥80% on a country\'s golden set, you\'re confident enough to publish there.',
+        'Cost: a typical eval run is one full compose ($0.05–0.15) + ~$0.01 for the judge.',
+      ],
+    })}
     <div class="card mb-4">
       <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Scoreboard</div>
       <div id="ev-scoreboard">Loading…</div>
@@ -8041,69 +8420,150 @@ async function evLoadPrompts() {
   } catch (e) { $('ev-prompts').innerHTML = `<div class="empty"><div class="empty-text text-xs">Failed: ${escapeHtml(e.message)}</div></div>`; }
 }
 async function evNewPrompt() {
-  const recipeId = prompt('Recipe (telegram / email / seo-article / facebook / x-thread / ig):');
-  if (!recipeId) return;
-  const country = prompt('Country code (uk / us / de / au / ca / uae / sa) or blank for multi:') || null;
-  const topic = prompt('Topic:');
-  if (!topic || topic.trim().length < 4) return alert('Topic too short.');
-  const audience = prompt('Audience (optional):') || null;
+  const data = await formModal({
+    title: 'New golden prompt',
+    sub: 'A repeatable test case for one country / one recipe. The harness runs your current pipeline against this prompt and judges the output vs a saved baseline.',
+    fields: [
+      { key: 'recipeId', label: 'Recipe', type: 'select', required: true,
+        options: [
+          { value: 'telegram',    label: 'Telegram post' },
+          { value: 'email',       label: 'Email' },
+          { value: 'seo-article', label: 'SEO article' },
+          { value: 'facebook',    label: 'Facebook post' },
+          { value: 'x-thread',    label: 'X thread' },
+          { value: 'ig',          label: 'Instagram' },
+        ] },
+      { key: 'country', label: 'Country', type: 'select',
+        options: [
+          { value: '',    label: '— Multi (no country)' },
+          { value: 'uk',  label: 'United Kingdom (uk)' },
+          { value: 'us',  label: 'United States (us)' },
+          { value: 'de',  label: 'Germany (de)' },
+          { value: 'au',  label: 'Australia (au)' },
+          { value: 'ca',  label: 'Canada (ca)' },
+          { value: 'uae', label: 'UAE (uae)' },
+          { value: 'sa',  label: 'Saudi Arabia (sa)' },
+        ] },
+      { key: 'topic',   label: 'Topic', type: 'textarea', required: true,
+        placeholder: 'e.g. NDEB Part 1 fee increase 2026',
+        hint: 'A real topic you actually publish about. The harness will reuse this prompt every time you eval.' },
+      { key: 'audience', label: 'Audience (optional)', type: 'text',
+        placeholder: 'e.g. Internationally trained dentists in Canada' },
+    ],
+    submitLabel: 'Create prompt',
+  });
+  if (!data) return;
   try {
     const r = await authFetch(`${PROXY}/evals/golden-prompts`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recipeId: recipeId.trim(), country: country ? country.trim() : null, topic: topic.trim(), audience }),
+      body: JSON.stringify({
+        recipeId: data.recipeId, country: data.country || null,
+        topic: data.topic, audience: data.audience || null,
+      }),
     });
-    if (r.status === 401) return alert('Sign in required.');
+    if (r.status === 401) return toast('Sign in required.', 'error');
     const j = await r.json();
-    if (!j.ok) return alert('Failed: ' + (j.error || '?'));
+    if (!j.ok) return toast('Failed: ' + (j.error || '?'), 'error');
+    toast('Golden prompt created. Now set a baseline run.', 'success');
     evLoadPrompts();
-  } catch (e) { alert('Error: ' + e.message); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 async function evSetBaseline(promptId) {
-  const runId = prompt('Compose run ID to use as baseline (the canonical reference output):');
-  if (!runId) return;
+  // Fetch recent compose runs so the founder can pick instead of typing an id
+  let runs = [];
+  try {
+    const j = await fetch(`${PROXY}/compose/runs?limit=30&status=done`).then(r => r.json());
+    runs = j.items || [];
+  } catch (_) {}
+  const data = await formModal({
+    title: 'Set baseline run',
+    sub: 'Pick a finished Compose run as the canonical reference output for this golden prompt. Future eval candidates will be judged against it.',
+    fields: [
+      { key: 'baselineRunId', label: 'Run', type: 'select', required: true,
+        options: runs.length === 0
+          ? [{ value: '', label: '— No finished runs available — paste an ID below' }]
+          : runs.map(r => ({ value: r.id, label: `${r.recipe_id} · ${(r.topic || '').slice(0, 60)}${(r.topic || '').length > 60 ? '…' : ''} · ${fmtTime(r.created_at)}` })),
+        hint: runs.length === 0 ? 'No finished runs found. Paste a run ID in the field below instead.' : null },
+      { key: 'baselineRunIdManual', label: 'Or paste a run ID', type: 'text',
+        placeholder: 'uuid' },
+    ],
+    submitLabel: 'Set baseline',
+  });
+  if (!data) return;
+  const runId = (data.baselineRunIdManual || data.baselineRunId || '').trim();
+  if (!runId) return toast('Need a run ID', 'warn');
   try {
     const r = await authFetch(`${PROXY}/evals/golden-prompts/${promptId}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ baseline_run_id: runId.trim() }),
+      body: JSON.stringify({ baseline_run_id: runId }),
     });
-    if (r.status === 401) return alert('Sign in required.');
+    if (r.status === 401) return toast('Sign in required.', 'error');
+    toast('Baseline set.', 'success');
     evLoadPrompts();
-  } catch (e) { alert('Error: ' + e.message); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 async function evRunAndJudge(promptId) {
-  if (!confirm('Run a candidate compose + pairwise judge against baseline?\nThis spends compose-run cost + ~$0.01 for the judge.')) return;
+  const ok = await confirmModal({
+    title: 'Run candidate + judge?',
+    sub: 'Spawns a fresh candidate Compose run end-to-end (no founder gates) and has Bidar judge it pairwise against the baseline. Cost: typically $0.05–0.15 for the compose + ~$0.01 for the judge.',
+    confirmLabel: '▶ Run + judge',
+  });
+  if (!ok) return;
+  toast('Running candidate + judge…', 'info', { duration: 4000 });
   try {
     const r = await authFetch(`${PROXY}/evals/run-and-judge`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ promptId }),
     });
-    if (r.status === 401) return alert('Sign in required.');
+    if (r.status === 401) return toast('Sign in required.', 'error');
     const j = await r.json();
-    if (!j.ok) return alert('Failed: ' + (j.error || '?'));
-    alert(`Judge verdict: ${j.verdict.winner_overall}\non-brand: ${j.verdict.winner_on_brand}\naccuracy: ${j.verdict.winner_accuracy}\nformat: ${j.verdict.winner_format}`);
+    if (!j.ok) return toast('Failed: ' + (j.error || '?'), 'error');
+    const v = j.verdict || {};
+    const overallColor = v.winner_overall === 'candidate' ? 'success' : v.winner_overall === 'baseline' ? 'error' : 'info';
+    toast(`Judge: ${v.winner_overall}  ·  on-brand: ${v.winner_on_brand}  ·  accuracy: ${v.winner_accuracy}  ·  format: ${v.winner_format}`, overallColor, { duration: 6500 });
     evLoadScoreboard();
-  } catch (e) { alert('Error: ' + e.message); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 async function evDelete(promptId) {
-  if (!confirm('Archive this golden prompt?')) return;
+  const ok = await confirmModal({ title: 'Archive this golden prompt?', danger: true, confirmLabel: 'Archive' });
+  if (!ok) return;
   try {
     const r = await authFetch(`${PROXY}/evals/golden-prompts/${promptId}`, { method: 'DELETE' });
-    if (r.status === 401) return alert('Sign in required.');
+    if (r.status === 401) return toast('Sign in required.', 'error');
+    toast('Archived', 'success');
     evLoadPrompts();
-  } catch (e) { alert('Error: ' + e.message); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 // ── Watchdog tab (M46) ────────────────────────────────────────────────
 async function renderWatchdog() {
   $('main').innerHTML = `
     <div class="section-h">
-      <div><h1>Watchdog</h1><div class="breadcrumb">Regulator-page drift detection · daily fetch + diff</div></div>
+      <div class="flex items-center gap-2">
+        <h1>Watchdog</h1>
+        <button class="help-btn" onclick="helpReshow('watchdog')" title="What does this tab do?">?</button>
+      </div>
       <div class="flex gap-2">
         <button class="btn btn-ghost btn-xs" onclick="renderWatchdog()">↻ Refresh</button>
         <button class="btn btn-xs" onclick="wdAddWatchpoint()">+ Add watchpoint</button>
         <button class="btn btn-primary btn-xs" onclick="wdRunCheckAll()">▶ Check all now</button>
       </div>
     </div>
+    <div class="breadcrumb mb-4">Regulator-page drift detection · daily fetch + diff</div>
+    ${helpPanel({
+      key: 'watchdog',
+      title: 'Why this exists',
+      paragraphs: [
+        'GDC, ORE, ADC, NDEB, AHPRA, DHA — regulator pages quietly change. Fees go up, eligibility tweaks, dates shift. Stale licensure content kills trust for a dental-migration brand.',
+        'This tab watches a list of pages you care about. Once a day (or when you click "Check all now"), it fetches each one, strips HTML noise, hashes the content, and compares to the last seen version. On change, you get a drift event to review and decide how to update the KB.',
+      ],
+      bullets: [
+        '1. Click "+ Add watchpoint" to register a regulator URL (e.g. NDEB fees page). Optional CSS selector (#id or .class) to narrow to a section.',
+        '2. Click "Check all now" to manually run a pass — or wire a daily n8n / Railway cron to POST /watchdog/check.',
+        '3. When a page changes, a red drift card appears at the top. Open the URL, decide if the KB needs updating, then mark "KB updated" / "Reviewed" / "Dismiss".',
+        'Tip: start with the 5-10 most important regulator URLs for your active country (UK first). Add more as you launch new countries.',
+      ],
+    })}
     <div class="card mb-4">
       <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">Pending drift events</div>
       <div id="wd-events">Loading…</div>
@@ -8172,49 +8632,117 @@ async function wdLoadWatchpoints() {
   } catch (e) { $('wd-watchpoints').innerHTML = `<div class="empty"><div class="empty-text text-xs">Failed: ${escapeHtml(e.message)}</div></div>`; }
 }
 async function wdAddWatchpoint() {
-  const url = prompt('URL to monitor (e.g. https://www.ndeb-bned.ca/en/ade/fees):');
-  if (!url || !url.trim()) return;
-  const label = prompt('Label (e.g. NDEB Part 1 fees):') || null;
-  const country = prompt('Country code (ca / uk / us / de / au / uae / sa):') || null;
-  const regulator = prompt('Regulator (NDEB / GDC / ORE / ADC / AHPRA / DHA):') || null;
-  const selector = prompt('CSS selector to scope (e.g. #fees, blank for whole page):') || null;
+  const data = await formModal({
+    title: 'Add watchpoint',
+    sub: 'Register a regulator page so the watchdog can detect changes. Optional CSS selector lets you scope the diff to a specific section instead of the whole page.',
+    fields: [
+      { key: 'url', label: 'URL', type: 'url', required: true,
+        placeholder: 'https://www.ndeb-bned.ca/en/ade/fees',
+        hint: 'Full URL including https://' },
+      { key: 'label', label: 'Label', type: 'text',
+        placeholder: 'NDEB Part 1 fees',
+        hint: 'A short founder-friendly name. Shown in the watchpoint list.' },
+      { key: 'country', label: 'Country', type: 'select',
+        options: [
+          { value: '',    label: '— Multi / unspecified' },
+          { value: 'ca',  label: 'Canada (ca)' },
+          { value: 'uk',  label: 'United Kingdom (uk)' },
+          { value: 'us',  label: 'United States (us)' },
+          { value: 'de',  label: 'Germany (de)' },
+          { value: 'au',  label: 'Australia (au)' },
+          { value: 'uae', label: 'UAE (uae)' },
+          { value: 'sa',  label: 'Saudi Arabia (sa)' },
+        ] },
+      { key: 'regulator', label: 'Regulator', type: 'select',
+        options: [
+          { value: '',      label: '— None / unspecified' },
+          { value: 'NDEB',  label: 'NDEB (Canada)' },
+          { value: 'GDC',   label: 'GDC (UK)' },
+          { value: 'ORE',   label: 'ORE (UK)' },
+          { value: 'ADC',   label: 'ADC (Australia)' },
+          { value: 'AHPRA', label: 'AHPRA (Australia)' },
+          { value: 'DHA',   label: 'DHA (UAE Dubai)' },
+          { value: 'ZAB',   label: 'ZAB (Germany)' },
+          { value: 'OTHER', label: 'Other' },
+        ] },
+      { key: 'selector', label: 'CSS selector (optional)', type: 'text',
+        placeholder: '#fees   or   .pricing-table',
+        hint: 'Scope the diff to a single page section. Leave blank to monitor the whole page. Supported: #id and .class only.' },
+    ],
+    submitLabel: 'Add watchpoint',
+  });
+  if (!data) return;
   try {
     const r = await authFetch(`${PROXY}/watchdog/watchpoints`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: url.trim(), label, country, regulator, selector }),
+      body: JSON.stringify({
+        url: data.url, label: data.label || null,
+        country: data.country || null, regulator: data.regulator || null,
+        selector: data.selector || null,
+      }),
     });
-    if (r.status === 401) return alert('Sign in required.');
+    if (r.status === 401) return toast('Sign in required.', 'error');
+    const j = await r.json();
+    if (!j.ok) return toast('Failed: ' + (j.error || '?'), 'error');
+    toast('Watchpoint added. Click "Check all now" to capture the first hash.', 'success');
     wdLoadWatchpoints();
-  } catch (e) { alert('Error: ' + e.message); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 async function wdRunCheckAll() {
-  if (!confirm('Run a fresh check on all active watchpoints? Polite 500ms gap per request.')) return;
+  const ok = await confirmModal({
+    title: 'Check all watchpoints?',
+    sub: 'Fetches every active watchpoint URL with a polite 500ms gap. Recomputes hash; flags any that changed. Typically 10-60 seconds depending on count.',
+    confirmLabel: '▶ Check now',
+  });
+  if (!ok) return;
+  toast('Checking all watchpoints…', 'info', { duration: 4000 });
   try {
     const r = await authFetch(`${PROXY}/watchdog/check`, { method: 'POST' });
-    if (r.status === 401) return alert('Sign in required.');
+    if (r.status === 401) return toast('Sign in required.', 'error');
     const j = await r.json();
-    alert(`Checked ${j.checked || 0} · changed ${j.changed || 0} · errors ${j.errors || 0}`);
+    if (!j.ok) return toast('Failed: ' + (j.error || '?'), 'error');
+    const kind = (j.changed || 0) > 0 ? 'warn' : 'success';
+    toast(`Checked ${j.checked} · changed ${j.changed} · errors ${j.errors}`, kind, { duration: 4500 });
     wdLoadEvents(); wdLoadWatchpoints();
-  } catch (e) { alert('Error: ' + e.message); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 async function wdCheckOne(id) {
+  toast('Checking…', 'info', { duration: 1500 });
   try {
     const r = await authFetch(`${PROXY}/watchdog/check/${id}`, { method: 'POST' });
-    if (r.status === 401) return alert('Sign in required.');
+    if (r.status === 401) return toast('Sign in required.', 'error');
+    const j = await r.json();
+    if (j.changed) toast('Drift detected — see top of page', 'warn');
+    else toast('No change', 'success', { duration: 2000 });
     wdLoadEvents(); wdLoadWatchpoints();
-  } catch (e) { alert('Error: ' + e.message); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 async function wdResolve(id, status) {
   let note = null;
-  if (status === 'kb-updated' || status === 'reviewed') note = prompt('Resolution note (optional):') || null;
+  if (status === 'kb-updated' || status === 'reviewed') {
+    const data = await formModal({
+      title: status === 'kb-updated' ? 'Mark as KB-updated' : 'Mark as reviewed',
+      sub: 'Optionally jot down what changed and what you did about it.',
+      fields: [
+        { key: 'note', label: 'Resolution note (optional)', type: 'textarea',
+          placeholder: status === 'kb-updated'
+            ? 'e.g. Updated KB entry "ndeb-fees-2026" with new $1,250 figure.'
+            : 'e.g. Verified — change is cosmetic; no KB update needed.' },
+      ],
+      submitLabel: status === 'kb-updated' ? '✓ Mark KB-updated' : '✓ Mark reviewed',
+    });
+    if (!data) return;
+    note = data.note || null;
+  }
   try {
     const r = await authFetch(`${PROXY}/watchdog/drift-events/${id}/resolve`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status, note }),
     });
-    if (r.status === 401) return alert('Sign in required.');
+    if (r.status === 401) return toast('Sign in required.', 'error');
+    toast(status === 'dismissed' ? 'Dismissed' : 'Resolved', 'success');
     wdLoadEvents();
-  } catch (e) { alert('Error: ' + e.message); }
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 // Sidebar badge pollers — DM hot+qualifying count, Watchdog pending count
