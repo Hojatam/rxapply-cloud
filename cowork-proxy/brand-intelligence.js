@@ -363,6 +363,11 @@ async function importPublicArchive({ patterns, exemplars, fingerprint, visualPro
   await query(`DELETE FROM brand_voice_fingerprint WHERE source = ${q(stamp)};`);
 
   // ── Voice patterns → intelligence rows ────
+  // M56 hotfix: harden every for...of with explicit Array.isArray check.
+  // Different analyzer outputs may serialize fields as objects/strings rather
+  // than arrays — e.g. dentistapply's analyzer outputs punctuation_tics as
+  // {em_or_en_dash_pct:..., ...} instead of ["em-dash heavy", ...].
+  const _arrOf = (x) => Array.isArray(x) ? x : [];
   lastSection = 'voice_patterns';
   if (patterns && patterns.patterns) {
     for (const [groupKey, group] of Object.entries(patterns.patterns)) {
@@ -371,7 +376,7 @@ async function importPublicArchive({ patterns, exemplars, fingerprint, visualPro
       const language = group.language;
 
       // Banned phrases — high importance
-      for (const ph of (group.banned_or_avoided || [])) {
+      for (const ph of _arrOf(group.banned_or_avoided)) {
         await createIntelligence({
           kind: 'banned_phrase', scope_platform: platform, scope_language: language,
           target_agent: null,            // applies to all agents
@@ -382,7 +387,7 @@ async function importPublicArchive({ patterns, exemplars, fingerprint, visualPro
         intel++;
       }
       // Favored phrases
-      for (const ph of (group.favored_phrases || [])) {
+      for (const ph of _arrOf(group.favored_phrases)) {
         await createIntelligence({
           kind: 'favored_phrase', scope_platform: platform, scope_language: language,
           rule_text: `Brand often uses: "${ph}"`,
@@ -392,7 +397,7 @@ async function importPublicArchive({ patterns, exemplars, fingerprint, visualPro
         intel++;
       }
       // Voice signature words → protected terms
-      for (const w of (group.voice_signature_words || [])) {
+      for (const w of _arrOf(group.voice_signature_words)) {
         await createIntelligence({
           kind: 'protected_term', scope_platform: platform, scope_language: language,
           rule_text: `Brand-signature term: "${w}" — keep verbatim across translations.`,
@@ -427,38 +432,68 @@ async function importPublicArchive({ patterns, exemplars, fingerprint, visualPro
         });
         intel++;
       }
-      // Punctuation tics
-      for (const t of (group.punctuation_tics || [])) {
-        await createIntelligence({
-          kind: 'voice_rule', scope_platform: platform, scope_language: language,
-          target_agent: 'sepehr',
-          rule_text: `Punctuation: ${t}`,
-          rule_data: { tic: t },
-          importance: 3, source: stamp,
-        });
-        intel++;
+      // Punctuation tics — supports BOTH shapes:
+      //   array of strings (legacy) → one rule per string
+      //   object of stats (e.g. {ellipsis_pct: 15.6, lone_dot_separator_lines_pct: 95.8})
+      //     → one summary rule
+      if (Array.isArray(group.punctuation_tics)) {
+        for (const t of group.punctuation_tics) {
+          await createIntelligence({
+            kind: 'voice_rule', scope_platform: platform, scope_language: language,
+            target_agent: 'sepehr',
+            rule_text: `Punctuation: ${t}`,
+            rule_data: { tic: t },
+            importance: 3, source: stamp,
+          });
+          intel++;
+        }
+      } else if (group.punctuation_tics && typeof group.punctuation_tics === 'object') {
+        const stats = Object.entries(group.punctuation_tics)
+          .filter(([k, v]) => typeof v === 'number')
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 6)
+          .map(([k, v]) => `${k.replace(/_pct$/, '').replace(/_/g, ' ')} ${Number(v).toFixed(1)}%`);
+        if (stats.length) {
+          await createIntelligence({
+            kind: 'voice_rule', scope_platform: platform, scope_language: language,
+            target_agent: 'sepehr',
+            rule_text: `Punctuation tics: ${stats.join(', ')}.`,
+            rule_data: group.punctuation_tics,
+            importance: 4, source: stamp,
+            topic_tags: ['punctuation', 'voice'],
+          });
+          intel++;
+        }
       }
-      // Opener templates → opener_template rows + an aggregate rule
-      for (const op of (group.openers && group.openers.templates || [])) {
+      // Opener templates → opener_template rows
+      const openerTemplates = group.openers && Array.isArray(group.openers.templates)
+        ? group.openers.templates : [];
+      for (const op of openerTemplates) {
+        const exSample = op.example || (Array.isArray(op.examples) ? op.examples[0] : '') || '';
         await createIntelligence({
           kind: 'opener_template', scope_platform: platform, scope_language: language,
           target_agent: 'sepehr',
-          rule_text: `Opener pattern (${op.frequency || 0}×): ${op.shape}. Example: "${op.example || ''}"`,
+          rule_text: `Opener pattern (${op.frequency || 0}×, ${op.pct ? op.pct.toFixed(1) + '%' : ''}): ${op.shape}. Example: "${String(exSample).slice(0, 200)}"`,
           rule_data: op,
           importance: Math.min(5, 2 + Math.floor(Math.log10(1 + (op.frequency || 1)))),
           source: stamp,
+          topic_tags: ['opener', 'voice'],
         });
         intel++;
       }
       // CTA templates
-      for (const cta of (group.ctas && group.ctas.templates || [])) {
+      const ctaTemplates = group.ctas && Array.isArray(group.ctas.templates)
+        ? group.ctas.templates : [];
+      for (const cta of ctaTemplates) {
+        const exSample = cta.example || (Array.isArray(cta.examples) ? cta.examples[0] : '') || '';
         await createIntelligence({
           kind: 'cta_template', scope_platform: platform, scope_language: language,
           target_agent: 'sepehr',
-          rule_text: `CTA pattern (${cta.frequency || 0}×): ${cta.form}. Example: "${cta.example || ''}"`,
+          rule_text: `CTA pattern (${cta.frequency || 0}×, ${cta.pct ? cta.pct.toFixed(1) + '%' : ''}): ${cta.form}. Example: "${String(exSample).slice(0, 200)}"`,
           rule_data: cta,
           importance: Math.min(5, 2 + Math.floor(Math.log10(1 + (cta.frequency || 1)))),
           source: stamp,
+          topic_tags: ['cta', 'voice'],
         });
         intel++;
       }
