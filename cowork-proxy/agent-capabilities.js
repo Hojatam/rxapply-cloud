@@ -22,9 +22,11 @@ const CAPABILITY_REGISTRY = {
   pooya:     ['plan', 'research'],
   paya:      ['plan'],
 
-  // KB-grounded fact verification (own dedicated capability so recipes can
-  // explicitly invoke Daneshyar to verify rather than do general research).
-  daneshyar: ['verify', 'research'],
+  // KB-grounded fact verification + multilingual back-translation QA (M41).
+  // 'verify' runs in master phase (post-critique). 'verify-translation' runs
+  // in target-lang phase (post-translate, pre-render-target) and cross-checks
+  // each translation against the master + the KB-derived protected-terms glossary.
+  daneshyar: ['verify', 'verify-translation', 'research'],
 
   // Drafting (long-form, master voice)
   sepehr:    ['draft'],

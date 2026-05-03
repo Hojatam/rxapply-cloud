@@ -38,6 +38,7 @@ const handoffs      = require('./agent-handoffs');
 const capabilities  = require('./agent-capabilities');
 const renderers     = require('./compose-renderers');
 const logWriter     = require('./log-writer');
+const protectedTerms = require('./kb-protected-terms');
 
 const RECIPES_DIR = path.resolve(__dirname, '..', 'compose-recipes');
 
@@ -113,7 +114,7 @@ function _parseJsonOrThrow(text, contextLabel) {
 //   • KB block (for research / draft / critique)
 //   • per-agent memory
 //   • the stage-specific instruction template
-function _buildSystemPrompt({ agent, stageName, recipe, run, masterDraft, lang }) {
+function _buildSystemPrompt({ agent, stageName, recipe, run, masterDraft, lang, protectedTermsBlock = null }) {
   const blocks = [];
 
   // The agent's own SKILL is loaded from disk (agents/<agent>/SKILL.md).
@@ -138,13 +139,20 @@ function _buildSystemPrompt({ agent, stageName, recipe, run, masterDraft, lang }
   const brand = brandProfile.renderAsPromptBlock();
   if (brand) blocks.push(brand);
 
-  // KB grounding for research / verify / draft / critique stages
-  if (['research', 'verify', 'draft', 'critique'].includes(stageName)) {
+  // KB grounding for research / verify / verify-translation / draft / critique / audit stages
+  if (['research', 'verify', 'verify-translation', 'draft', 'critique', 'audit'].includes(stageName)) {
     try {
       const country = KB.detectCountry(run.topic);
       const kb = KB.renderAsBlock({ country, query: run.topic, limit: 6 });
       if (kb) blocks.push(kb);
     } catch (_) { /* non-fatal */ }
+  }
+
+  // M41 · Protected terms glossary — auto-derived from KB, never seeded.
+  // Injected for verify-translation (where it matters most) and translate (so the translator
+  // sees the protected list before it's checked against). Empty on first run; grows as KB grows.
+  if (protectedTermsBlock && ['verify-translation', 'translate'].includes(stageName)) {
+    blocks.push(protectedTermsBlock);
   }
 
   // Per-agent memory (top procedural + relevant semantic).
@@ -284,8 +292,12 @@ listed in params.produce. Return ONLY this JSON:
 }`,
 
   translate:
-`Translate the master output into {{lang_label}} ({{lang_code}}). Preserve the tone, the CTAs,
-the named entities (regulators, institutions). Do NOT add new claims. Return ONLY this JSON:
+`Translate the master output into {{lang}} ({{lang}}). Preserve the tone, the CTAs,
+the named entities (regulators, institutions). Do NOT add new claims. Use the
+PROTECTED TERMS list in your system prompt — those terms must appear EXACTLY
+as listed; do NOT translate them, abbreviate, or substitute.
+
+Return ONLY this JSON:
 
 {
   "fields": {
@@ -293,6 +305,52 @@ the named entities (regulators, institutions). Do NOT add new claims. Return ONL
   },
   "handoff_intent": null
 }`,
+
+  'verify-translation':
+`You are Daneshyar performing back-translation QA on the {{lang}} translation
+above. The MASTER output is in the language indicated; the TRANSLATED output
+is in {{lang}}.
+
+Your task — three passes:
+
+  1. **Back-translation pass.** Mentally back-translate the {{lang}} version
+     to the master language. Compare to the master. Flag any meaning drift
+     (claims that changed, intensity that shifted, CTAs that softened or
+     hardened, regulators / numbers / dates that moved).
+
+  2. **Protected-terms pass.** Every term in the PROTECTED TERMS list (in
+     your system prompt) MUST appear in the translation EXACTLY as listed.
+     If a protected term was translated, abbreviated, or replaced, flag it.
+
+  3. **KB consistency pass.** Cross-check every claim in the translation
+     against the KB block in your system prompt. If the translation introduces
+     a claim the master didn't make AND that claim isn't supported by KB,
+     flag it.
+
+Return ONLY this JSON:
+
+{
+  "passed": true | false,
+  "issues": [
+    { "kind": "meaning-drift | protected-term | kb-claim",
+      "severity": "high | medium | low",
+      "master_phrase": "<exact text from master>",
+      "translated_phrase": "<exact text from translation>",
+      "problem": "<one sentence>",
+      "fix": "<safer phrasing>"
+    }
+  ],
+  "protected_terms_check": {
+    "n_protected_terms_in_glossary": <int>,
+    "n_terms_present_in_translation": <int>,
+    "n_terms_violated": <int>
+  },
+  "overall_confidence": 0.00,
+  "handoff_intent": null
+}
+
+Pass requires: zero high-severity issues AND no protected-term violations.
+A medium-severity meaning drift is OK to flag but does NOT fail the run.`,
 
   design:
 `You are Afshin, the visual director for the RxApply brand. Avang has
@@ -554,20 +612,29 @@ function _nextPendingStage({ recipe, run, existingStages }) {
   }
   // Phase 2: translate per target language (only after master is fully done)
   if (recipe.translate && (run.target_langs || []).length > 0) {
-    const baseIndex = masterStages.length;
-    for (const lang of run.target_langs) {
-      if (lang === run.master_lang) continue;
+    const baseIndex      = masterStages.length;
+    const verifyTrIndex  = masterStages.length + 1;        // M41
+    const renderIndex    = masterStages.length + 2;
+    const targetLangs    = run.target_langs.filter(l => l !== run.master_lang);
+
+    // Phase 2a: translate(lang) for each target
+    for (const lang of targetLangs) {
       const row = existingStages.find(s => s.stage_index === baseIndex && s.lang === lang);
       if (!row || row.status !== 'done') {
         return { stageIndex: baseIndex, stage: { name: 'translate', capability: recipe.translate.capability || 'translate' }, lang, phase: 'translate' };
       }
     }
+    // Phase 2b: M41 · verify-translation(lang) for each target — back-translate + glossary check
+    for (const lang of targetLangs) {
+      const row = existingStages.find(s => s.stage_index === verifyTrIndex && s.lang === lang);
+      if (!row || row.status !== 'done') {
+        return { stageIndex: verifyTrIndex, stage: { name: 'verify-translation', capability: 'verify-translation' }, lang, phase: 'verify-translation' };
+      }
+    }
     // Phase 3: re-render per target language
     if (recipe.stages.find(s => s.name === 'render')) {
       const renderStage = recipe.stages.find(s => s.name === 'render');
-      const renderIndex = baseIndex + 1;
-      for (const lang of run.target_langs) {
-        if (lang === run.master_lang) continue;
+      for (const lang of targetLangs) {
         const row = existingStages.find(s => s.stage_index === renderIndex && s.lang === lang);
         if (!row || row.status !== 'done') {
           return { stageIndex: renderIndex, stage: renderStage, lang, phase: 'render-target' };
@@ -674,8 +741,15 @@ async function _executeLlmStage({ runId, run, recipe, stage, stageIndex, lang, p
   userParts.push(`\nReturn the JSON for stage "${stageName}" now.`);
   const userPrompt = userParts.join('\n');
 
+  // M41 · Pre-fetch protected-terms block for verify-translation / translate.
+  let protectedTermsBlock = null;
+  if (['verify-translation', 'translate'].includes(stageName)) {
+    try { protectedTermsBlock = await protectedTerms.renderAsPromptBlock(); }
+    catch (_) { /* non-fatal — KB may not be reachable; verify still runs without the block */ }
+  }
+
   const systemPrompt = _buildSystemPrompt({
-    agent, stageName, recipe, run, masterDraft, lang,
+    agent, stageName, recipe, run, masterDraft, lang, protectedTermsBlock,
   });
 
   // Open an agent_runs row so this stage execution shows up in the agent's
