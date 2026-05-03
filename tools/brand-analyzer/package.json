@@ -1,0 +1,19 @@
+{
+  "name": "rxapply-brand-analyzer",
+  "version": "1.0.0",
+  "description": "Local CLI: ingest Telegram + Instagram archive, extract brand voice + visual style, output JSONs for the control plane",
+  "private": true,
+  "main": "analyze.js",
+  "type": "commonjs",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "analyze": "node analyze.js",
+    "upload": "node upload.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.36.0",
+    "openai": "^4.80.0",
+    "yauzl": "^3.2.0",
+    "node-vibrant": "^3.2.1-alpha.1"
+  }
+}
