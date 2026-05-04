@@ -3,7 +3,8 @@
   "label": "SEO article",
   "icon": "newspaper",
   "description": "Long-form article optimised for organic search: headline, slug, meta description, H1/H2 outline, full body in MDX/HTML, optional hero image.",
-  "version": "3",
+  "version": "4",
+  "length_target_words": "1200–2000 (long-form SEO content — different content type)",
 
   "stages": [
     { "name": "plan",     "capability": "plan" },

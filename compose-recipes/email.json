@@ -3,7 +3,8 @@
   "label": "Email",
   "icon": "mail",
   "description": "HTML email with subject, preview text, body, and an optional hero image. Good for campaigns, announcements, newsletters.",
-  "version": "3",
+  "version": "4",
+  "length_target_words": "400–700 (long-form newsletter — different content type from social posts)",
 
   "stages": [
     { "name": "plan",     "capability": "plan" },

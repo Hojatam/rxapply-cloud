@@ -3,11 +3,12 @@
   "label": "Telegram post",
   "icon": "send",
   "description": "Telegram channel post with markdown, emoji, optional cover image, and a CTA. Length-aware (capped to one screen).",
-  "version": "3",
+  "version": "4",
+  "length_target_words": "17–58 (mean 46, p95 139 — rarely exceed 139)",
 
   "stages": [
     { "name": "plan",     "capability": "plan" },
-    { "name": "draft",    "capability": "draft", "params": { "length_words": [120, 280] } },
+    { "name": "draft",    "capability": "draft", "params": { "length_words": [17, 58], "hard_max_words": 139 } },
     { "name": "critique", "capability": "critique" },
     { "name": "verify",   "capability": "verify" },
     { "name": "voice-critic", "capability": "voice-critic" },

@@ -3,7 +3,8 @@
   "label": "X thread",
   "icon": "twitter",
   "description": "Multi-tweet thread for X (Twitter): hook tweet + 4-12 body tweets + closing tweet with CTA. Auto-split per 280-char tweets. Optional cover for the first tweet.",
-  "version": "3",
+  "version": "4",
+  "length_target_words": "350–800 (multi-tweet thread, total across all tweets)",
 
   "stages": [
     { "name": "plan",     "capability": "plan" },

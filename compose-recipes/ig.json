@@ -3,12 +3,13 @@
   "label": "Instagram",
   "icon": "instagram",
   "description": "Instagram feed post: caption + hashtags + cover image OR multi-slide carousel (Tarrah plans the slides, Afshin renders).",
-  "version": "5",
+  "version": "6",
+  "length_target_words": "38–75 (mean 60, p95 119 — never exceed 119)",
 
   "stages": [
     { "name": "plan",     "capability": "plan" },
     { "name": "research", "capability": "research", "if_complexity_at_least": "standard" },
-    { "name": "draft",    "capability": "draft", "params": { "length_words": [80, 220] } },
+    { "name": "draft",    "capability": "draft", "params": { "length_words": [38, 75], "hard_max_words": 119 } },
     { "name": "critique", "capability": "critique" },
     { "name": "verify",   "capability": "verify" },
     { "name": "voice-critic", "capability": "voice-critic" },

@@ -267,38 +267,75 @@ Pass requires: zero issues with confidence < 0.7 AND no claim flagged "unverifia
 
   draft:
 `Using the plan + research, write the FIRST DRAFT in the master voice for the format below.
-Format: {{recipe.label}}. Length target: {{recipe.length_target_words}} words (or as appropriate
-for the format). Master language: {{run.master_lang}}. Do NOT translate; downstream stages
-handle that.
+Format: {{recipe.label}}. Length target (recipe-level guidance): {{recipe.length_target_words}}.
+Master language: {{run.master_lang}}. Do NOT translate; downstream stages handle that.
+
+PRIORITY ORDER FOR LENGTH AND VOICE (M58 hard rule):
+  1. The "Brand intelligence" rules in your system prompt are the BRAND'S
+     ACTUAL DATA from 5 years of real posts. They WIN. If a brand rule
+     says caption length is "38–75 words" and the recipe says something
+     different, FOLLOW THE BRAND RULE.
+  2. Brand voice opener patterns (lead-with-bullet emoji, plain-statement
+     etc.) — match the highest-frequency pattern relevant to platform+language.
+  3. Brand voice CTA patterns — use the dominant statement-close style;
+     hard-sell CTAs are explicitly avoided by the brand (<2% of all posts).
+  4. The recipe's length range above is a fallback ONLY when no brand
+     length rule is present in your system prompt.
+
+HARD CAPS (never exceed):
+  • Instagram FA: never exceed 119 words (brand p95).
+  • Telegram FA:  never exceed 139 words (brand p95).
+  • If you write past these, the critique stage WILL fail the draft.
 
 Return ONLY this JSON:
 
 {
   "title": "<the headline / subject / hook line>",
   "body": "<the full draft body in the master language>",
+  "word_count": <integer — count words in body, you must be honest>,
   "tone_notes": "<one sentence — how the voice carries>",
+  "length_check": "<one sentence — which brand length rule applies and your word count vs that range>",
   "handoff_intent": null
 }`,
 
   critique:
-`Score the draft below against brand voice + format rules. Return ONLY this JSON:
+`Score the draft below against brand voice + format rules. Brand-voice rules in
+your system prompt are the SOURCE OF TRUTH (5 years of real post data).
+
+LENGTH CHECK — do this first, mechanically:
+  1. Count words in draft.body.
+  2. Look up the platform+language length rule in your "Brand intelligence"
+     block (e.g. "instagram-fa caption length: target 38.5-75.5 words ...
+     p95 = 119; rarely exceed").
+  3. If word count > p95 from the brand rule → set verdict = "fail" and
+     length_score = 0.00 with the actionable_fix "Cut to <range> words —
+     current draft is N words, brand p95 is M".
+  4. If word count is between target_max and p95 → length_score = 0.50,
+     verdict at most "needs_refine", actionable_fix to bring it into target.
+  5. If word count is in target range → length_score = 1.00.
+  6. If word count is far below target_min → length_score = 0.50 (under-spec).
+
+Return ONLY this JSON:
 
 {
   "verdict": "pass" | "needs_refine" | "fail",
-  "verdict_reason": "<one sentence>",
+  "verdict_reason": "<one sentence — call out length explicitly if that's the issue>",
+  "word_count": <integer>,
+  "length_rule_applied": "<the exact brand length rule you applied, verbatim>",
   "scores": {
     "brand_voice": 0.00,
     "specificity": 0.00,
     "cta_present": 0.00,
     "banned_phrases_clean": 0.00,
-    "format_fit": 0.00
+    "format_fit": 0.00,
+    "length_fit": 0.00
   },
   "actionable_fixes": ["<fix 1>", "..."],
   "handoff_intent": null
 }
 
-A draft passes if every score >= 0.70 AND no banned phrase. Otherwise verdict is "needs_refine"
-or "fail" depending on severity.`,
+A draft passes if every score >= 0.70 AND no banned phrase AND word_count <= brand p95.
+Length over p95 is an automatic FAIL regardless of other scores.`,
 
   audit:
 `You are running RED-TEAM audit on a draft about to publish on RxApply. This
@@ -562,8 +599,8 @@ M64 · Stock photos (Unsplash) — when to use instead of generating:
   a stock photo and overlay your text/brand block on top. Generating
   these from scratch is wasteful and often less convincing.
 
-  Set `image_source: "unsplash"` in your output and provide a clean
-  English search query in `unsplash_query`. The system will pick the
+  Set image_source = "unsplash" in your output and provide a clean
+  English search query in unsplash_query. The system will pick the
   top-relevance photo, attribute the photographer per Unsplash terms,
   and store it in media_library. You then design the text overlay on
   top of that photo at render time.
@@ -574,7 +611,7 @@ M64 · Stock photos (Unsplash) — when to use instead of generating:
   watercolor occasion days, any slide where the visual identity matters
   more than the photo subject.
 
-  When `image_source: "unsplash"`, you don't need `recommended_model`
+  When image_source = "unsplash", you don't need recommended_model
   for that slide — just the search query.
 
 Return ONLY this JSON:

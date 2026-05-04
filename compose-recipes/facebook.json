@@ -3,7 +3,8 @@
   "label": "Facebook post",
   "icon": "facebook",
   "description": "Facebook page or group post: short hook, body, CTA, optional cover image.",
-  "version": "3",
+  "version": "4",
+  "length_target_words": "80–220 (no brand archive data; mirroring IG range as a safe default)",
 
   "stages": [
     { "name": "plan",     "capability": "plan" },
