@@ -173,6 +173,28 @@ async function _buildSystemPrompt({ agent, stageName, recipe, run, masterDraft, 
     }
   } catch (_) { /* non-fatal */ }
 
+  // M69 · Refine notes — when the orchestrator is re-running this stage
+  // because a downstream stage rejected the previous output, inject the
+  // failing stage's actionable_fixes verbatim. The model sees what to
+  // change before producing the next attempt.
+  try {
+    const refine = _latestRefineFor(run, stageName);
+    if (refine) {
+      const cap = (recipe.stages || []).find(s => s.name === refine.from_stage);
+      const capN = _resolveRetryCap(cap, refine.from_stage);
+      const lines = [];
+      lines.push(`# 🔄 REFINE NOTES (attempt #${refine.attempt} of ${capN})`);
+      lines.push(`The previous draft was rejected by the ${refine.from_stage} stage with verdict="${refine.reason}".`);
+      lines.push(`Address each fix below in this attempt:`);
+      for (const f of (refine.fixes || [])) {
+        lines.push(`  • ${f}`);
+      }
+      lines.push('');
+      lines.push(`If you ignore these fixes, the ${refine.from_stage} stage will reject this attempt too — and after ${capN} refines the run halts and the founder is asked to intervene.`);
+      blocks.push(lines.join('\n'));
+    }
+  } catch (_) { /* non-fatal */ }
+
   // M68 · Stage-specific instruction template, resolution order:
   //   1. recipe.stage_prompts[stageName]   — per-recipe override (rare)
   //   2. agents/<agent>/stages/<stage>.md  — per-agent stage file (preferred)
@@ -780,6 +802,7 @@ async function getRun(id) {
       SELECT id::text, recipe_id, recipe_version, topic, audience, master_lang, target_langs,
               options, gate_strategy, agent_overrides, status, current_stage, error,
               final_output, total_cost_usd, total_input_tokens, total_output_tokens,
+              refine_attempts, refine_status,
               created_at::text, started_at::text, finished_at::text
         FROM compose_runs WHERE id = ${q(id)}
     ) r;`);
@@ -890,6 +913,146 @@ async function _markAwaitingApproval(runId, stageName) {
   await query(`UPDATE compose_runs
                   SET status = 'awaiting_approval', current_stage = ${q(stageName)}
                 WHERE id = ${q(runId)};`);
+}
+
+// ── M69 · Refine loops ───────────────────────────────────────────────
+//
+// When critique/verify/audit/voice-critic/verify-translation comes back
+// with a failing verdict, we automatically re-run the previous LLM stage
+// (typically draft) with a # REFINE NOTES block built from the failing
+// stage's actionable_fixes. Each refine attempt is recorded on
+// compose_runs.refine_attempts.
+//
+// retry_cap is read from (in order):
+//   1. recipe stage's `retry_cap` field (per-pipeline override, M72A)
+//   2. per-agent stage file frontmatter `retry_cap` (M68)  [TODO: parse frontmatter]
+//   3. _DEFAULT_RETRY_CAPS map below (last-resort default)
+const _DEFAULT_RETRY_CAPS = {
+  critique: 2,
+  verify: 1,
+  audit: 0,                     // block immediately on uncited claims
+  'voice-critic': 1,
+  'verify-translation': 1,
+};
+
+// Map: failing stage → which prior stage to re-run.
+// The orchestrator looks back through completed stages to find the most
+// recent matching role.
+const _REFINE_TARGETS = {
+  critique:              ['draft'],
+  verify:                ['draft'],
+  audit:                 ['draft'],
+  'voice-critic':        ['draft'],
+  'verify-translation':  ['translate'],
+};
+
+// Inspect a stage output to decide whether it triggers a refine.
+// Returns { trigger:true, reason, fixes[] } or null.
+function _detectRefineTrigger(stageName, output) {
+  if (!output || typeof output !== 'object') return null;
+  const v = output.verdict;
+  const fixes = Array.isArray(output.actionable_fixes) ? output.actionable_fixes.slice(0, 6) : [];
+  const driftAsFixes = Array.isArray(output.drift_concerns)
+    ? output.drift_concerns.map(d => `[${d.aspect || '?'}] ${d.fix || d.observed || ''}`).slice(0, 6)
+    : [];
+  const claimsAsFixes = Array.isArray(output.claims)
+    ? output.claims.filter(c => c.status === 'uncited' || c.status === 'conflicting')
+                    .map(c => `[${c.kind || 'claim'}] ${c.fix || ''} (was: "${(c.claim || '').slice(0, 120)}")`)
+                    .slice(0, 6)
+    : [];
+
+  if (stageName === 'critique' && (v === 'fail' || v === 'needs_refine')) {
+    return { trigger: true, reason: v, fixes };
+  }
+  if (stageName === 'voice-critic' && (v === 'block' || v === 'needs_voice_polish')) {
+    return { trigger: true, reason: v, fixes: driftAsFixes };
+  }
+  if (stageName === 'verify' && output.passed === false) {
+    const issuesAsFixes = Array.isArray(output.issues)
+      ? output.issues.map(i => `${i.fix || 'review'} (was: "${(i.claim || '').slice(0, 120)}")`).slice(0, 6)
+      : [];
+    return { trigger: true, reason: 'verify_failed', fixes: issuesAsFixes };
+  }
+  if (stageName === 'verify-translation' && output.passed === false) {
+    const issuesAsFixes = Array.isArray(output.issues)
+      ? output.issues.map(i => `${i.fix || 'review'} (was: "${(i.translated_phrase || '').slice(0, 120)}")`).slice(0, 6)
+      : [];
+    return { trigger: true, reason: 'verify_translation_failed', fixes: issuesAsFixes };
+  }
+  if (stageName === 'audit' && v === 'block') {
+    return { trigger: true, reason: 'audit_block', fixes: claimsAsFixes };
+  }
+  return null;
+}
+
+// Resolve retry_cap for a stage: pipeline override > stage file frontmatter > default.
+function _resolveRetryCap(stageDefn, stageName) {
+  if (stageDefn && Number.isFinite(stageDefn.retry_cap)) return stageDefn.retry_cap;
+  return _DEFAULT_RETRY_CAPS[stageName] != null ? _DEFAULT_RETRY_CAPS[stageName] : 0;
+}
+
+// Find the previous LLM stage to refine. Returns { stageIndex, stage, lang } or null.
+function _findRefineTarget({ recipe, run, failingStageName, lang }) {
+  const targets = _REFINE_TARGETS[failingStageName] || [];
+  if (!targets.length) return null;
+  const stages = recipe.stages || [];
+  // Look backward through completed master stages for the most recent target.
+  // For target-language phase (verify-translation), look at translate rows by lang.
+  for (let i = stages.length - 1; i >= 0; i--) {
+    const s = stages[i];
+    if (!targets.includes(s.name)) continue;
+    return { stageIndex: i, stage: s, lang: lang || null };
+  }
+  return null;
+}
+
+// How many times have we already refined a given target stage?
+function _countRefinesFor(run, toStageName) {
+  const arr = Array.isArray(run.refine_attempts) ? run.refine_attempts : [];
+  return arr.filter(a => a && a.to_stage === toStageName).length;
+}
+
+// Look up the most recent refine entry that targets this stage. Used by
+// _buildSystemPrompt to inject the "REFINE NOTES" block when re-running.
+function _latestRefineFor(run, stageName) {
+  const arr = Array.isArray(run.refine_attempts) ? run.refine_attempts : [];
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (arr[i] && arr[i].to_stage === stageName) return arr[i];
+  }
+  return null;
+}
+
+// Append a refine entry on compose_runs and reset the target stage row to
+// 'pending' so the next tick re-executes it.
+async function _enqueueRefine({ runId, run, fromStage, toStage, reason, fixes, attempt, targetStageIndex, lang }) {
+  const entry = {
+    from_stage: fromStage,
+    to_stage:   toStage,
+    reason,
+    fixes:      Array.isArray(fixes) ? fixes : [],
+    attempt,
+    at:         new Date().toISOString(),
+    lang:       lang || null,
+  };
+  const newAttempts = [...(run.refine_attempts || []), entry];
+  await query(`
+    UPDATE compose_runs
+       SET refine_attempts = ${qJson(newAttempts)}::jsonb,
+           refine_status = 'in_progress',
+           current_stage = ${q(toStage)}
+     WHERE id = ${q(runId)};`);
+
+  // Reset the target stage's row to pending so _nextPendingStage picks it up.
+  // We DELETE the existing row rather than UPDATE so the orchestrator's "find
+  // missing/non-done row" logic re-queues it cleanly.
+  if (lang) {
+    await query(`DELETE FROM compose_stages
+                  WHERE run_id = ${q(runId)} AND stage_index = ${targetStageIndex} AND lang = ${q(lang)};`);
+  } else {
+    await query(`DELETE FROM compose_stages
+                  WHERE run_id = ${q(runId)} AND stage_index = ${targetStageIndex} AND lang IS NULL;`);
+  }
+  return entry;
 }
 
 // M40 · Effort-scaling — complexity tiers from the plan stage.
@@ -1282,6 +1445,55 @@ async function _executeLlmStage({ runId, run, recipe, stage, stageIndex, lang, p
       importance: 2, source: 'auto',
     });
   } catch (_) { /* non-fatal */ }
+
+  // ── M69 · Refine loop check ───────────────────────────────────────
+  // If this stage's verdict triggers a refine AND retry_cap is not yet
+  // reached AND there is a previous LLM stage to re-run → reset that
+  // stage to pending and append an entry on compose_runs.refine_attempts.
+  // The next tick re-executes the target with a # REFINE NOTES block.
+  if (finalStatus === 'done' && parsed) {
+    try {
+      const trigger = _detectRefineTrigger(stageName, parsed);
+      if (trigger && trigger.trigger) {
+        const target = _findRefineTarget({ recipe, run, failingStageName: stageName, lang });
+        if (target) {
+          const cap = _resolveRetryCap(stage, stageName);
+          const already = _countRefinesFor(run, target.stage.name);
+          if (already < cap) {
+            await _enqueueRefine({
+              runId, run,
+              fromStage: stageName,
+              toStage:   target.stage.name,
+              reason:    trigger.reason,
+              fixes:     trigger.fixes,
+              attempt:   already + 1,
+              targetStageIndex: target.stageIndex,
+              lang:      target.lang,
+            });
+            console.log(`[M69] refine ${stageName}→${target.stage.name} attempt ${already + 1}/${cap} (run ${runId.slice(0,8)})`);
+            // Don't gate this refine cycle — the next tick re-executes the target.
+            return await getRun(runId);
+          } else {
+            // Cap reached. Mark refine_status accordingly so the UI can show
+            // "founder must intervene"; gate this stage so the run pauses.
+            await query(`UPDATE compose_runs
+                            SET refine_status = 'cap_reached'
+                          WHERE id = ${q(runId)};`);
+            await query(`UPDATE compose_stages
+                            SET status = 'gated', approval_required = TRUE,
+                                finished_at = COALESCE(finished_at, NOW())
+                          WHERE run_id = ${q(runId)} AND stage_name = ${q(stageName)}
+                            AND ${lang ? `lang = ${q(lang)}` : 'lang IS NULL'};`);
+            await _markAwaitingApproval(runId, stageName);
+            console.log(`[M69] refine cap_reached ${stageName}→${target.stage.name} (${already}/${cap}) run ${runId.slice(0,8)}`);
+            return await getRun(runId);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[M69] refine handler threw, continuing:', e.message);
+    }
+  }
 
   if (gateHere) {
     await _markAwaitingApproval(runId, stageName);
