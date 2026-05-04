@@ -132,9 +132,15 @@ async function _buildSystemPrompt({ agent, stageName, recipe, run, masterDraft, 
     }
   } catch (_) { /* non-fatal */ }
 
-  // Stage-specific instruction template (per-recipe override beats default).
-  const tmpl = (recipe.stage_prompts && recipe.stage_prompts[stageName])
-            || _DEFAULT_STAGE_PROMPTS[stageName];
+  // M68 · Stage-specific instruction template, resolution order:
+  //   1. recipe.stage_prompts[stageName]   — per-recipe override (rare)
+  //   2. agents/<agent>/stages/<stage>.md  — per-agent stage file (preferred)
+  //   3. _DEFAULT_STAGE_PROMPTS[stage]     — hardcoded last-resort fallback
+  // The per-agent file is the source of truth; the dashboard's Pipeline tab
+  // edits it directly. Cache with file-mtime invalidation.
+  let tmpl = (recipe.stage_prompts && recipe.stage_prompts[stageName])
+          || _loadStagePrompt(agent, stageName)
+          || _DEFAULT_STAGE_PROMPTS[stageName];
   if (tmpl) {
     blocks.push(`# This stage: ${stageName}\n${_renderTemplate(tmpl, { run, recipe, masterDraft, lang })}`);
   }
@@ -636,6 +642,45 @@ Return ONLY this JSON:
 
 The final_prompt should be 60-160 words, vivid and specific (for generated). For unsplash mode, it's a short overlay-design note.`,
 };
+
+// ── M68 · Per-agent stage prompt loader ──────────────────────────────
+// Reads agents/<agent>/stages/<stage>.md, strips YAML frontmatter,
+// returns the prompt body. Cached in-memory keyed by file path; cache
+// is invalidated by mtime check on each read (cheap, single fs.statSync).
+const _stagePromptCache = new Map();   // path → { mtimeMs, body }
+
+function _loadStagePrompt(agent, stageName) {
+  if (!agent || !stageName) return null;
+  const filePath = path.resolve(__dirname, '..', 'agents', agent, 'stages', `${stageName}.md`);
+  let stat;
+  try { stat = fs.statSync(filePath); }
+  catch (_) { return null; }   // file doesn't exist → fall through to default
+
+  const cached = _stagePromptCache.get(filePath);
+  if (cached && cached.mtimeMs === stat.mtimeMs) return cached.body;
+
+  let raw;
+  try { raw = fs.readFileSync(filePath, 'utf8'); }
+  catch (_) { return null; }
+
+  // Strip YAML frontmatter (--- ... ---) at top of file
+  let body = raw;
+  if (body.startsWith('---')) {
+    const closeIdx = body.indexOf('\n---', 3);
+    if (closeIdx > 0) body = body.slice(closeIdx + 4).replace(/^\r?\n+/, '');
+  }
+  body = body.trim();
+
+  _stagePromptCache.set(filePath, { mtimeMs: stat.mtimeMs, body });
+  return body || null;
+}
+
+// Cache invalidation hook — call from server.js after PUT writes a stage file.
+function _invalidateStagePromptCache(agent, stageName) {
+  if (!agent || !stageName) { _stagePromptCache.clear(); return; }
+  const filePath = path.resolve(__dirname, '..', 'agents', agent, 'stages', `${stageName}.md`);
+  _stagePromptCache.delete(filePath);
+}
 
 // Tiny mustache-style template renderer (no external dep).
 function _renderTemplate(tmpl, ctx) {
@@ -1477,4 +1522,6 @@ module.exports = {
   start, getRun, listRuns, tick, runToBlock, approve, cancel,
   // M44 · checkpointed state
   forkFromStage,
+  // M68 · stage-prompt loader + cache invalidation hook
+  _loadStagePrompt, _invalidateStagePromptCache,
 };

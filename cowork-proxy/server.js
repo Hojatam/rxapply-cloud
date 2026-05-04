@@ -502,6 +502,85 @@ app.post('/prompts/:agent/rollback', auth.middleware, async (req, res) => {
   res.json({ ok: true, agent, restored_from: parseInt(to, 10), new_version: r.version });
 });
 
+// ── M68 · Per-agent stage prompt endpoints ──────────────────────────
+// One file per (agent, stage) at agents/<agent>/stages/<stage>.md.
+// These are the per-stage instructions the orchestrator injects after
+// the agent's SKILL.md. Edit here once, every Compose run that routes
+// the stage to this agent picks up the change on next call.
+//
+// GET    /agents/:agent/stages           → list stage files for this agent
+// GET    /agents/:agent/stages/:stage    → returns markdown body
+// PUT    /agents/:agent/stages/:stage    → body {markdown:"..."} → writes file + invalidates cache
+const STAGE_NAME_RE = /^[a-z][a-z0-9_-]{0,40}$/;
+
+app.get('/agents/:agent/stages', (req, res) => {
+  const { agent } = req.params;
+  if (!AGENT_NAME_RE.test(agent)) return res.status(400).json({ error: 'invalid agent name' });
+  const dir = path.join(AGENTS_DIR, agent, 'stages');
+  if (!fs.existsSync(dir)) return res.json({ ok: true, agent, stages: [] });
+  try {
+    const stages = fs.readdirSync(dir)
+      .filter(f => f.endsWith('.md'))
+      .map(f => {
+        const stage = f.replace(/\.md$/, '');
+        const fp = path.join(dir, f);
+        const stat = fs.statSync(fp);
+        return { stage, path: fp, bytes: stat.size, mtime: stat.mtime.toISOString() };
+      })
+      .sort((a, b) => a.stage.localeCompare(b.stage));
+    res.json({ ok: true, agent, count: stages.length, stages });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.get('/agents/:agent/stages/:stage', (req, res) => {
+  const { agent, stage } = req.params;
+  if (!AGENT_NAME_RE.test(agent))   return res.status(400).json({ error: 'invalid agent name' });
+  if (!STAGE_NAME_RE.test(stage))   return res.status(400).json({ error: 'invalid stage name' });
+  const fp = path.join(AGENTS_DIR, agent, 'stages', `${stage}.md`);
+  if (!fs.existsSync(fp))           return res.status(404).json({ error: 'stage file not found', path: fp });
+  fs.readFile(fp, 'utf-8', (err, data) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({
+      ok: true, agent, stage, path: fp,
+      markdown: data, chars: data.length, bytes: Buffer.byteLength(data, 'utf-8'),
+    });
+  });
+});
+
+app.put('/agents/:agent/stages/:stage', auth.middleware, async (req, res) => {
+  const { agent, stage } = req.params;
+  if (!AGENT_NAME_RE.test(agent)) return res.status(400).json({ error: 'invalid agent name' });
+  if (!STAGE_NAME_RE.test(stage)) return res.status(400).json({ error: 'invalid stage name' });
+
+  let markdown, reason = null;
+  if (Buffer.isBuffer(req.body))           markdown = req.body.toString('utf-8');
+  else if (typeof req.body === 'string')   markdown = req.body;
+  else if (req.body && typeof req.body.markdown === 'string') {
+    markdown = req.body.markdown;
+    reason = req.body.reason || null;
+  } else return res.status(400).json({ error: 'send {markdown:"..."} or raw text body' });
+
+  if (!markdown.trim().startsWith('---')) {
+    return res.status(400).json({
+      error: 'stage file must start with YAML frontmatter (---)',
+      hint: 'frontmatter must include at least: agent + stage',
+    });
+  }
+
+  const dir = path.join(AGENTS_DIR, agent, 'stages');
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const fp = path.join(dir, `${stage}.md`);
+
+  try {
+    fs.writeFileSync(fp, markdown, 'utf-8');
+    composeOrchestrator._invalidateStagePromptCache(agent, stage);
+    // M68 ships file-only; full DB-backed versioning of stage edits lands
+    // alongside Pipeline tab v2 (M72) where the version-history UI lives.
+    log(`stage.put agent=${agent} stage=${stage} chars=${markdown.length} reason=${reason || '-'}`);
+    res.json({ ok: true, agent, stage, path: fp, chars: markdown.length });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ── F7 · auth routes ────────────────────────────────────────────────────
 app.get('/auth/status', (_, res) => {
   res.json({
