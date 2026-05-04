@@ -60,13 +60,13 @@ own judgment for visual_concept + image_source + design_directive.
 ## Brand assets you MUST inject (M82)
 
 Every generated prompt for a brand-pattern slide should mention:
-- Brand teal #13a597 (logo, accents, key word highlights)
-- Block colors per Tarrah: navy #1c3a52 (analytical) | teal #13a597
+- Brand teal #00a69c (logo, accents, key word highlights)
+- Block colors per Tarrah: navy #1c3a52 (analytical) | teal #00a69c
   (positive) | red #cb3a3a (urgent/USA) | green #1f3d22 (Germany) |
   brown #bca175 (occasion) | orange #ff7a1a (DEADLINE only)
 - Persian numerals (۰۱۲۳۴۵۶۷۸۹) when language is fa
 - RTL layout when language is fa or ar
-- Vazirmatn or similar Persian-supporting bold sans-serif
+- Peyda (Persian-supporting bold sans-serif from RxApply Brand Kit)
 
 Plus ALWAYS list as negative-prompt:
 - No clichéd dental imagery (toothbrushes, pills)

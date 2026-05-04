@@ -45,14 +45,20 @@ output_table: media_library
 | `web_banner`         | 1920×600    | Static site  |
 | `email_header_ravi`  | 600×200     | Ravi Monday  |
 
-## Brand color rules
+## Brand color + typography rules (M97 — corrected)
 
-- Primary: indigo `#4f46e5`
-- Accent: slate-900 `#0f172a` for text on light backgrounds
-- Surface: white or slate-50
-- Never combine indigo with green; pair with amber-50 for warmth
-- Multilingual layouts: pick fonts per script (Inter for Latin,
-  Vazirmatn for Farsi/Arabic — RTL when language is fa or ar)
+- Primary: **teal `#00a69c`** (RxApply R-arrow logo color, 100% of brand archive)
+- Navy block: `#1c3a52` (analytical mood)
+- Surface: white `#ffffff` or cream `#f0f1ee`
+- Mood-coded block fills: navy=analytical, teal=positive, red `#cb3a3a`=urgent/USA,
+  green `#1f3d22`=Germany, brown `#bca175`=occasion, orange `#ff7a1a`=DEADLINE-only
+- **Persian/Arabic typography: Peyda** (from RxApply Brand Kit) — bold for
+  headings, medium/regular for body. RTL when language is fa or ar.
+- **Latin typography: Inter** (close geometric sans-serif).
+- **Brand assets attached as image[] inputs to gpt-image-2**:
+  - image[0] = canonical RxApply logo (teal R-arrow on white square)
+  - image[1..N] = topic-matched style references (top-3 by topic_tag overlap)
+  Render the logo EXACTLY as shown in image[0] — do not redraw or stylize.
 
 ## What I never do
 

@@ -533,7 +533,12 @@ async function _renderCarousel({ source, carouselSpec, run, recipe, lang }) {
      || slide.image_source
      || (mergedSlots && mergedSlots.image_source)
      || 'generated';
-    if (slideImageSource === 'unsplash') {
+    // M97 · For 'mixed' slides, we fetch from Unsplash AND continue down
+    // to the generated path with the Unsplash photo as a reference image.
+    let _mixedSlideRefUrl = null;
+    let _mixedAttribution = null;
+    let _mixedPhotographer = null;
+    if (slideImageSource === 'unsplash' || slideImageSource === 'mixed') {
       const unsplash = require('./unsplash');
       if (!unsplash.hasKey()) {
         if (!firstError) firstError = `slide ${slide.n}: UNSPLASH_ACCESS_KEY not set`;
@@ -558,23 +563,40 @@ async function _renderCarousel({ source, carouselSpec, run, recipe, lang }) {
           renderedSlides.push({ n: slide.n, role: slide.role, error: u.error });
           continue;
         }
-        renderedSlides.push({
-          n: slide.n,
-          role: slide.role,
-          slots: mergedSlots,
-          url: u.url,
-          key: u.r2_key,
-          media_id: u.media_id,
-          model: 'unsplash-stock',
-          size: null,
-          cost_usd: 0,
-          model_label: 'Unsplash stock',
-          prompt: `Unsplash search: "${qText}"`,
-          _image_source: 'unsplash',
-          _attribution: u.attribution_text,
-          _photographer: u.photographer,
-        });
-        continue;
+        // M97 · For 'unsplash' the photo IS the slide. For 'mixed' we feed the
+        // Unsplash URL into gpt-image-2's reference inputs so the generated
+        // image uses the photo as the hero + overlays the brand text/blocks.
+        if (slideImageSource === 'unsplash') {
+          renderedSlides.push({
+            n: slide.n,
+            role: slide.role,
+            slots: mergedSlots,
+            url: u.url,
+            key: u.r2_key,
+            media_id: u.media_id,
+            model: 'unsplash-stock',
+            size: null,
+            cost_usd: 0,
+            model_label: 'Unsplash stock',
+            prompt: `Unsplash search: "${qText}"`,
+            _image_source: 'unsplash',
+            _attribution: u.attribution_text,
+            _photographer: u.photographer,
+          });
+          continue;
+        }
+
+        // 'mixed' path · fall through to generated, but override referenceUrls
+        // so the Unsplash photo is fed as a style reference to gpt-image-2.
+        // Combined input order to gpt-image-2:
+        //   image[0] = brand logo (from disk, attached in compose-image.js)
+        //   image[1] = Unsplash hero photo (this slide's photo)
+        //   image[2..N] = topic-matched brand exemplars (style anchors)
+        // gpt-image-2 then composites the slide with the photo as background
+        // + brand-styled overlay + canonical logo.
+        _mixedSlideRefUrl   = u.url;
+        _mixedAttribution   = u.attribution_text;
+        _mixedPhotographer  = u.photographer;
       } catch (e) {
         if (!firstError) firstError = `slide ${slide.n}: unsplash ${e.message}`;
         renderedSlides.push({ n: slide.n, role: slide.role, error: e.message });
@@ -596,6 +618,13 @@ async function _renderCarousel({ source, carouselSpec, run, recipe, lang }) {
       designBriefs,
     });
 
+    // M97 · For 'mixed' slides, prepend the Unsplash photo URL to the brand
+    // exemplar references. compose-image.js still attaches the brand logo
+    // from disk as image[0]; the Unsplash photo becomes image[1]; brand
+    // exemplars fill image[2..N].
+    const slideReferenceUrls = _mixedSlideRefUrl
+      ? [_mixedSlideRefUrl, ...referenceUrls]
+      : referenceUrls;
     try {
       const r = await composeImage.generateCover({
         prompt: enrichedPrompt,
@@ -606,7 +635,7 @@ async function _renderCarousel({ source, carouselSpec, run, recipe, lang }) {
         runOption,
         designSuggestion,
         recipeDefault,
-        referenceUrls,
+        referenceUrls: slideReferenceUrls,
       });
       if (!r.ok) {
         if (!firstError) firstError = `slide ${slide.n}: ${r.error}`;
@@ -626,7 +655,12 @@ async function _renderCarousel({ source, carouselSpec, run, recipe, lang }) {
         cost_usd: r.cost_usd,
         model_label: r.model_label || null,
         prompt: slidePrompt,
-        _image_source: 'generated',
+        _image_source: _mixedSlideRefUrl ? 'mixed' : 'generated',
+        ...(_mixedSlideRefUrl ? {
+          _attribution: _mixedAttribution,
+          _photographer: _mixedPhotographer,
+          _unsplash_hero_url: _mixedSlideRefUrl,
+        } : {}),
       });
     } catch (e) {
       if (!firstError) firstError = `slide ${slide.n}: ${e.message}`;
@@ -722,32 +756,41 @@ function _buildEnrichedImagePrompt({ baseBrief, source, run, recipe, lang, desig
     if (lines.length > 1) blocks.push(lines.join('\n'));
   }
 
-  // Block 4 · Brand color hex callouts (always — the brand is anchored
-  // in 100% of the archive on this teal).
+  // Block 4 · Brand color hex callouts + asset attachments (M97 update)
   blocks.push([
     '',
+    '## BRAND ASSETS (deterministic — DO NOT invent or substitute)',
+    '  image[0]       = the CANONICAL RxApply logo (teal R-arrow on white square,',
+    '                   brand-asset PNG attached to this call). Render it on the',
+    '                   slide EXACTLY as shown, at the position your design_directive',
+    '                   specifies (BR-small | TR-medium | TL-outline | absent). Do',
+    '                   not redraw or stylize the logo — replicate its exact shape.',
+    '  Brand pattern  = geometric Persian/Islamic line motif (light teal #00a69c).',
+    '                   Place per design_directive (TL-corner | full-canvas-faint | absent).',
+    '',
     '## BRAND COLORS (use these exact hex values)',
-    '  Primary teal   #13a597   — logo, accents, CTA, key word highlights',
+    '  Primary teal   #00a69c   — logo, accents, CTA, key word highlights',
     '  Navy block     #1c3a52   — analytical mood, fact-heavy posts',
     '  Urgent red     #cb3a3a   — USA-themed posts',
     '  Germany green  #1f3d22   — Germany-themed posts',
     '  Earth/brown    #bca175   — occasion / cultural posts',
     '  Orange         #ff7a1a   — DEADLINE pressure ONLY',
     '  Surface        #ffffff or #f0f1ee',
+    '',
+    '## TYPOGRAPHY',
+    '  Persian text:  Peyda font (bold for headings, medium/regular for body)',
+    '  Latin text:    Inter (or close geometric sans-serif)',
+    '  Numerals:      Persian numerals (۰۱۲۳۴۵۶۷۸۹) on Persian slides; Latin on Latin',
   ].join('\n'));
 
-  // Block 5 · Language direction (when Persian/Arabic is involved)
+  // Block 5 · Language direction — only RTL/spacing notes (font is in Block 4)
   if (language === 'fa' || language === 'ar') {
     blocks.push([
       '',
       `## TEXT RENDERING (language: ${language})`,
       `  Direction:  right-to-left (RTL).`,
-      `  Typeface:   bold sans-serif Persian/Arabic-supporting (Vazirmatn,`,
-      `              IRANSans, or equivalent). Latin wordmarks (RXAPPLY)`,
-      `              stay in Latin font.`,
-      `  Numerals:   Persian numerals (۰۱۲۳۴۵۶۷۸۹) for Persian text,`,
-      `              not Latin (0-9).`,
       `  Spacing:    Persian text needs slightly more line-height than Latin.`,
+      `              Latin wordmarks like 'RXAPPLY' stay in Latin font (Inter).`,
     ].join('\n'));
   }
 

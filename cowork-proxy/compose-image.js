@@ -132,10 +132,16 @@ async function _genOpenAI(prompt, size, apiKey, modelEntry, referenceUrls = []) 
   const isImage2 = apiModelId === 'gpt-image-2';
   const promptStr = String(prompt).slice(0, 4000);
 
-  // M62 · gpt-image-2 supports reference images via the /images/edits
-  // multipart endpoint. Fetch each URL → Blob, attach as image[]. Cap 3.
+  // M62 + M97 · gpt-image-2 supports reference images via /images/edits
+  // (multipart). Up to ~10 image[] slots accepted. Allocation:
+  //   slot 0: brand logo (icon.png — teal R-arrow on transparent) — ALWAYS
+  //   slot 1-3: brand reference photos (top-3 by topic match)
+  // The model is told in the prompt: "image[0] is the canonical brand
+  // logo — render it on the slide exactly as shown, in the position you
+  // were instructed; do not invent a logo. image[1..N] are style anchors."
   const refs = Array.isArray(referenceUrls) ? referenceUrls.filter(Boolean).slice(0, 3) : [];
-  const useEdits = isImage2 && refs.length > 0;
+  const includeBrandAssets = isImage2 && (refs.length > 0 || true);
+  const useEdits = isImage2 && (refs.length > 0 || includeBrandAssets);
 
   let r;
   if (useEdits) {
@@ -148,6 +154,22 @@ async function _genOpenAI(prompt, size, apiKey, modelEntry, referenceUrls = []) 
     fd.append('size', size);
     fd.append('n', '1');
     fd.append('quality', (modelEntry && modelEntry.quality_default) || 'high');
+
+    // M97 · Attach the canonical brand logo from disk (cowork-proxy/public/brand-assets/logo.png)
+    // BEFORE the topic-matched reference photos. The model now has a
+    // deterministic logo image, not a description-only.
+    if (includeBrandAssets) {
+      try {
+        const fs = require('fs');
+        const path = require('path');
+        const logoPath = path.resolve(__dirname, 'public', 'brand-assets', 'logo.png');
+        if (fs.existsSync(logoPath)) {
+          const lb = fs.readFileSync(logoPath);
+          fd.append('image[]', new Blob([lb], { type: 'image/png' }), 'brand_logo.png');
+        }
+      } catch (e) { console.warn('[M97] brand logo attach failed:', e.message); }
+    }
+
     for (let i = 0; i < refs.length; i++) {
       try {
         const ir = await fetch(refs[i]);

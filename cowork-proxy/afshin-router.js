@@ -63,7 +63,7 @@ const TEMPLATE_REGISTRY = {
     render_scaffold:
       'Vertical poster, RxApply brand. Solid-fill {block_color} block dominates the layout with the title "{title}" rendered in bold sans-serif Persian/Arabic-supporting type. ' +
       'Small {country_pill_color} pill containing the word "{country_pill}" near the title. ' +
-      'A circular {icon} icon callout in brand teal #13a597 sized ~12% of the canvas. ' +
+      'A circular {icon} icon callout in brand teal #00a69c sized ~12% of the canvas. ' +
       'Body bullets stacked beneath the title in white-on-block. Small date pill in the lower corner. ' +
       'Teal R-arrow logo on white square placed as an integrated element (not a corner watermark). ' +
       'Mood: {mood}. No clichéd dental imagery (toothbrush/pill stock).',
@@ -129,7 +129,7 @@ function renderTemplatePrompt(templateId, slots = {}) {
     country_pill_color: slots.country_pill_color || slots.accent_color || '#ff7a1a',
     icon: slots.icon || 'tooth',
     block_color: slots.block_color || '#1c3a52',
-    accent_color: slots.accent_color || '#13a597',
+    accent_color: slots.accent_color || '#00a69c',
     mood: slots.mood || 'calm, authoritative',
     title: slots.title || '',
     subtitle: slots.subtitle || '',

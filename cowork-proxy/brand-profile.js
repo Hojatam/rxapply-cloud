@@ -15,12 +15,26 @@
 
 const { query, queryValue, q } = require('./db');
 
+// M97 · Defaults updated to match the actual Brand Kit.
+//   primary_color #00a69c — sourced from the SVG pattern files in Brand Kit
+//   typography Peyda      — from BrandBook
+//   logo_url + pattern_url — served by the proxy at /static/brand-assets/
+//
+// Earlier defaults had #4f46e5 (indigo) which contradicted the brand
+// archive's actual color. Now brand profile + brand_intelligence + Tarrah
+// + Afshin + the actual logo file all agree on #00a69c teal.
 const DEFAULT_PROFILE = {
   name: 'RxApply',
   tagline: 'We help internationally-trained dentists migrate, calmly.',
-  primary_color: '#4f46e5',
-  secondary_colors: ['#0f172a', '#f8fafc'],
-  typography: 'Inter (EN) / Vazirmatn (FA, AR)',
+  primary_color: '#00a69c',
+  secondary_colors: ['#1c3a52', '#f0f1ee'],
+  typography: 'Peyda (FA) / Inter (EN)',
+  font_family_persian: 'Peyda',
+  font_family_latin:   'Inter',
+  logo_url: '/static/brand-assets/logo.png',
+  logo_with_tagline_url: '/static/brand-assets/logo-with-tagline.png',
+  pattern_url: '/static/brand-assets/pattern.svg',
+  favicon_url: '/static/brand-assets/favicon.png',
   voice_rules: [
     'Hype-free. We are a guide, not a hype machine.',
     'Specific over general: real numbers, named regulators.',
@@ -29,7 +43,12 @@ const DEFAULT_PROFILE = {
   ],
   always_include: ['A soft CTA'],
   never_include: ['guaranteed claims', 'specific immigration legal advice'],
-  visual_rules: ['Geometric, type-led, lots of negative space'],
+  visual_rules: [
+    'Brand teal #00a69c on logo, accents, key word highlights',
+    'Geometric, type-led, lots of negative space',
+    'Persian text in Peyda (bold for headings, medium for body)',
+    'Logo placement variable — integrated as design element, not corner watermark',
+  ],
   founder_name: 'Dr. Hojat',
   audience: 'Internationally-trained dentists',
   example_captions: [],
@@ -99,6 +118,11 @@ function renderAsPromptBlock() {
   if (p.secondary_colors && p.secondary_colors.length)
     lines.push(`Secondary colors: ${p.secondary_colors.join(', ')}`);
   if (p.typography) lines.push(`Typography: ${p.typography}`);
+  if (p.font_family_persian) lines.push(`Persian font: ${p.font_family_persian} (bold for headings, medium for body)`);
+  if (p.font_family_latin) lines.push(`Latin font: ${p.font_family_latin}`);
+  // M97 · Brand asset URLs — referenced by image-gen pipeline
+  if (p.logo_url) lines.push(`Logo asset: ${p.logo_url} (teal R-arrow on white square — attached to gpt-image-2 calls)`);
+  if (p.pattern_url) lines.push(`Pattern asset: ${p.pattern_url} (geometric line motif — TL corner placement)`);
   lines.push('');
   if (p.voice_rules && p.voice_rules.length) {
     lines.push('VOICE — ALL these rules apply to every word of output:');

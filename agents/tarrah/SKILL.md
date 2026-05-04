@@ -124,10 +124,10 @@ Each slide I plan includes:
       "country_pill": "کانادا",
       "date_pill": null,
       "deadline_pill": null,
-      "visual_concept": "Photoreal Toronto skyline at dusk (CN Tower silhouette), soft teal overlay (#13a597 at 40% opacity), single doctor figure in foreground with stethoscope, lower-third caption block in #1c3a52 navy.",
+      "visual_concept": "Photoreal Toronto skyline at dusk (CN Tower silhouette), soft teal overlay (#00a69c at 40% opacity), single doctor figure in foreground with stethoscope, lower-third caption block in #1c3a52 navy.",
       "image_source": "unsplash",
       "unsplash_query": "toronto skyline cn tower dusk silhouette",
-      "design_directive": "Hero photo full-bleed background. Title block in lower third with #1c3a52 navy fill. Country pill 'کانادا' top-left in #ff7a1a orange pill. Logo BR-small. Brand pattern (geometric line) TL corner. Tagline thin white footer.",
+      "design_directive": "Hero photo full-bleed background. Title block in lower third with #1c3a52 navy fill. Heading in Peyda Bold; subheading in Peyda Medium. Country pill 'کانادا' top-left in #ff7a1a orange pill. Logo (canonical RxApply teal R-arrow — passed as image[0] to gpt-image-2) BR-small at ~9% canvas. Brand pattern (geometric Persian line motif #00a69c) TL corner low-opacity. Tagline 'We help internationally-trained dentists migrate, calmly.' as thin white footer.",
       "brand_asset_placement": {
         "logo": "BR-small",
         "tagline": "footer",
