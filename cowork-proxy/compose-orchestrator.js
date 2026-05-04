@@ -1467,15 +1467,72 @@ async function _executeLlmStage({ runId, run, recipe, stage, stageIndex, lang, p
   // If this stage's verdict triggers a refine AND retry_cap is not yet
   // reached AND there is a previous LLM stage to re-run → reset that
   // stage to pending and append an entry on compose_runs.refine_attempts.
+  // M88 · Refine SUCCESS path — when a verdict-flagging stage now PASSES
+  // and we previously refined the upstream writer, write a procedural
+  // memory to that writer so it remembers the correction.
+  // Detected by: stageName has a refine target (critique→draft etc) AND
+  // _countRefinesFor(target) > 0 AND current verdict is "pass".
+  if (finalStatus === 'done' && parsed) {
+    try {
+      const refineTargets = _REFINE_TARGETS[stageName];
+      if (refineTargets && refineTargets.length) {
+        const targetName = refineTargets[0];
+        const priorRefines = _countRefinesFor(run, targetName);
+        const verdictNow = parsed.verdict;
+        const passedNow = parsed.passed === true || verdictNow === 'pass' || verdictNow === 'pass_with_flags';
+        if (priorRefines > 0 && passedNow) {
+          // The latest refine entry has the fixes that were applied. Write
+          // them as a procedural memory to the writer agent so it learns
+          // permanently.
+          const lastRefine = _latestRefineFor(run, targetName);
+          if (lastRefine && Array.isArray(lastRefine.fixes) && lastRefine.fixes.length) {
+            try {
+              const writerAgent = capabilities.resolveAgent({
+                capability: targetName === 'translate' ? 'translate' : 'draft',
+                stageName: targetName,
+              });
+              const memContent = `Refine-correction (auto, M88): When working on ${recipe.id} ${targetName}, the ${stageName} stage failed me on attempt #1 with reason "${lastRefine.reason}". The fixes I applied that made attempt #2 pass: ${lastRefine.fixes.map(f => '"' + String(f).slice(0, 200) + '"').join(' · ')}. Apply this lesson by default on future ${recipe.id} runs.`;
+              await agentMemory.write({
+                agent: writerAgent,
+                type: 'procedural',
+                content: memContent,
+                tags: ['correction-from-refine', recipe.id, targetName],
+                importance: 4,
+                source: 'auto:M88',
+                sourceRunId: runId,
+              });
+              console.log(`[M88] force-correction memory written to ${writerAgent} after ${stageName} pass (refine_count=${priorRefines})`);
+            } catch (e) {
+              console.warn('[M88] failed to write force-correction memory:', e.message);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[M88] force-correction handler threw:', e.message);
+    }
+  }
+
   // The next tick re-executes the target with a # REFINE NOTES block.
   if (finalStatus === 'done' && parsed) {
     try {
       const trigger = _detectRefineTrigger(stageName, parsed);
+      // M87 · Instrumentation — log every refine decision point so the
+      // founder can audit why a refine did or didn't fire.
+      if (trigger) {
+        console.log(`[M87] refine trigger detected at ${stageName} (run ${runId.slice(0,8)}) reason=${trigger.reason} fixes=${(trigger.fixes||[]).length}`);
+      } else {
+        console.log(`[M87] refine no-trigger at ${stageName} (run ${runId.slice(0,8)}) verdict=${parsed.verdict || (parsed.passed===false?'failed':parsed.passed===true?'passed':'?')}`);
+      }
       if (trigger && trigger.trigger) {
         const target = _findRefineTarget({ recipe, run, failingStageName: stageName, lang });
+        if (!target) {
+          console.warn(`[M87] refine target NOT FOUND for ${stageName} (run ${runId.slice(0,8)}) — _REFINE_TARGETS map may be missing entry`);
+        }
         if (target) {
           const cap = _resolveRetryCap(stage, stageName);
           const already = _countRefinesFor(run, target.stage.name);
+          console.log(`[M87] refine decision: ${stageName}→${target.stage.name} cap=${cap} already=${already}`);
           if (already < cap) {
             await _enqueueRefine({
               runId, run,

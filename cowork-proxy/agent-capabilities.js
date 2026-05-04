@@ -49,6 +49,12 @@ const CAPABILITY_REGISTRY = {
   // slot-spec JSON that Afshin renders. Tarrah does not draw; Afshin draws.
   tarrah:    ['carousel-plan'],
 
+  // M84 · Moallem (معلم, "teacher") — meta-trainer. Watches the team's
+  // recent runs, identifies failure patterns, and produces TRAINING
+  // PROPOSALS for the founder to approve. Never auto-applies changes.
+  // Runs weekly on a cron OR on-demand from the dashboard.
+  moallem:   ['train'],
+
   // M47 · DM triage + reply drafting
   bineh:     ['triage'],         // Inbound-DM intent classification
   mehrban:   ['reply-draft'],    // Drafts a reply for hot/qualifying DMs

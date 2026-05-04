@@ -873,6 +873,63 @@ app.post('/agents/:agent/prompt-preview', async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ── M84 · Moallem trainer endpoints ──────────────────────────────────
+// Lists proposals, runs detection, approves/rejects.
+const moallem = require('./moallem-trainer');
+
+app.get('/trainer/proposals', async (req, res) => {
+  try {
+    const items = await moallem.listProposals({
+      status: req.query.status || 'pending',
+      agent: req.query.agent || null,
+      limit: parseInt(req.query.limit, 10) || 50,
+    });
+    res.json({ ok: true, count: items.length, items });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.get('/trainer/proposals/:id', async (req, res) => {
+  try {
+    const p = await moallem.getProposal(req.params.id);
+    if (!p) return res.status(404).json({ ok: false, error: 'proposal not found' });
+    res.json({ ok: true, proposal: p });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// POST /trainer/run — manual trigger; runs Moallem against last N days
+app.post('/trainer/run', auth.middleware, async (req, res) => {
+  try {
+    const daysBack = parseInt((req.body && req.body.daysBack) || 30, 10);
+    const r = await moallem.detectPatterns({ daysBack });
+    if (!r.ok) return res.status(500).json(r);
+    log(`moallem.run daysBack=${daysBack} examined=${r.n_examined} proposed=${r.n_proposed}`);
+    res.json(r);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.post('/trainer/proposals/:id/approve', auth.middleware, async (req, res) => {
+  try {
+    const note = req.body && req.body.note;
+    const r = await moallem.approveProposal(req.params.id, {
+      note,
+      decidedBy: (req.user && req.user.username) || 'founder',
+    });
+    if (!r.ok) return res.status(400).json(r);
+    log(`moallem.approve ${req.params.id.slice(0, 8)} → ${r.applied_to}`);
+    res.json(r);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.post('/trainer/proposals/:id/reject', auth.middleware, async (req, res) => {
+  try {
+    const note = req.body && req.body.note;
+    const r = await moallem.rejectProposal(req.params.id, { note });
+    if (!r.ok) return res.status(400).json(r);
+    log(`moallem.reject ${req.params.id.slice(0, 8)}`);
+    res.json(r);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ── F7 · auth routes ────────────────────────────────────────────────────
 app.get('/auth/status', (_, res) => {
   res.json({
