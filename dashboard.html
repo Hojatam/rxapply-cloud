@@ -5676,9 +5676,7 @@ function loadAdForward(name) {
 // Agents available to place in the editor
 const PIPELINE_AGENTS = AGENTS.map(a => a.name).sort();
 
-let _dfEditor    = null;   // Drawflow instance
-let _dfCurrentName = null; // pipeline name currently loaded
-let _dfRunning   = false;
+// M72B · Pipeline state lives in _plState (declared in renderPipelines section).
 
 const NODE_COLORS = {
   agent:       { bg: '#eef2ff', text: '#4338ca' },
@@ -5734,316 +5732,542 @@ function _outputHtml() {
   </div>`;
 }
 
+// ════════════════════════════════════════════════════════════════════
+// M72B · Pipeline Control Center (v2)
+//
+// Three-panel layout: pipelines list (left) · Drawflow graph (center)
+// · stage detail drawer (right). Stages map 1:1 to nodes in the graph;
+// click a node → open the drawer → edit prompt / agent / gate / retry.
+// Save → PUT /pipelines/:id (creates new version). Edit prompt → PUT
+// /agents/:agent/stages/:stage (per-agent stage file from M68).
+// ════════════════════════════════════════════════════════════════════
+
+let _plState = {
+  pipelines: [],
+  current: null,            // { id, label, definition, version, ... }
+  selectedStageId: null,
+  editor: null,             // Drawflow instance
+  dirty: false,
+  nodeIdMap: new Map(),     // drawflowNodeId → stage.id (or stage.name)
+  stageIdMap: new Map(),    // stage.id → drawflowNodeId
+  promptDirty: false,
+};
+
 function renderPipelines() {
   $('main').innerHTML = `
     <div class="section-h">
-      <div><h1>Pipelines</h1><div class="breadcrumb">Visual drag-and-drop orchestration</div></div>
+      <div>
+        <h1>Pipelines</h1>
+        <div class="breadcrumb">Full control · edit prompts · override agents · gate stages · all pipelines under your control</div>
+      </div>
       <div class="flex gap-2">
-        <button class="btn btn-ghost btn-xs" onclick="loadPipelineList()">↻ Refresh list</button>
-        <button class="btn btn-ghost btn-xs" onclick="dfNew()">+ New</button>
-        <button class="btn btn-ghost btn-xs" onclick="dfSave()">💾 Save</button>
-        <button class="btn btn-ghost btn-xs" onclick="dfClearLog()">🧹 Clear log</button>
-        <button class="btn btn-primary btn-xs" id="df-run-btn" onclick="dfRun()">▶ Run pipeline</button>
+        <button class="btn btn-ghost btn-xs" onclick="plRefresh()">↻ Refresh</button>
+        <button class="btn btn-ghost btn-xs" onclick="plClone()" id="pl-clone-btn" disabled>⎘ Clone</button>
+        <button class="btn btn-ghost btn-xs" onclick="plImport()">⬆ Import</button>
+        <button class="btn btn-ghost btn-xs" onclick="plExport()" id="pl-export-btn" disabled>⬇ Export</button>
+        <button class="btn btn-primary btn-xs" onclick="plSave()" id="pl-save-btn" disabled>💾 Save pipeline</button>
       </div>
     </div>
 
-    <div class="card mb-4" style="padding:10px 16px;">
-      <div class="flex items-center gap-3">
-        <div class="df-toolbar" id="df-toolbar">
-          <div class="df-node-btn agent-btn" draggable="true" ondragstart="dfDrag(event,'agent')">🤖 Agent</div>
-          <div class="df-node-btn cond-btn" draggable="true" ondragstart="dfDrag(event,'conditional')">⚡ Conditional</div>
-          <div class="df-node-btn trans-btn" draggable="true" ondragstart="dfDrag(event,'transform')">⚙ Transform</div>
-          <div class="df-node-btn output-btn" draggable="true" ondragstart="dfDrag(event,'output')">📤 Output</div>
+    <div style="display:grid;grid-template-columns:260px 1fr 360px;gap:12px;height:calc(100vh - 180px);min-height:560px;">
+      <!-- LEFT · pipelines list -->
+      <div class="card" style="overflow-y:auto;padding:0;">
+        <div style="padding:10px 14px;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid #f1f5f9;background:#fafbff;">
+          Pipelines
         </div>
-        <div class="ml-auto flex gap-2 items-center">
-          <span class="text-xs text-slate-500">Pipeline:</span>
-          <input id="df-name-input" class="border border-slate-200 rounded px-2 py-1 text-sm" style="width:160px;" placeholder="Name…">
-          <input id="df-desc-input" class="border border-slate-200 rounded px-2 py-1 text-sm" style="width:240px;" placeholder="Description (optional)">
-          <button class="btn btn-danger btn-xs" onclick="dfDelete()">🗑 Delete</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="flex gap-0" style="height:600px;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;background:white;">
-      <!-- Saved pipelines list -->
-      <div class="pipeline-sidebar" id="df-sidebar">
-        <div style="padding:10px 14px;font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid #f1f5f9;">
-          Saved pipelines
-        </div>
-        <div id="df-sidebar-list"><div class="empty" style="padding:20px;font-size:12px;">Loading…</div></div>
+        <div id="pl-list"><div class="empty" style="padding:18px;font-size:12px;">Loading…</div></div>
       </div>
 
-      <!-- Canvas -->
-      <div style="flex:1;display:flex;flex-direction:column;">
-        <div id="df-wrap" style="flex:1;border-radius:0;"
-             ondrop="dfDrop(event)" ondragover="event.preventDefault()">
+      <!-- CENTER · graph editor -->
+      <div class="card" style="padding:0;display:flex;flex-direction:column;overflow:hidden;">
+        <div id="pl-canvas-toolbar" style="padding:8px 14px;border-bottom:1px solid #f1f5f9;background:#fafbff;display:flex;align-items:center;gap:10px;font-size:12px;">
+          <div id="pl-canvas-title" style="font-weight:600;color:#334155;">Select a pipeline →</div>
+          <div id="pl-canvas-meta" style="color:#94a3b8;"></div>
+          <div class="ml-auto flex gap-2">
+            <button class="btn btn-ghost btn-xs" onclick="plViewVersions()" id="pl-versions-btn" disabled>History</button>
+            <button class="btn btn-ghost btn-xs" onclick="plRevertChanges()" id="pl-revert-btn" disabled>Revert changes</button>
+          </div>
+        </div>
+        <div id="pl-canvas" style="flex:1;background:#f8fafc;position:relative;">
           <div id="drawflow" style="width:100%;height:100%;"></div>
+          <div id="pl-canvas-empty" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:13px;">
+            Pick a pipeline from the left to see its graph.
+          </div>
         </div>
-        <!-- Run log -->
-        <div class="df-run-log" id="df-run-log"><span class="log-info">▸ run log will appear here after ▶ Run pipeline</span></div>
+      </div>
+
+      <!-- RIGHT · stage drawer -->
+      <div class="card" style="overflow-y:auto;padding:0;">
+        <div style="padding:10px 14px;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid #f1f5f9;background:#fafbff;">
+          Stage detail
+        </div>
+        <div id="pl-drawer" style="padding:14px;">
+          <div class="empty" style="font-size:12px;color:#94a3b8;font-style:italic;">Click a stage in the graph to edit it.</div>
+        </div>
       </div>
     </div>
   `;
-
-  // Init Drawflow
-  _initDrawflow();
-  loadPipelineList();
+  plRefresh();
 }
 
-function _initDrawflow() {
-  if (_dfEditor) {
-    try { _dfEditor.clearModuleSelected(); } catch (_) {}
-  }
-  const container = document.getElementById('drawflow');
-  if (!container) return;
-  _dfEditor = new Drawflow(container);
-  _dfEditor.reroute = true;
-  _dfEditor.reroute_fix_curvature = true;
-  _dfEditor.force_first_input = false;
-  _dfEditor.editor_mode = 'edit';
-  _dfEditor.start();
-}
-
-let _dfDragType = null;
-function dfDrag(event, type) {
-  _dfDragType = type;
-  event.dataTransfer.setData('nodeType', type);
-}
-
-function dfDrop(event) {
-  event.preventDefault();
-  const type = event.dataTransfer.getData('nodeType') || _dfDragType;
-  if (!type || !_dfEditor) return;
-
-  const wrap = document.getElementById('df-wrap');
-  const rect = wrap.getBoundingClientRect();
-  const pos_x = event.clientX - rect.left - wrap.scrollLeft;
-  const pos_y = event.clientY - rect.top  - wrap.scrollTop;
-
-  let html, inputs, outputs, cssClass, data;
-  switch (type) {
-    case 'agent':
-      html = _agentHtml(); inputs = 1; outputs = 1; cssClass = 'agent-node';
-      data = { agent: PIPELINE_AGENTS[0] || '', args: '' };
-      break;
-    case 'conditional':
-      html = _conditionalHtml(); inputs = 1; outputs = 2; cssClass = 'conditional-node';
-      data = { condition: 'carry.ok === true' };
-      break;
-    case 'transform':
-      html = _transformHtml(); inputs = 1; outputs = 1; cssClass = 'transform-node';
-      data = { expression: 'carry' };
-      break;
-    case 'output':
-      html = _outputHtml(); inputs = 1; outputs = 0; cssClass = 'output-node';
-      data = {};
-      break;
-    default: return;
-  }
-
-  _dfEditor.addNode(type, inputs, outputs, pos_x, pos_y, cssClass, data, html);
-}
-
-function dfNew() {
-  if (!confirm('Start a new blank pipeline? Unsaved changes will be lost.')) return;
-  _initDrawflow();
-  _dfCurrentName = null;
-  const nameInput = $('df-name-input');
-  if (nameInput) nameInput.value = '';
-  const descInput = $('df-desc-input');
-  if (descInput) descInput.value = '';
-  dfLogInfo('▸ new blank pipeline');
-}
-
-async function dfSave() {
-  if (!_dfEditor) return;
-  const nameInput = $('df-name-input');
-  const name = (nameInput && nameInput.value.trim()) || _dfCurrentName || '';
-  if (!name) {
-    alert('Give the pipeline a name first (the input box at top right).');
-    return;
-  }
-  const graphData = _dfEditor.export();
-  // B-4 fix: don't silently save an empty pipeline.
-  const nodeCt = Object.keys((graphData.drawflow && graphData.drawflow.Home && graphData.drawflow.Home.data) || {}).length;
-  if (nodeCt === 0) {
-    if (!confirm('This pipeline has no nodes. Save it anyway?')) return;
-  }
-  const description = ($('df-desc-input') && $('df-desc-input').value.trim()) || '';
+// ── Left panel · list of pipelines ────────────────────────────────
+async function plRefresh() {
+  const el = $('pl-list');
+  if (!el) return;
   try {
-    const r = await authFetch(`${PROXY}/pipelines`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, description, graphData }),
-    });
+    const r = await fetch(`${PROXY}/pipelines?include_disabled=true`);
     const j = await r.json();
-    if (!j.ok) { dfLogErr('✕ save failed: ' + (j.error || 'unknown')); return; }
-    _dfCurrentName = name;
-    dfLogInfo(`✓ saved "${name}" · ${j.nodeCount} nodes`);
-    loadPipelineList();
-  } catch (e) { dfLogErr('✕ ' + e.message); }
-}
-
-async function dfDelete() {
-  const name = _dfCurrentName || ($('df-name-input') && $('df-name-input').value.trim());
-  if (!name) { alert('No pipeline selected.'); return; }
-  if (!confirm(`Delete pipeline "${name}"?`)) return;
-  try {
-    const r = await authFetch(`${PROXY}/pipelines/${encodeURIComponent(name)}`, { method: 'DELETE' });
-    const j = await r.json();
-    if (!j.ok && r.status !== 404) { dfLogErr('✕ ' + (j.error || 'failed')); return; }
-    dfNew();
-    loadPipelineList();
-  } catch (e) { dfLogErr('✕ ' + e.message); }
-}
-
-async function loadPipelineList() {
-  const listEl = $('df-sidebar-list');
-  if (!listEl) return;
-  try {
-    const r = await fetch(`${PROXY}/pipelines`);
-    const j = await r.json();
-    if (!j.ok || j.pipelines.length === 0) {
-      listEl.innerHTML = '<div style="padding:14px;font-size:12px;color:#94a3b8;font-style:italic;">No saved pipelines yet.</div>';
+    if (!j.ok) { el.innerHTML = `<div class="empty" style="padding:14px;color:#dc2626;">Error: ${escapeHtml(j.error || 'failed')}</div>`; return; }
+    _plState.pipelines = j.items || [];
+    if (!_plState.pipelines.length) {
+      el.innerHTML = '<div class="empty" style="padding:14px;font-size:12px;font-style:italic;">No pipelines yet.</div>';
       return;
     }
-    listEl.innerHTML = j.pipelines.map(p => `
-      <div class="pipeline-sidebar-item ${p.name === _dfCurrentName ? 'active' : ''}"
-           onclick="dfLoad('${escapeHtml(p.name)}')">
-        <span style="font-size:16px;">📋</span>
-        <div>
-          <div style="font-weight:600;font-size:12px;">${escapeHtml(p.name)}</div>
-          <div style="font-size:11px;color:#94a3b8;">${p.nodeCount} nodes · ${fmtTime(p.savedAt)}</div>
-        </div>
-      </div>
-    `).join('');
-  } catch (e) {
-    listEl.innerHTML = `<div style="padding:14px;font-size:12px;color:#f87171;">Failed: ${escapeHtml(e.message)}</div>`;
-  }
-}
-
-async function dfLoad(name) {
-  try {
-    const r = await fetch(`${PROXY}/pipelines/${encodeURIComponent(name)}`);
-    const j = await r.json();
-    if (!j.ok) { dfLogErr('✕ load failed: ' + j.error); return; }
-    _initDrawflow();
-    _dfEditor.import(j.graphData);
-    _dfCurrentName = name;
-    const nameInput = $('df-name-input');
-    if (nameInput) nameInput.value = name;
-    const descInput = $('df-desc-input');
-    if (descInput) descInput.value = j.description || '';
-    dfLogInfo(`▸ loaded "${name}" · ${j.description || ''}`);
-    loadPipelineList();
-  } catch (e) { dfLogErr('✕ ' + e.message); }
-}
-
-async function dfRun() {
-  if (_dfRunning) return;
-  if (!_dfEditor) return;
-  const graphData = _dfEditor.export();
-  const nodeCount = Object.keys(
-    (graphData.drawflow && graphData.drawflow.Home && graphData.drawflow.Home.data) || {}
-  ).length;
-  if (nodeCount === 0) { dfLogErr('✕ no nodes in the pipeline'); return; }
-  // M-4: be explicit that the CURRENT canvas state runs, not the saved version.
-  const target = _dfCurrentName ? `current canvas (saved as "${_dfCurrentName}")` : 'current canvas (unsaved)';
-  if (!confirm(`Run ${target} — ${nodeCount} nodes?`)) return;
-
-  _dfRunning = true;
-  $('df-run-btn').disabled = true;
-  // Append a separator instead of clearing — preserves history of previous runs.
-  const ts = new Date().toLocaleTimeString();
-  const log = $('df-run-log');
-  log.innerHTML += `<span class="log-info">─── run @ ${escapeHtml(ts)} ───────────────────</span>\n`;
-  log.scrollTop = log.scrollHeight;
-
-  const url = _dfCurrentName
-    ? `${PROXY}/pipelines/${encodeURIComponent(_dfCurrentName)}/run`
-    : `${PROXY}/pipelines/run`;
-
-  try {
-    const r = await authFetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ graphData }),
-    });
-
-    if (r.status === 401) { dfLogErr('✕ not signed in — go to Settings to authenticate'); _dfRunning = false; $('df-run-btn').disabled = false; return; }
-
-    const reader  = r.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      const parts = buf.split('\n\n');
-      buf = parts.pop();
-      for (const part of parts) {
-        const lines = part.split('\n');
-        let event = '', data = '';
-        for (const line of lines) {
-          if (line.startsWith('event:')) event = line.slice(6).trim();
-          if (line.startsWith('data:'))  data  = line.slice(5).trim();
-        }
-        if (!event || !data) continue;
-        try {
-          const obj = JSON.parse(data);
-          _dfHandleRunEvent(event, obj);
-        } catch (_) {}
+    // Group by category
+    const byCat = {};
+    for (const p of _plState.pipelines) {
+      const c = p.category || 'compose';
+      (byCat[c] = byCat[c] || []).push(p);
+    }
+    const items = [];
+    for (const cat of Object.keys(byCat).sort()) {
+      items.push(`<div style="padding:6px 14px;font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;background:#fafbff;border-top:1px solid #f1f5f9;">${escapeHtml(cat)}</div>`);
+      for (const p of byCat[cat]) {
+        const isCurrent = _plState.current && _plState.current.id === p.id;
+        const stageCount = (p.definition && p.definition.stages || []).length;
+        const dim = p.enabled ? '' : 'opacity:.55;';
+        items.push(`
+          <div class="pl-item" data-id="${escapeHtml(p.id)}" onclick="plLoad('${escapeHtml(p.id)}')"
+               style="padding:10px 14px;border-bottom:1px solid #f1f5f9;cursor:pointer;${dim}${isCurrent?'background:#eef2ff;border-left:3px solid #4f46e5;':''}">
+            <div style="font-weight:600;font-size:13px;color:#1e293b;">${escapeHtml(p.label || p.id)}</div>
+            <div style="font-size:11px;color:#94a3b8;margin-top:2px;">${escapeHtml(p.id)} · ${stageCount} stages · v${p.version}${p.enabled?'':' · disabled'}</div>
+          </div>
+        `);
       }
     }
+    el.innerHTML = items.join('');
   } catch (e) {
-    dfLogErr('✕ ' + e.message);
+    el.innerHTML = `<div class="empty" style="padding:14px;color:#dc2626;font-size:12px;">${escapeHtml(e.message)}</div>`;
   }
-  _dfRunning = false;
-  $('df-run-btn').disabled = false;
 }
 
-function _dfHandleRunEvent(event, obj) {
-  switch (event) {
-    case 'start':
-      dfLogInfo(`▸ ${obj.nodeCount} nodes · order: [${(obj.order || []).join(', ')}]`);
-      break;
-    case 'step': {
-      const icon = obj.status === 'success' ? '✓' : obj.status === 'fail' ? '✕' : obj.status === 'skipped' ? '↷' : '⊡';
-      const cls  = obj.status === 'success' ? 'log-ok' : obj.status === 'fail' ? 'log-err' : 'log-step';
-      const agent = obj.agent ? ` (${obj.agent})` : '';
-      // B-2 fix: escape every interpolated value before injecting into innerHTML.
-      let detail = '';
-      if (obj.error)        detail = ' — ' + escapeHtml(String(obj.error).slice(0, 200));
-      else if (obj.reason)  detail = ' — ' + escapeHtml(String(obj.reason));
-      else if (obj.output)  detail = ' — ' + escapeHtml(JSON.stringify(obj.output).slice(0, 120));
-      else if (obj.condition !== undefined) detail = ` — ${escapeHtml(obj.condition)} → ${obj.result} (live=${obj.livePort || '?'})`;
-      const head = `${icon} node ${escapeHtml(String(obj.nodeId))} [${escapeHtml(obj.nodeType)}${escapeHtml(agent)}] ${escapeHtml(obj.status)}`;
-      dfLogRaw(`<span class="${cls}">${head}${detail}</span>`);
-      break;
+// ── Load and render a pipeline ────────────────────────────────────
+async function plLoad(id) {
+  if (_plState.dirty || _plState.promptDirty) {
+    if (!confirm('Unsaved changes will be lost. Switch pipelines?')) return;
+  }
+  try {
+    const r = await fetch(`${PROXY}/pipelines/${encodeURIComponent(id)}`);
+    const j = await r.json();
+    if (!j.ok) { alert('Failed to load: ' + (j.error || 'unknown')); return; }
+    _plState.current = j.pipeline;
+    _plState.selectedStageId = null;
+    _plState.dirty = false;
+    _plState.promptDirty = false;
+    _plRenderGraph();
+    _plRenderDrawer();
+    plRefresh();   // re-highlight in left panel
+    // toggle buttons
+    ['pl-clone-btn','pl-export-btn','pl-versions-btn'].forEach(id => { const b = $(id); if (b) b.disabled = false; });
+    _plUpdateSaveButton();
+  } catch (e) { alert(e.message); }
+}
+
+// ── Center panel · render Drawflow graph from definition.stages ───
+function _plInitDrawflow() {
+  const container = document.getElementById('drawflow');
+  if (!container) return null;
+  // Drawflow holds a reference to the DOM; clear children before reinit to
+  // avoid stale event handlers and ghost nodes when switching pipelines.
+  container.innerHTML = '';
+  _plState.editor = new Drawflow(container);
+  _plState.editor.reroute = true;
+  _plState.editor.reroute_fix_curvature = true;
+  _plState.editor.editor_mode = 'edit';
+  _plState.editor.start();
+  // Wire selection event
+  _plState.editor.on('nodeSelected', (drawflowNodeId) => {
+    const stageId = _plState.nodeIdMap.get(String(drawflowNodeId));
+    if (stageId) { _plState.selectedStageId = stageId; _plRenderDrawer(); }
+  });
+  _plState.editor.on('nodeUnselected', () => {
+    _plState.selectedStageId = null;
+    _plRenderDrawer();
+  });
+  _plState.editor.on('nodeMoved', () => { _plState.dirty = true; _plUpdateSaveButton(); });
+  _plState.editor.on('connectionCreated', () => { _plState.dirty = true; _plUpdateSaveButton(); });
+  _plState.editor.on('connectionRemoved', () => { _plState.dirty = true; _plUpdateSaveButton(); });
+  return _plState.editor;
+}
+
+function _plRenderGraph() {
+  const empty = $('pl-canvas-empty');
+  if (empty) empty.style.display = 'none';
+  const title = $('pl-canvas-title');
+  const meta  = $('pl-canvas-meta');
+  if (title) title.textContent = `${_plState.current.label} (${_plState.current.id})`;
+  if (meta)  meta.textContent  = `v${_plState.current.version} · updated ${fmtTime(_plState.current.updated_at)}`;
+
+  _plInitDrawflow();
+  const editor = _plState.editor;
+  const def = _plState.current.definition || {};
+  const stages = Array.isArray(def.stages) ? def.stages : [];
+  _plState.nodeIdMap.clear();
+  _plState.stageIdMap.clear();
+
+  // Layout: linear chain, x = idx * 260
+  const X_GAP = 260, Y_BASE = 80;
+  stages.forEach((stage, idx) => {
+    const x = 40 + idx * X_GAP;
+    const y = Y_BASE;
+    const stageId = stage.id || stage.name || `stage_${idx}`;
+    const html = _plNodeHtml(stage);
+    const className = _plNodeClass(stage);
+    const dfId = editor.addNode(
+      stageId,
+      idx > 0 ? 1 : 0,                      // inputs
+      idx < stages.length - 1 ? 1 : 0,      // outputs
+      x, y,
+      className,
+      { stageId },
+      html
+    );
+    _plState.nodeIdMap.set(String(dfId), stageId);
+    _plState.stageIdMap.set(stageId, dfId);
+  });
+  // Linear edges
+  stages.forEach((stage, idx) => {
+    if (idx >= stages.length - 1) return;
+    const fromId = _plState.stageIdMap.get(stage.id || stage.name || `stage_${idx}`);
+    const toId   = _plState.stageIdMap.get(stages[idx+1].id || stages[idx+1].name || `stage_${idx+1}`);
+    if (fromId != null && toId != null) {
+      try { editor.addConnection(fromId, toId, 'output_1', 'input_1'); } catch (_) {}
     }
-    case 'done':
-      dfLogInfo('▸ pipeline complete');
-      break;
-    case 'error':
-      dfLogErr('✕ ' + (obj.message || 'unknown error'));
-      break;
+  });
+}
+
+function _plNodeClass(stage) {
+  if (stage.if_complexity_at_least || stage.if_option || (stage.conditions||[]).length) return 'conditional-node';
+  if (stage.renderer) return 'output-node';
+  return 'agent-node';
+}
+
+function _plNodeHtml(stage) {
+  const name = stage.name || stage.id || '?';
+  const cap  = stage.capability || (stage.renderer ? `renderer:${stage.renderer}` : '—');
+  const cond = stage.if_complexity_at_least ? `if ≥${stage.if_complexity_at_least}` : (stage.if_option ? `if ${stage.if_option}` : '');
+  const gate = stage.gate || ((_plState.current && _plState.current.definition && (_plState.current.definition.gateable_stages || []).includes(name)) ? 'gateable' : '');
+  return `
+    <div class="title-box" style="font-size:12px;font-weight:600;padding:6px 10px;">${escapeHtml(name)}</div>
+    <div class="box" style="font-size:11px;padding:8px 10px;">
+      <div style="color:#64748b;">${escapeHtml(cap)}</div>
+      ${cond ? `<div style="color:#d97706;font-size:10px;margin-top:3px;">${escapeHtml(cond)}</div>` : ''}
+      ${gate ? `<div style="color:#7c3aed;font-size:10px;margin-top:3px;">⏸ ${escapeHtml(gate)}</div>` : ''}
+    </div>
+  `;
+}
+
+// ── Right panel · stage drawer ─────────────────────────────────────
+function _plRenderDrawer() {
+  const el = $('pl-drawer');
+  if (!el) return;
+  if (!_plState.current || !_plState.selectedStageId) {
+    el.innerHTML = '<div class="empty" style="font-size:12px;color:#94a3b8;font-style:italic;">Click a stage in the graph to edit it.</div>';
+    return;
+  }
+  const stages = (_plState.current.definition && _plState.current.definition.stages) || [];
+  const stage = stages.find(s => (s.id || s.name) === _plState.selectedStageId) || stages.find(s => s.name === _plState.selectedStageId);
+  if (!stage) { el.innerHTML = '<div class="empty">Stage not found.</div>'; return; }
+
+  const sName = stage.name || stage.id;
+  const cap = stage.capability || '';
+  const isRenderer = !!stage.renderer;
+  const cond = stage.if_complexity_at_least || stage.if_option || '';
+
+  el.innerHTML = `
+    <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;font-weight:600;">Stage</div>
+    <div style="font-size:18px;font-weight:700;color:#1e293b;margin-top:2px;">${escapeHtml(sName)}</div>
+    <div style="font-size:12px;color:#64748b;margin-top:4px;">
+      Capability: <span class="mono" style="background:#eef2ff;color:#4338ca;padding:1px 6px;border-radius:3px;">${escapeHtml(cap || (isRenderer ? `renderer:${stage.renderer}` : '—'))}</span>
+      ${cond ? ` · <span style="color:#d97706;">${escapeHtml(typeof cond === 'string' ? cond : JSON.stringify(cond))}</span>` : ''}
+    </div>
+
+    ${isRenderer ? `
+      <div class="mt-3" style="padding:10px;background:#fef3c7;border-radius:6px;font-size:12px;color:#92400e;">
+        ⚙ Renderer stage — deterministic JS in <code>compose-renderers.js</code>. No agent prompt to edit.
+      </div>
+    ` : `
+      <div class="mt-3">
+        <div style="font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">Agent</div>
+        <select id="pl-stage-agent" class="border border-slate-200 rounded px-2 py-1 text-sm" style="width:100%;">
+          <option value="">auto (capability registry)</option>
+          ${_plAgentOptions(cap, stage.default_agent || '')}
+        </select>
+        <div class="text-xs text-slate-500 mt-1">Override which agent owns this stage. Must have capability "${escapeHtml(cap)}".</div>
+      </div>
+
+      <div class="mt-3 grid grid-cols-2 gap-2">
+        <div>
+          <div style="font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">Gate</div>
+          <select id="pl-stage-gate" class="border border-slate-200 rounded px-2 py-1 text-sm" style="width:100%;">
+            <option value="auto" ${stage.gate==='auto'||!stage.gate?'selected':''}>auto-advance</option>
+            <option value="approve_required" ${stage.gate==='approve_required'?'selected':''}>require approval</option>
+          </select>
+        </div>
+        <div>
+          <div style="font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">Retry cap</div>
+          <input id="pl-stage-retry" type="number" min="0" max="5" value="${stage.retry_cap != null ? stage.retry_cap : 0}"
+                 class="border border-slate-200 rounded px-2 py-1 text-sm" style="width:100%;">
+        </div>
+      </div>
+
+      <div class="mt-4">
+        <div class="flex items-center justify-between mb-1">
+          <div style="font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:.05em;">Stage prompt</div>
+          <button class="btn btn-ghost btn-xs" onclick="plLoadStagePrompt()" id="pl-prompt-load-btn">↻ Load</button>
+        </div>
+        <textarea id="pl-stage-prompt" placeholder="Click ↻ Load to fetch the per-agent stage prompt from agents/&lt;agent&gt;/stages/${escapeHtml(sName)}.md"
+                  class="border border-slate-200 rounded p-2 text-xs mono"
+                  style="width:100%;height:300px;font-family:ui-monospace,Menlo,monospace;line-height:1.45;resize:vertical;"
+                  oninput="_plState.promptDirty=true; _plUpdateSaveButton();"></textarea>
+        <div class="flex gap-2 mt-2">
+          <button class="btn btn-primary btn-xs" onclick="plSaveStagePrompt()" id="pl-prompt-save-btn" disabled>💾 Save prompt</button>
+          <span class="text-xs text-slate-500" id="pl-prompt-status">Prompt loads from <code>agents/&lt;agent&gt;/stages/${escapeHtml(sName)}.md</code></span>
+        </div>
+      </div>
+
+      <div class="mt-4">
+        <div style="font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">Stage params (JSON)</div>
+        <textarea id="pl-stage-params" class="border border-slate-200 rounded p-2 text-xs mono"
+                  style="width:100%;height:80px;font-family:ui-monospace,Menlo,monospace;line-height:1.45;resize:vertical;"
+                  oninput="_plState.dirty=true; _plUpdateSaveButton();">${escapeHtml(JSON.stringify(stage.params || {}, null, 2))}</textarea>
+      </div>
+    `}
+  `;
+  // Wire change tracking on the form fields
+  ['pl-stage-agent','pl-stage-gate','pl-stage-retry'].forEach(id => {
+    const e = $(id); if (e) e.addEventListener('change', () => { _plState.dirty = true; _plUpdateSaveButton(); });
+  });
+}
+
+function _plAgentOptions(capability, selected) {
+  // Static map matching agent-capabilities.js · should ideally come from API
+  const REG = {
+    plan: ['pooya','paya'],
+    research: ['pooya','daneshyar'],
+    verify: ['daneshyar'],
+    'verify-translation': ['daneshyar'],
+    draft: ['sepehr'],
+    critique: ['kherad','bidar'],
+    audit: ['davari','bidar'],
+    'voice-critic': ['bidar'],
+    judge: ['bidar'],
+    adapt: ['avang'],
+    translate: ['goyesh'],
+    design: ['afshin'],
+    image: ['afshin'],
+    triage: ['bineh'],
+    'reply-draft': ['mehrban'],
+    'carousel-plan': ['tarrah'],
+    render: ['payvand'],
+  };
+  const list = REG[capability] || [];
+  return list.map(a => `<option value="${a}" ${a===selected?'selected':''}>${a}</option>`).join('');
+}
+
+// Resolve which agent currently owns the selected stage (for prompt fetch)
+function _plResolveStageAgent(stage) {
+  const override = stage.default_agent || ($('pl-stage-agent') && $('pl-stage-agent').value) || null;
+  if (override) return override;
+  const REG = {
+    plan: 'pooya', research: 'pooya', verify: 'daneshyar', 'verify-translation': 'daneshyar',
+    draft: 'sepehr', critique: 'kherad', audit: 'davari', 'voice-critic': 'bidar',
+    judge: 'bidar', adapt: 'avang', translate: 'goyesh', design: 'afshin',
+    triage: 'bineh', 'reply-draft': 'mehrban', 'carousel-plan': 'tarrah',
+  };
+  return REG[stage.capability] || null;
+}
+
+async function plLoadStagePrompt() {
+  if (!_plState.current || !_plState.selectedStageId) return;
+  const stages = _plState.current.definition.stages || [];
+  const stage = stages.find(s => (s.id || s.name) === _plState.selectedStageId);
+  if (!stage) return;
+  const agent = _plResolveStageAgent(stage);
+  const stageName = stage.name;
+  const status = $('pl-prompt-status');
+  if (!agent) { if (status) status.innerHTML = '<span style="color:#dc2626;">No agent resolves for this stage.</span>'; return; }
+  try {
+    const r = await fetch(`${PROXY}/agents/${encodeURIComponent(agent)}/stages/${encodeURIComponent(stageName)}`);
+    const j = await r.json();
+    if (!j.ok) {
+      if (status) status.innerHTML = `<span style="color:#dc2626;">${escapeHtml(j.error || 'failed')}</span>`;
+      return;
+    }
+    $('pl-stage-prompt').value = j.markdown;
+    _plState.promptDirty = false;
+    _plUpdateSaveButton();
+    if (status) status.innerHTML = `Loaded <code>agents/${escapeHtml(agent)}/stages/${escapeHtml(stageName)}.md</code> · ${j.chars} chars`;
+  } catch (e) {
+    if (status) status.innerHTML = `<span style="color:#dc2626;">${escapeHtml(e.message)}</span>`;
   }
 }
 
-function dfLogInfo(msg) { _dfLog(`<span class="log-info">${escapeHtml(msg)}</span>`); }
-function dfLogErr(msg)  { _dfLog(`<span class="log-err">${escapeHtml(msg)}</span>`); }
-function dfLogRaw(html) { _dfLog(html); }
-function _dfLog(html) {
-  const el = $('df-run-log');
-  if (!el) return;
-  el.innerHTML += html + '\n';
-  el.scrollTop = el.scrollHeight;
+async function plSaveStagePrompt() {
+  if (!_plState.current || !_plState.selectedStageId) return;
+  const stages = _plState.current.definition.stages || [];
+  const stage = stages.find(s => (s.id || s.name) === _plState.selectedStageId);
+  if (!stage) return;
+  const agent = _plResolveStageAgent(stage);
+  const stageName = stage.name;
+  const markdown = $('pl-stage-prompt').value;
+  if (!markdown.trim().startsWith('---')) {
+    alert('Stage prompt must start with YAML frontmatter (---).');
+    return;
+  }
+  const status = $('pl-prompt-status');
+  try {
+    const r = await authFetch(`${PROXY}/agents/${encodeURIComponent(agent)}/stages/${encodeURIComponent(stageName)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ markdown, reason: 'edited via Pipeline tab' }),
+    });
+    const j = await r.json();
+    if (!j.ok) { alert('Save failed: ' + (j.error || 'unknown')); return; }
+    _plState.promptDirty = false;
+    _plUpdateSaveButton();
+    if (status) status.innerHTML = `<span style="color:#16a34a;">✓ saved</span> · ${j.chars} chars`;
+  } catch (e) { alert(e.message); }
 }
-function dfClearLog() {
-  const el = $('df-run-log');
-  if (el) el.innerHTML = '<span class="log-info">▸ log cleared</span>\n';
+
+function _plUpdateSaveButton() {
+  const saveBtn = $('pl-save-btn');
+  const revertBtn = $('pl-revert-btn');
+  const promptBtn = $('pl-prompt-save-btn');
+  if (saveBtn) saveBtn.disabled = !_plState.dirty;
+  if (revertBtn) revertBtn.disabled = !_plState.dirty;
+  if (promptBtn) promptBtn.disabled = !_plState.promptDirty;
 }
+
+// Serialize the current graph + drawer-state back into definition.stages,
+// then PUT /pipelines/:id (creates a new version).
+async function plSave() {
+  if (!_plState.current) return;
+  if (!_plState.dirty) return;
+
+  // Read drawer-state into the currently-selected stage (if any)
+  if (_plState.selectedStageId) {
+    const stages = _plState.current.definition.stages || [];
+    const stage = stages.find(s => (s.id || s.name) === _plState.selectedStageId);
+    if (stage) {
+      const agentSel = $('pl-stage-agent');
+      const gateSel  = $('pl-stage-gate');
+      const retry    = $('pl-stage-retry');
+      const params   = $('pl-stage-params');
+      if (agentSel && agentSel.value) stage.default_agent = agentSel.value;
+      else delete stage.default_agent;
+      if (gateSel) stage.gate = gateSel.value;
+      if (retry) stage.retry_cap = parseInt(retry.value, 10) || 0;
+      if (params) {
+        try { stage.params = JSON.parse(params.value || '{}'); }
+        catch (e) { alert('Stage params is not valid JSON: ' + e.message); return; }
+      }
+    }
+  }
+
+  try {
+    const r = await authFetch(`${PROXY}/pipelines/${encodeURIComponent(_plState.current.id)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        definition: _plState.current.definition,
+        change_note: 'edited via Pipeline tab',
+      }),
+    });
+    const j = await r.json();
+    if (!j.ok) { alert('Save failed: ' + (j.error || 'unknown')); return; }
+    _plState.dirty = false;
+    _plState.current.version = j.version;
+    _plUpdateSaveButton();
+    alert(`Saved as v${j.version}`);
+    plRefresh();
+  } catch (e) { alert(e.message); }
+}
+
+async function plRevertChanges() {
+  if (!_plState.current) return;
+  if (!_plState.dirty) return;
+  if (!confirm('Discard unsaved changes to the graph?')) return;
+  await plLoad(_plState.current.id);
+}
+
+async function plClone() {
+  if (!_plState.current) return;
+  const newId = prompt(`Clone "${_plState.current.id}" — new pipeline id (lowercase, dashes ok):`);
+  if (!newId || !newId.match(/^[a-z0-9][a-z0-9_-]*$/)) { alert('Invalid id.'); return; }
+  const newLabel = prompt('Label for the clone:', _plState.current.label + ' (copy)');
+  try {
+    const r = await authFetch(`${PROXY}/pipelines/${encodeURIComponent(_plState.current.id)}/clone`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ newId, newLabel }),
+    });
+    const j = await r.json();
+    if (!j.ok) { alert(j.error || 'failed'); return; }
+    await plRefresh();
+    await plLoad(newId);
+  } catch (e) { alert(e.message); }
+}
+
+async function plExport() {
+  if (!_plState.current) return;
+  window.open(`${PROXY}/pipelines/${encodeURIComponent(_plState.current.id)}/export`, '_blank');
+}
+
+async function plImport() {
+  const text = prompt('Paste pipeline JSON:');
+  if (!text) return;
+  let def;
+  try { def = JSON.parse(text); }
+  catch (e) { alert('Invalid JSON: ' + e.message); return; }
+  if (!def.id) { alert('JSON must include {"id":"..."}.'); return; }
+  try {
+    const r = await authFetch(`${PROXY}/pipelines/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ definition: def }),
+    });
+    const j = await r.json();
+    if (!j.ok) { alert(j.error || 'failed'); return; }
+    await plRefresh();
+    await plLoad(def.id);
+  } catch (e) { alert(e.message); }
+}
+
+async function plViewVersions() {
+  if (!_plState.current) return;
+  try {
+    const r = await fetch(`${PROXY}/pipelines/${encodeURIComponent(_plState.current.id)}/versions`);
+    const j = await r.json();
+    if (!j.ok) { alert(j.error || 'failed'); return; }
+    const lines = (j.versions || []).map(v =>
+      `v${v.version} · ${v.changed_by || '-'} · ${fmtTime(v.created_at)} · ${(v.change_note || '').slice(0,80)}`
+    );
+    const which = prompt(`Version history for ${_plState.current.id}:\n\n${lines.join('\n')}\n\nEnter version number to roll back to (or cancel):`);
+    if (!which) return;
+    const to = parseInt(which, 10);
+    if (!to) return;
+    const rb = await authFetch(`${PROXY}/pipelines/${encodeURIComponent(_plState.current.id)}/rollback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to }),
+    });
+    const jrb = await rb.json();
+    if (!jrb.ok) { alert(jrb.error || 'failed'); return; }
+    await plLoad(_plState.current.id);
+  } catch (e) { alert(e.message); }
+}
+
 
 async function renderLogs() {
   const html = `

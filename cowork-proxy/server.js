@@ -3068,36 +3068,40 @@ app.get('/n8n/executions', async (req, res) => {
 // DELETE /pipelines/:name          — delete
 // POST /pipelines/:name/run        — SSE stream of execution progress
 
-app.get('/pipelines', async (_, res) => {
+// M72B · Legacy Drawflow pipeline runner endpoints renamed to
+// /pipeline-runner/* to free up /pipelines/* for the new compose-pipeline
+// management API (M72A). The legacy ad-hoc agent pipelines feature remains
+// available at /pipeline-runner if anyone still uses it.
+app.get('/pipeline-runner', async (_, res) => {
   try {
     res.json({ ok: true, pipelines: await pipelineRunner.listPipelines() });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-app.post('/pipelines', auth.middleware, async (req, res) => {
+app.post('/pipeline-runner', auth.middleware, async (req, res) => {
   const { name, description, graphData } = req.body || {};
   const r = await pipelineRunner.savePipeline({ name, description, graphData });
   if (!r.ok) return res.status(400).json(r);
-  log(`pipelines.save name=${name} nodes=${r.nodeCount}`);
+  log(`pipeline-runner.save name=${name} nodes=${r.nodeCount}`);
   res.json(r);
 });
 
-app.get('/pipelines/:name', async (req, res) => {
+app.get('/pipeline-runner/:name', async (req, res) => {
   const r = await pipelineRunner.loadPipeline(req.params.name);
   if (!r.ok) return res.status(404).json(r);
   res.json(r);
 });
 
-app.delete('/pipelines/:name', auth.middleware, async (req, res) => {
+app.delete('/pipeline-runner/:name', auth.middleware, async (req, res) => {
   const r = await pipelineRunner.deletePipeline(req.params.name);
   if (!r.ok) return res.status(404).json(r);
-  log(`pipelines.delete name=${req.params.name}`);
+  log(`pipeline-runner.delete name=${req.params.name}`);
   res.json(r);
 });
 
-// IMPORTANT: /pipelines/run MUST be registered before /pipelines/:name/run
+// IMPORTANT: /pipeline-runner/run MUST be registered before /pipeline-runner/:name/run
 // (Express matches in order; ":name" would otherwise capture "run").
-app.post('/pipelines/run', auth.middleware, async (req, res) => {
+app.post('/pipeline-runner/run', auth.middleware, async (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
@@ -3115,7 +3119,7 @@ app.post('/pipelines/run', auth.middleware, async (req, res) => {
   res.end();
 });
 
-app.post('/pipelines/:name/run', auth.middleware, async (req, res) => {
+app.post('/pipeline-runner/:name/run', auth.middleware, async (req, res) => {
   // SSE stream of pipeline execution.
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -3127,7 +3131,7 @@ app.post('/pipelines/:name/run', auth.middleware, async (req, res) => {
     try { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch (_) {}
   }
 
-  log(`pipelines.run name=${req.params.name}`);
+  log(`pipeline-runner.run name=${req.params.name}`);
   try {
     const inlineGraph = req.body && req.body.graphData;
     await pipelineRunner.runPipeline({ name: req.params.name, graphData: inlineGraph }, emit);
