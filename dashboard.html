@@ -7914,6 +7914,8 @@ async function coOpenRun(runId) {
         </div>
         <div class="flex gap-2 ml-auto">
           <button class="btn btn-ghost btn-xs" onclick="coRefreshRun()">↻</button>
+          <button class="btn btn-ghost btn-xs" onclick="coDownloadLog('text')" title="Download a human-readable log of every prompt + output + cost in this run">⬇ Log</button>
+          <button class="btn btn-ghost btn-xs" onclick="coDownloadLog('json')" title="Download the full run as JSON (machine-readable)">⬇ JSON</button>
           <button class="btn btn-ghost btn-xs" onclick="coCloseRun()">Close</button>
         </div>
       </div>
@@ -7967,6 +7969,35 @@ async function coRefreshRun() {
     const j = await fetch(`${PROXY}/compose/runs/${_coState.currentRun.id}`).then(r => r.json());
     if (j.ok && j.run) { _coState.currentRun = j.run; coRenderRun(j.run); }
   } catch (_) {}
+}
+
+// M99 · Download the full process log for the currently open compose run.
+// `format` is 'text' (markdown) or 'json'. The endpoint sets a
+// Content-Disposition: attachment header so the browser will save the file.
+async function coDownloadLog(format) {
+  if (!_coState.currentRun) { alert('No active run'); return; }
+  const runId = _coState.currentRun.id;
+  const fmt = format === 'json' ? 'json' : 'text';
+  const url = `${PROXY}/compose/runs/${runId}/log?format=${fmt}`;
+  try {
+    const r = await fetch(url);
+    if (!r.ok) {
+      const msg = await r.text().catch(() => r.statusText);
+      alert('Download failed: ' + msg);
+      return;
+    }
+    const blob = await r.blob();
+    const ext = fmt === 'json' ? 'json' : 'log.md';
+    const filename = `compose-run-${runId.slice(0, 8)}.${ext}`;
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(() => { URL.revokeObjectURL(link.href); link.remove(); }, 0);
+  } catch (e) {
+    alert('Download error: ' + e.message);
+  }
 }
 
 function _coStageStatusPill(status) {

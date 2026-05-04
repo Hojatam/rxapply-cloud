@@ -171,11 +171,14 @@ async function main() {
     };
 
     let success = false, lastErr = null;
+    const csrfToken = args['csrf-token'] || process.env.RXAPPLY_CSRF_TOKEN;
+    const headers = { 'authorization': `Bearer ${token}`, 'content-type': 'application/json' };
+    if (csrfToken) headers['x-csrf-token'] = csrfToken;
     for (let attempt = 0; attempt < 3 && !success; attempt++) {
       try {
         const r = await fetch(`${baseUrl}/brand/visual-references/upload`, {
           method: 'POST',
-          headers: { 'authorization': `Bearer ${token}`, 'content-type': 'application/json' },
+          headers,
           body: JSON.stringify(payload),
         });
         const txt = await r.text();

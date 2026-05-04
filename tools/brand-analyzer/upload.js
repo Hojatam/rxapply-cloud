@@ -130,12 +130,15 @@ async function main() {
   const url = `${baseUrl}/brand/archive/upload`;
   console.log(`\nUploading to ${url} ...`);
   console.log(`  source label: ${archivePayload.sourceLabel}`);
+  const csrfToken = args['csrf-token'] || process.env.RXAPPLY_CSRF_TOKEN;
+  const headers = {
+    'authorization': `Bearer ${token}`,
+    'content-type': 'application/json',
+  };
+  if (csrfToken) headers['x-csrf-token'] = csrfToken;
   const r = await fetch(url, {
     method: 'POST',
-    headers: {
-      'authorization': `Bearer ${token}`,
-      'content-type': 'application/json',
-    },
+    headers,
     body: JSON.stringify(archivePayload),
   });
   const txt = await r.text();
@@ -166,9 +169,11 @@ async function main() {
         toneProfile: JSON.parse(fs.readFileSync(tonePath, 'utf8')),
         sourceLabel: `dm_tone_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`,
       };
+      const toneHeaders = { 'authorization': `Bearer ${token}`, 'content-type': 'application/json' };
+      if (csrfToken) toneHeaders['x-csrf-token'] = csrfToken;
       const tr = await fetch(`${baseUrl}/brand/dm-tone-profile/upload`, {
         method: 'POST',
-        headers: { 'authorization': `Bearer ${token}`, 'content-type': 'application/json' },
+        headers: toneHeaders,
         body: JSON.stringify(tonePayload),
       });
       const tt = await tr.text();

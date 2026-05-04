@@ -1389,7 +1389,17 @@ async function _executeLlmStage({ runId, run, recipe, stage, stageIndex, lang, p
     }
     await _writeStage({
       runId, stageIndex, stageName, capability, lang: lang || null,
-      agent, model: modelUsed, input: { user_prompt_excerpt: userPrompt.slice(0, 500), agent_run_id: agentRunId },
+      agent, model: modelUsed,
+      // M99 · Persist FULL prompts (system + user) so the process-log
+      // download surfaces exactly what the model saw. The legacy
+      // `user_prompt_excerpt` key is kept for backward-compatible readers.
+      input: {
+        system_prompt: systemPrompt,
+        user_prompt: userPrompt,
+        user_prompt_excerpt: userPrompt.slice(0, 500),
+        agent_run_id: agentRunId,
+        retried,
+      },
       output: null, status: 'failed', error: errMsg,
       inputTokens, outputTokens, costUsd,
     });
@@ -1441,7 +1451,15 @@ async function _executeLlmStage({ runId, run, recipe, stage, stageIndex, lang, p
   await _writeStage({
     runId, stageIndex, stageName, capability, lang: lang || null,
     agent, model: modelUsed,
-    input: { user_prompt_excerpt: userPrompt.slice(0, 1500), agent_run_id: agentRunId },
+    // M99 · Persist FULL prompts (system + user) so the process-log
+    // download is a faithful record of every input the model received.
+    input: {
+      system_prompt: systemPrompt,
+      user_prompt: userPrompt,
+      user_prompt_excerpt: userPrompt.slice(0, 1500),
+      agent_run_id: agentRunId,
+      retried,
+    },
     output: parsed,
     status: finalStatus, approvalRequired: gateHere,
     inputTokens, outputTokens, costUsd,

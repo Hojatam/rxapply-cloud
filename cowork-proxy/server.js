@@ -2445,6 +2445,121 @@ app.get('/compose/runs/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// M99 · Process-log download. Returns a single human-readable text dump
+// of EVERYTHING that flowed through the run: run metadata, recipe + options,
+// each stage's resolved agent + model, the system prompt + user input
+// (verbatim, as sent to the LLM), the raw output (pre-parse), parsed result,
+// validation errors, refine attempts, costs, tokens, timing, errors. The
+// founder's "I want to see exactly what happened" surface.
+//   ?format=json → returns the full JSON dump (machine-readable)
+//   default      → returns a markdown/text log (Content-Disposition: attachment)
+app.get('/compose/runs/:id/log', async (req, res) => {
+  try {
+    const run = await composeOrchestrator.getRun(req.params.id);
+    if (!run) return res.status(404).json({ ok: false, error: 'not found' });
+    const fmt = String(req.query.format || 'text').toLowerCase();
+
+    // Helpers
+    const j = (v) => {
+      if (v == null) return '(none)';
+      try { return JSON.stringify(v, null, 2); }
+      catch (_) { return String(v); }
+    };
+    const fence = (lang, body) => `\n\`\`\`${lang}\n${body}\n\`\`\`\n`;
+    const hr = '\n' + '─'.repeat(78) + '\n';
+
+    if (fmt === 'json') {
+      const filename = `compose-run-${run.id}.json`;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      return res.end(JSON.stringify(run, null, 2));
+    }
+
+    // Build markdown/text log
+    const stages = (run.stages || []).slice().sort((a, b) => {
+      if (a.stage_index !== b.stage_index) return a.stage_index - b.stage_index;
+      return String(a.lang || '').localeCompare(String(b.lang || ''));
+    });
+
+    const lines = [];
+    lines.push(`# Compose run · process log`);
+    lines.push('');
+    lines.push(`Run ID:          ${run.id}`);
+    lines.push(`Recipe:          ${run.recipe_id} (v${run.recipe_version || '?'})`);
+    lines.push(`Topic:           ${run.topic || ''}`);
+    lines.push(`Audience:        ${run.audience || ''}`);
+    lines.push(`Master language: ${run.master_lang || ''}`);
+    lines.push(`Target langs:    ${Array.isArray(run.target_langs) ? run.target_langs.join(', ') : ''}`);
+    lines.push(`Gate strategy:   ${run.gate_strategy || ''}`);
+    lines.push(`Status:          ${run.status}${run.error ? '  · error: ' + run.error : ''}`);
+    lines.push(`Cost:            $${Number(run.total_cost_usd || 0).toFixed(4)}   (in: ${run.total_input_tokens || 0} tok · out: ${run.total_output_tokens || 0} tok)`);
+    lines.push(`Refine attempts: ${run.refine_attempts || 0}   (${run.refine_status || 'n/a'})`);
+    lines.push(`Created:         ${run.created_at || ''}`);
+    lines.push(`Started:         ${run.started_at || ''}`);
+    lines.push(`Finished:        ${run.finished_at || ''}`);
+    lines.push('');
+    lines.push('## Options');
+    lines.push(fence('json', j(run.options)));
+    if (run.agent_overrides && Object.keys(run.agent_overrides).length) {
+      lines.push('## Agent overrides');
+      lines.push(fence('json', j(run.agent_overrides)));
+    }
+    if (run.final_output) {
+      lines.push('## Final output (rendered)');
+      lines.push(fence('json', j(run.final_output)));
+    }
+
+    lines.push(hr);
+    lines.push(`## Stage timeline (${stages.length} stages)`);
+    lines.push('');
+
+    for (const s of stages) {
+      const head = `### #${s.stage_index} · ${s.stage_name}${s.lang ? ' [' + s.lang + ']' : ''}`;
+      lines.push(head);
+      lines.push('');
+      lines.push(`Agent:    ${s.agent || '(renderer)'}`);
+      lines.push(`Model:    ${s.model || '(none)'}`);
+      lines.push(`Capability: ${s.capability || ''}`);
+      lines.push(`Status:   ${s.status}${s.error ? '  · ' + s.error : ''}`);
+      lines.push(`Tokens:   in ${s.input_tokens || 0} · out ${s.output_tokens || 0}   Cost: $${Number(s.cost_usd || 0).toFixed(4)}`);
+      lines.push(`Timing:   started ${s.started_at || ''} → finished ${s.finished_at || ''}`);
+      if (s.approval_required) {
+        lines.push(`Gate:     approved_at=${s.approved_at || '(pending)'} by ${s.approved_by || ''}${s.approval_note ? '  note: ' + s.approval_note : ''}`);
+      }
+      lines.push('');
+      // INPUT — verbatim system prompt + user prompt the model received.
+      // Older runs (pre-M99) only have an excerpt; newer runs have full text.
+      const inp = s.input && typeof s.input === 'object' ? s.input : {};
+      if (inp.system_prompt || inp.user_prompt) {
+        if (inp.system_prompt) {
+          lines.push('#### System prompt (full)');
+          lines.push(fence('text', inp.system_prompt));
+        }
+        if (inp.user_prompt) {
+          lines.push('#### User prompt (full)');
+          lines.push(fence('text', inp.user_prompt));
+        }
+        if (inp.retried) lines.push('_Note: this stage was retried once after contract validation._\n');
+        if (inp.agent_run_id) lines.push(`Linked agent_runs row: ${inp.agent_run_id}\n`);
+      } else {
+        lines.push('#### Input (sent to model)');
+        lines.push(fence('json', j(s.input)));
+      }
+      // OUTPUT — parsed JSON the model produced
+      lines.push('#### Output (parsed)');
+      lines.push(fence('json', j(s.output)));
+      lines.push(hr);
+    }
+
+    const filename = `compose-run-${run.id}.log.md`;
+    res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.end(lines.join('\n'));
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 app.post('/compose/runs', auth.middleware, async (req, res) => {
   try {
     const {
