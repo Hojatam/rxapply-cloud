@@ -741,11 +741,21 @@ app.post('/agents/:agent/prompt-preview', async (req, res) => {
       }
     } catch (_) {}
 
-    // Block 2 · per-agent stage file
+    // Block 2 · per-agent stage file (or fallback warning)
     try {
       const co = require('./compose-orchestrator');
       const stagePrompt = co._loadStagePrompt(agent, stageName);
-      if (stagePrompt) blocks.push({ source: 'stage_file', label: `${agent}/stages/${stageName}.md`, text: `# This stage: ${stageName}\n${stagePrompt}`, editable_at: `/agents/${agent}/stages/${stageName}` });
+      if (stagePrompt) {
+        blocks.push({ source: 'stage_file', label: `${agent}/stages/${stageName}.md`, text: `# This stage: ${stageName}\n${stagePrompt}`, editable_at: `agents/${agent}/stages/${stageName}.md (Pipeline tab → click stage)` });
+      } else {
+        // M80 · Surface the fallback so the founder knows a per-agent file is missing
+        blocks.push({
+          source: 'stage_fallback_warning',
+          label: `⚠ No per-agent stage file — orchestrator will use hardcoded default for "${stageName}"`,
+          text: `No file found at agents/${agent}/stages/${stageName}.md.\nThe orchestrator will fall back to the hardcoded default in compose-orchestrator.js#_DEFAULT_STAGE_PROMPTS.\nCreate the file via the Pipeline tab to take full control.`,
+          editable_at: `Create agents/${agent}/stages/${stageName}.md`,
+        });
+      }
     } catch (_) {}
 
     // Block 3 · brand profile
@@ -762,6 +772,56 @@ app.post('/agents/:agent/prompt-preview', async (req, res) => {
         const country = KB.detectCountry(topic);
         const kb = KB.renderAsBlock({ country, query: topic, limit: 6 });
         if (kb) blocks.push({ source: 'knowledge_base', label: `Knowledge base (country=${country}, topic=${(topic || '').slice(0, 50)})`, text: kb, editable_at: '/knowledge' });
+      } catch (_) {}
+    }
+
+    // Block 4b · M80 · Protected-terms glossary (auto-derived from KB)
+    // Only injected for translate / verify-translation stages. Show its
+    // derivation logic so the founder knows where each term came from.
+    if (['translate', 'verify-translation'].includes(stageName)) {
+      try {
+        const KBProtected = require('./kb-protected-terms');
+        const block = await KBProtected.renderAsPromptBlock();
+        const meta = await KBProtected.get();
+        if (block) {
+          blocks.push({
+            source: 'protected_terms',
+            label: `Protected terms (${meta.n_total} terms · ${meta.n_explicit} explicit + ${meta.n_heuristic} heuristic — auto-derived from KB)`,
+            text: `${block}\n\n--- DERIVATION (M80 surfaced) ---\nTerms come from two sources:\n  1. Explicit metadata.protected_terms in KB documents (${meta.n_explicit} terms)\n  2. Heuristic ALL-CAPS scan with stoplist + recurrence ≥3 (${meta.n_heuristic} terms)\nGenerated at: ${meta.generated_at} · Cache TTL: 1 hour`,
+            editable_at: 'Edit KB documents → metadata.protected_terms; cache refreshes hourly',
+          });
+        }
+      } catch (_) {}
+    }
+
+    // Block 4c · M80 · Recipe template variables surfaced
+    // The orchestrator silently substitutes {{recipe.X}} and {{run.Y}} in
+    // stage prompts. Show what they expand to so the founder knows.
+    if (platform) {
+      try {
+        const composeOrch = require('./compose-orchestrator');
+        const recipe = composeOrch.getRecipe(platform);
+        if (recipe) {
+          const vars = [];
+          if (recipe.label) vars.push(`{{recipe.label}} → "${recipe.label}"`);
+          if (recipe.length_target_words) vars.push(`{{recipe.length_target_words}} → "${recipe.length_target_words}"`);
+          if (language) vars.push(`{{run.master_lang}} → "${language}"`);
+          // Stage params
+          const stageDef = (recipe.stages || []).find(s => s.name === stageName);
+          if (stageDef && stageDef.params) {
+            for (const [k, v] of Object.entries(stageDef.params)) {
+              vars.push(`recipe.stages[${stageName}].params.${k} → ${JSON.stringify(v)}`);
+            }
+          }
+          if (vars.length) {
+            blocks.push({
+              source: 'recipe_template_vars',
+              label: `Recipe template substitutions (${platform})`,
+              text: `These values get substituted into the stage prompt template at runtime:\n${vars.join('\n')}`,
+              editable_at: `Pipeline tab → ${platform}`,
+            });
+          }
+        }
       } catch (_) {}
     }
 

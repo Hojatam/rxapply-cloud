@@ -195,15 +195,25 @@ async function _buildSystemPrompt({ agent, stageName, recipe, run, masterDraft, 
     }
   } catch (_) { /* non-fatal */ }
 
-  // M68 · Stage-specific instruction template, resolution order:
+  // M68/M80 · Stage-specific instruction template, resolution order:
   //   1. recipe.stage_prompts[stageName]   — per-recipe override (rare)
-  //   2. agents/<agent>/stages/<stage>.md  — per-agent stage file (preferred)
-  //   3. _DEFAULT_STAGE_PROMPTS[stage]     — hardcoded last-resort fallback
-  // The per-agent file is the source of truth; the dashboard's Pipeline tab
-  // edits it directly. Cache with file-mtime invalidation.
+  //   2. agents/<agent>/stages/<stage>.md  — per-agent stage file (PREFERRED;
+  //                                            full visibility + edit in Brain tab)
+  //   3. _DEFAULT_STAGE_PROMPTS[stage]     — hardcoded last-resort fallback;
+  //                                            M80 surfaces a console warning so
+  //                                            the founder knows it's firing
   let tmpl = (recipe.stage_prompts && recipe.stage_prompts[stageName])
-          || _loadStagePrompt(agent, stageName)
-          || _DEFAULT_STAGE_PROMPTS[stageName];
+          || _loadStagePrompt(agent, stageName);
+  let _stageSource = tmpl ? (recipe.stage_prompts && recipe.stage_prompts[stageName] ? 'recipe-override' : 'per-agent-file') : null;
+  if (!tmpl) {
+    tmpl = _DEFAULT_STAGE_PROMPTS[stageName];
+    if (tmpl) {
+      _stageSource = 'hardcoded-fallback';
+      // M80 · Surface fallback so the founder knows a per-agent stage file
+      // is missing. Visible in server logs + via prompt-preview endpoint.
+      console.warn(`[M80] stage prompt fallback fired for ${agent}/${stageName} — create agents/${agent}/stages/${stageName}.md to customize.`);
+    }
+  }
   if (tmpl) {
     blocks.push(`# This stage: ${stageName}\n${_renderTemplate(tmpl, { run, recipe, masterDraft, lang })}`);
   }
