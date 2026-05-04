@@ -243,6 +243,10 @@ app.get('/health', (_, res) => res.json({
     afshin: { draft: afshin.hasAnthropic(), render: afshin.hasOpenAI() },  // F8
     pipelines: true,                 // F6 (visual pipeline editor)
     cost: true,                      // F9
+    // M101b · Image-pipeline env diagnostics — visible to the founder via
+    // GET /health so you can confirm whether Unsplash is wired without
+    // grepping Railway logs.
+    unsplash: !!process.env.UNSPLASH_ACCESS_KEY,
   },
   routes: ['/health', '/run-agent', '/run-agents-parallel', '/run-helper',
            '/prompts/:agent (GET, PUT)', '/prompts/:agent/versions',
@@ -3893,9 +3897,13 @@ app.listen(PORT, () => {
   // Confirm what dotenv pulled in. Mask the values — only show presence.
   const present = (v) => v ? `\x1b[32m✓ set (${v.slice(0,8)}…${v.slice(-4)})\x1b[0m` : `\x1b[31m✕ NOT SET\x1b[0m`;
   console.log(`  env keys:`);
-  console.log(`    ANTHROPIC_API_KEY  ${present(process.env.ANTHROPIC_API_KEY)}`);
-  console.log(`    OPENAI_API_KEY     ${present(process.env.OPENAI_API_KEY)}`);
-  console.log(`    N8N_API_KEY        ${present(process.env.N8N_API_KEY)}`);
+  console.log(`    ANTHROPIC_API_KEY    ${present(process.env.ANTHROPIC_API_KEY)}`);
+  console.log(`    OPENAI_API_KEY       ${present(process.env.OPENAI_API_KEY)}`);
+  console.log(`    N8N_API_KEY          ${present(process.env.N8N_API_KEY)}`);
+  // M101b · Image pipeline diagnostics. Without UNSPLASH_ACCESS_KEY,
+  // Tarrah's image_source='mixed' silently degrades to 'generated' (M101).
+  // This boot line tells the founder what to expect at a glance.
+  console.log(`    UNSPLASH_ACCESS_KEY  ${present(process.env.UNSPLASH_ACCESS_KEY)}`);
   log(`startup port=${PORT} mode=${MODE} authInit=${auth.isInitialized()} anth=${!!process.env.ANTHROPIC_API_KEY} openai=${!!process.env.OPENAI_API_KEY} n8n=${!!process.env.N8N_API_KEY}`);
 
   // M95 · Single-source-of-truth control map
