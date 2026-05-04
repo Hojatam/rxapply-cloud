@@ -79,7 +79,7 @@ async function savePipeline({ name, description, graphData }) {
 
   try {
     await query(`
-      INSERT INTO pipelines (name, description, graph_data, node_count, updated_at)
+      INSERT INTO pipeline_runner_pipelines (name, description, graph_data, node_count, updated_at)
       VALUES (${q(name)}, ${q(description || '')}, ${qJson(graphData)}, ${nodeCount}, NOW())
       ON CONFLICT (name) DO UPDATE
         SET description = ${q(description || '')},
@@ -101,7 +101,7 @@ async function loadPipeline(name) {
   try {
     const r = await query(`
       SELECT name, description, graph_data, updated_at::text AS saved_at
-        FROM pipelines WHERE name = ${q(name)};`);
+        FROM pipeline_runner_pipelines WHERE name = ${q(name)};`);
     if (!r.rows || !r.rows.length) return { ok: false, error: `pipeline "${name}" not found` };
     const row = r.rows[0];
     return {
@@ -121,7 +121,7 @@ async function listPipelines() {
   try {
     const r = await query(`
       SELECT name, description, node_count, updated_at::text AS saved_at
-        FROM pipelines
+        FROM pipeline_runner_pipelines
         ORDER BY updated_at DESC;`);
     return (r.rows || []).map(row => ({
       name:        row.name,
@@ -136,7 +136,7 @@ async function listPipelines() {
 // ── Delete ──────────────────────────────────────────────────────────
 async function deletePipeline(name) {
   try {
-    const r = await query(`DELETE FROM pipelines WHERE name = ${q(name)};`);
+    const r = await query(`DELETE FROM pipeline_runner_pipelines WHERE name = ${q(name)};`);
     if (!r.rowCount) return { ok: false, error: 'not found' };
     // Best-effort cleanup of disk mirror (only exists when DISK_MIRROR=true).
     try {
