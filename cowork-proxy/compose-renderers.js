@@ -447,6 +447,23 @@ async function _renderCarousel({ source, carouselSpec, run, recipe, lang }) {
   const templateId = carouselSpec.template;
   const globalSlots = carouselSpec.global || {};
 
+  // ── M89 · Contract enforcement ─────────────────────────────────
+  // Afshin (after M82) produces a `slides` array that mirrors Tarrah's
+  // count and provides per-slide overrides (image_source, unsplash_query,
+  // final_prompt, design_directive, brand_asset_placement). When present,
+  // we use Afshin's overrides per-slide. If counts diverge, we FAIL —
+  // the founder needs to see that the contract broke.
+  const afshinSlides = (source && source.mode === 'carousel' && Array.isArray(source.slides)) ? source.slides : null;
+  if (afshinSlides && afshinSlides.length !== slides.length) {
+    throw new Error(`M89 contract violation · Tarrah specified ${slides.length} slides, Afshin produced ${afshinSlides.length}. The design stage must produce one slide entry per Tarrah slide. Fix: re-run the design stage or adjust Tarrah's spec.`);
+  }
+  const afshinByN = new Map();
+  if (afshinSlides) {
+    for (const a of afshinSlides) {
+      if (a && a.n != null) afshinByN.set(a.n, a);
+    }
+  }
+
   // Pull top-3 brand reference URLs once — same anchor for every slide.
   // M70 · Also pulls descriptive metadata so the per-slide prompt can be
   // enriched (style/layout/typography rules from the visual_style_profile).
@@ -504,12 +521,18 @@ async function _renderCarousel({ source, carouselSpec, run, recipe, lang }) {
                     `This is slide ${slide.n} of ${slides.length} in a carousel — keep palette, fonts, ` +
                     `and brand identity consistent across slides.]`;
 
-    // M71 · Per-slide Unsplash branch — when Tarrah's slot or Afshin's
-    // design output flagged this slide as photo-led, fetch a real photo
-    // instead of generating from scratch. Photographer attribution is
-    // stored on the resulting media_library row and surfaced in the
-    // slide's _image_source / _attribution fields.
-    const slideImageSource = (slide.image_source) || (mergedSlots && mergedSlots.image_source) || 'generated';
+    // M71 + M82/M89 · Per-slide image_source resolution
+    // Priority order (Afshin's spec wins because he's the strict executor):
+    //   1. Afshin's per-slide directive (afshinByN[slide.n].image_source)
+    //   2. Tarrah's slide.image_source (the planner's choice)
+    //   3. mergedSlots.image_source (legacy fallback)
+    //   4. 'generated' default
+    const afshinSlide = afshinByN.get(slide.n) || null;
+    const slideImageSource =
+        (afshinSlide && afshinSlide.image_source)
+     || slide.image_source
+     || (mergedSlots && mergedSlots.image_source)
+     || 'generated';
     if (slideImageSource === 'unsplash') {
       const unsplash = require('./unsplash');
       if (!unsplash.hasKey()) {
@@ -517,7 +540,11 @@ async function _renderCarousel({ source, carouselSpec, run, recipe, lang }) {
         renderedSlides.push({ n: slide.n, role: slide.role, error: 'UNSPLASH_ACCESS_KEY not set on server' });
         continue;
       }
-      const qText = slide.unsplash_query || mergedSlots.unsplash_query || run.topic;
+      const qText =
+          (afshinSlide && afshinSlide.unsplash_query)
+       || slide.unsplash_query
+       || mergedSlots.unsplash_query
+       || run.topic;
       try {
         const u = await unsplash.quickPick({
           query: qText,
@@ -555,11 +582,16 @@ async function _renderCarousel({ source, carouselSpec, run, recipe, lang }) {
       }
     }
 
-    // M70 · Enrich with carousel slot block + brand exemplar metadata +
-    // hex colors + RTL/numeral direction + negative prompt list.
+    // M82/M89 · When Afshin produced an explicit final_prompt for this
+    // slide (carrying Tarrah's design_directive + brand_asset_placement
+    // verbatim), use it as the base. Otherwise fall back to the template-
+    // scaffold path. Either way, M70 enrichment runs on top.
+    const baseBriefForSlide = (afshinSlide && afshinSlide.final_prompt)
+      ? afshinSlide.final_prompt
+      : slidePrompt;
     const enrichedPrompt = _buildEnrichedImagePrompt({
-      baseBrief: slidePrompt,
-      source: { _carousel_slot: mergedSlots },
+      baseBrief: baseBriefForSlide,
+      source: { _carousel_slot: mergedSlots, _afshin_slide: afshinSlide },
       run, recipe, lang,
       designBriefs,
     });

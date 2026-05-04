@@ -1246,6 +1246,13 @@ async function _executeLlmStage({ runId, run, recipe, stage, stageIndex, lang, p
   userParts.push(`Format: ${recipe.label}`);
   userParts.push(`Master language: ${run.master_lang}`);
   if (lang) userParts.push(`Translate to language: ${lang}`);
+  // M83 · Founder-forced slide count flows through run.options into the plan
+  // stage's user prompt. Plan emits content_partition.slide_count_target =
+  // this value verbatim. Tarrah respects it strictly (M81/M89). For non-plan
+  // stages we still surface it so each agent sees the founder's intent.
+  if (run.options && run.options.carousel_slides) {
+    userParts.push(`Founder requested slide count: ${run.options.carousel_slides} (HONOR EXACTLY — Tarrah must put the important info in this many slides; Sepehr's caption must not duplicate slide content).`);
+  }
   if (priorMaster.plan)     userParts.push(`\n--- PLAN ---\n${JSON.stringify(priorMaster.plan, null, 2)}`);
   if (priorMaster.research) userParts.push(`\n--- RESEARCH ---\n${JSON.stringify(priorMaster.research, null, 2)}`);
   if (priorMaster.draft)    userParts.push(`\n--- DRAFT ---\n${JSON.stringify(priorMaster.draft, null, 2)}`);
