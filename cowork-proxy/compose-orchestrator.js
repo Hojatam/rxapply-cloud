@@ -46,10 +46,23 @@ const trainingRetrieval = require('./agent-training-retrieval');  // M56 · unif
 
 const RECIPES_DIR = path.resolve(__dirname, '..', 'compose-recipes');
 
-// ── Recipe loading ────────────────────────────────────────────────────
-let _recipeCache = null;
-function _loadRecipes() {
-  if (_recipeCache) return _recipeCache;
+// ── Recipe loading (M72A: DB-backed via cowork-proxy/pipelines.js) ───
+//
+// Resolution order on the hot path (sync — orchestrator's stage tick):
+//   1. pipelines.getCachedSync(id) — populated by pipelines.refreshCache()
+//      (DB pull, runs at boot + on every save)
+//   2. compose-recipes/<id>.json file fallback (boot safety + during the
+//      transition window where DB hasn't been seeded yet)
+//
+// pipelines.onChange wires cache invalidation in both directions: when
+// the founder saves a pipeline via the API, our local cache flips, the
+// next stage tick sees the new definition.
+const pipelines = require('./pipelines');
+let _fileCache = null;          // legacy file-based fallback cache
+let _dbReady = false;           // flips true once DB seed/refresh succeeds
+
+function _loadRecipesFromFiles() {
+  if (_fileCache) return _fileCache;
   const out = {};
   if (fs.existsSync(RECIPES_DIR)) {
     for (const f of fs.readdirSync(RECIPES_DIR)) {
@@ -62,16 +75,44 @@ function _loadRecipes() {
       }
     }
   }
-  _recipeCache = out;
+  _fileCache = out;
   return out;
 }
+
+// Background seed + cache warm. Called once from server boot. Best-effort —
+// if the DB isn't ready yet (e.g. first deploy before migration runs), we
+// silently fall back to file-based recipes until the next refresh succeeds.
+async function ensurePipelinesLoaded() {
+  try {
+    const seedRes = await pipelines.seedFromFiles({ recipesDir: RECIPES_DIR });
+    if (seedRes && seedRes.seeded > 0) {
+      console.log(`[pipelines] seeded ${seedRes.seeded} pipelines from ${RECIPES_DIR}`);
+    }
+    await pipelines.refreshCache();
+    _dbReady = true;
+  } catch (e) {
+    console.warn('[pipelines] DB load failed, falling back to file-based recipes:', e.message);
+    _dbReady = false;
+  }
+}
+
+// Re-run on every pipelines change so any cross-cutting state stays fresh.
+pipelines.onChange(() => { _dbReady = pipelines.listCachedSync().length > 0; });
+
 function getRecipe(id) {
-  const r = _loadRecipes()[id];
-  if (!r) throw new Error(`Unknown recipe: ${id}`);
-  return r;
+  const fromDb = _dbReady ? pipelines.getCachedSync(id) : null;
+  if (fromDb && fromDb.definition) return fromDb.definition;
+  const fromFile = _loadRecipesFromFiles()[id];
+  if (fromFile) return fromFile;
+  throw new Error(`Unknown recipe: ${id}`);
 }
 function listRecipes() {
-  return Object.values(_loadRecipes()).map(r => ({
+  // Prefer DB list when ready; otherwise file list. Both produce the same shape.
+  const fromDb = _dbReady ? pipelines.listCachedSync() : [];
+  const list = fromDb.length
+    ? fromDb.map(p => p.definition || {})
+    : Object.values(_loadRecipesFromFiles());
+  return list.map(r => ({
     id: r.id, label: r.label, icon: r.icon || null,
     description: r.description || '',
     options_schema: r.options_schema || [],
@@ -1524,4 +1565,6 @@ module.exports = {
   forkFromStage,
   // M68 · stage-prompt loader + cache invalidation hook
   _loadStagePrompt, _invalidateStagePromptCache,
+  // M72A · pipelines bootstrap (call once on server boot)
+  ensurePipelinesLoaded,
 };

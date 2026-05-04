@@ -1709,6 +1709,144 @@ app.get('/compose/recipes', (_req, res) => {
   catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ── M72A · Pipeline management API ──────────────────────────────────
+// Founder-facing CRUD for pipelines. The Pipeline tab v2 (M72B) reads
+// and writes through these endpoints. Compose runs use the orchestrator's
+// in-memory cache (populated by pipelines.js); these endpoints invalidate
+// that cache on every write.
+//
+//   GET    /pipelines                          — list (?category, ?include_disabled)
+//   GET    /pipelines/:id                      — full row + cached definition
+//   PUT    /pipelines/:id (auth)               — save (creates new version)
+//   POST   /pipelines/:id/clone (auth)         — body {newId, newLabel?}
+//   POST   /pipelines/:id/rollback (auth)      — body {to:<n>}
+//   DELETE /pipelines/:id (auth)               — soft-disable (?hard=true to actually delete)
+//   GET    /pipelines/:id/versions             — version history (header rows)
+//   GET    /pipelines/:id/versions/:n          — full snapshot
+//   POST   /pipelines/import (auth)            — body = pipeline JSON, creates new
+//   GET    /pipelines/:id/export               — JSON dump for backup
+const _pipelines = require('./pipelines');
+const PIPELINE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,49}$/i;
+
+app.get('/pipelines', async (req, res) => {
+  try {
+    const items = await _pipelines.listAll({
+      category: req.query.category || null,
+      includeDisabled: req.query.include_disabled === 'true',
+    });
+    res.json({ ok: true, count: items.length, items });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.get('/pipelines/:id', async (req, res) => {
+  try {
+    if (!PIPELINE_ID_RE.test(req.params.id)) return res.status(400).json({ ok: false, error: 'invalid pipeline id' });
+    const row = await _pipelines.getById(req.params.id);
+    if (!row) return res.status(404).json({ ok: false, error: 'pipeline not found' });
+    res.json({ ok: true, pipeline: row });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.put('/pipelines/:id', auth.middleware, async (req, res) => {
+  try {
+    if (!PIPELINE_ID_RE.test(req.params.id)) return res.status(400).json({ ok: false, error: 'invalid pipeline id' });
+    const body = req.body || {};
+    const definition = body.definition || body;        // accept either {definition:{...}} or raw def
+    const r = await _pipelines.save(req.params.id, definition, {
+      changedBy: (req.user && req.user.username) || 'founder',
+      changeNote: body.change_note || body.changeNote || null,
+      label: body.label || null,
+      description: body.description || null,
+      category: body.category || null,
+    });
+    log(`pipelines.put id=${req.params.id} v=${r.version}`);
+    res.json(r);
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+app.post('/pipelines/:id/clone', auth.middleware, async (req, res) => {
+  try {
+    if (!PIPELINE_ID_RE.test(req.params.id)) return res.status(400).json({ ok: false, error: 'invalid pipeline id' });
+    const body = req.body || {};
+    const newId = body.newId || body.new_id;
+    const newLabel = body.newLabel || body.new_label || null;
+    if (!newId || !PIPELINE_ID_RE.test(newId)) return res.status(400).json({ ok: false, error: 'newId required and must be a valid id' });
+    const r = await _pipelines.clone(req.params.id, newId, newLabel);
+    log(`pipelines.clone src=${req.params.id} new=${newId}`);
+    res.json(r);
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+app.post('/pipelines/:id/rollback', auth.middleware, async (req, res) => {
+  try {
+    if (!PIPELINE_ID_RE.test(req.params.id)) return res.status(400).json({ ok: false, error: 'invalid pipeline id' });
+    const to = req.body && (req.body.to || req.body.toVersion);
+    if (to == null) return res.status(400).json({ ok: false, error: 'send {to: <version>}' });
+    const r = await _pipelines.rollback(req.params.id, to, {
+      changedBy: (req.user && req.user.username) || 'founder',
+    });
+    if (!r.ok) return res.status(404).json(r);
+    log(`pipelines.rollback id=${req.params.id} to=${to} new_v=${r.version}`);
+    res.json(r);
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+app.delete('/pipelines/:id', auth.middleware, async (req, res) => {
+  try {
+    if (!PIPELINE_ID_RE.test(req.params.id)) return res.status(400).json({ ok: false, error: 'invalid pipeline id' });
+    const hard = req.query.hard === 'true';
+    const r = await _pipelines.del(req.params.id, { hard });
+    log(`pipelines.delete id=${req.params.id} hard=${hard}`);
+    res.json(r);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.get('/pipelines/:id/versions', async (req, res) => {
+  try {
+    if (!PIPELINE_ID_RE.test(req.params.id)) return res.status(400).json({ ok: false, error: 'invalid pipeline id' });
+    const versions = await _pipelines.listVersions(req.params.id, { limit: req.query.limit });
+    res.json({ ok: true, count: versions.length, versions });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.get('/pipelines/:id/versions/:n', async (req, res) => {
+  try {
+    if (!PIPELINE_ID_RE.test(req.params.id)) return res.status(400).json({ ok: false, error: 'invalid pipeline id' });
+    const def = await _pipelines.getVersion(req.params.id, req.params.n);
+    if (!def) return res.status(404).json({ ok: false, error: 'version not found' });
+    res.json({ ok: true, id: req.params.id, version: parseInt(req.params.n, 10), definition: def });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.post('/pipelines/import', auth.middleware, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const def = body.definition || body;
+    if (!def || !def.id) return res.status(400).json({ ok: false, error: 'definition.id required' });
+    if (!PIPELINE_ID_RE.test(def.id)) return res.status(400).json({ ok: false, error: 'invalid pipeline id' });
+    const r = await _pipelines.save(def.id, def, {
+      changedBy: (req.user && req.user.username) || 'founder',
+      changeNote: 'imported from JSON',
+      label: def.label,
+      description: def.description,
+      category: def.category || 'compose',
+    });
+    log(`pipelines.import id=${def.id} v=${r.version}`);
+    res.json(r);
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+app.get('/pipelines/:id/export', async (req, res) => {
+  try {
+    if (!PIPELINE_ID_RE.test(req.params.id)) return res.status(400).json({ ok: false, error: 'invalid pipeline id' });
+    const row = await _pipelines.getById(req.params.id);
+    if (!row) return res.status(404).json({ ok: false, error: 'pipeline not found' });
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="pipeline-${row.id}-v${row.version}.json"`);
+    res.send(JSON.stringify(row.definition, null, 2));
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // M38 · List available image-gen models for the run-form picker.
 app.get('/compose/image-models', (_req, res) => {
   try {
@@ -3035,6 +3173,11 @@ app.use('/tools', toolsRouter);
     const n = await toolsRegistry.sync();
     console.log(`  tools registry: synced ${n} tools to Postgres`);
   } catch (e) { console.error(`  tools registry sync failed: ${e.message}`); }
+  // M72A · Bootstrap pipelines table from compose-recipes/*.json on first
+  // boot. Idempotent: skipped when the table already has rows.
+  try {
+    await composeOrchestrator.ensurePipelinesLoaded();
+  } catch (e) { console.error(`  pipelines bootstrap failed: ${e.message}`); }
 })();
 
 app.listen(PORT, () => {
