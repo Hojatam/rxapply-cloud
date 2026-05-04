@@ -172,7 +172,44 @@ async function probeN8n() {
   }
 }
 
-// ── 6. Node process ─────────────────────────────────────────────────
+// ── 6. Unsplash ─────────────────────────────────────────────────────
+// M101c · Verifies UNSPLASH_ACCESS_KEY is set AND that the key is valid
+// against the live API. We use /me which is the cheapest authenticated
+// endpoint (1 request, returns the developer's account, no rate-limit
+// penalty for ping-style use).
+async function probeUnsplash() {
+  const t0 = Date.now();
+  const apiKey = process.env.UNSPLASH_ACCESS_KEY;
+  if (!apiKey) return { ok: null, latency_ms: 0, note: 'UNSPLASH_ACCESS_KEY not set (skipped — mixed/unsplash slides will degrade to generated)' };
+  try {
+    const r = await _withTimeout(
+      fetch('https://api.unsplash.com/photos/random?count=1', {
+        headers: { 'Authorization': `Client-ID ${apiKey}` },
+      }),
+      'unsplash.fetch');
+    // Headers Unsplash returns: X-Ratelimit-Limit + X-Ratelimit-Remaining.
+    const rateLimit  = r.headers.get('x-ratelimit-limit');
+    const rateRemain = r.headers.get('x-ratelimit-remaining');
+    if (!r.ok) {
+      const t = await r.text();
+      return {
+        ok: false, latency_ms: Date.now() - t0, status: r.status,
+        api_key_valid: r.status !== 401,
+        error: t.slice(0, 200),
+      };
+    }
+    return {
+      ok: true, latency_ms: Date.now() - t0, status: r.status,
+      api_key_valid: true,
+      rate_limit:     rateLimit  ? Number(rateLimit)  : null,
+      rate_remaining: rateRemain ? Number(rateRemain) : null,
+    };
+  } catch (e) {
+    return { ok: false, latency_ms: Date.now() - t0, error: e.message.slice(0, 200) };
+  }
+}
+
+// ── 7. Node process ─────────────────────────────────────────────────
 function probeProcess() {
   const m = process.memoryUsage();
   return {
@@ -187,8 +224,8 @@ function probeProcess() {
 
 // ── Public API ──────────────────────────────────────────────────────
 async function probeAll() {
-  const [database, storageR, anthropic, openai, n8n] = await Promise.all([
-    probeDatabase(), probeStorage(), probeAnthropic(), probeOpenAI(), probeN8n(),
+  const [database, storageR, anthropic, openai, n8n, unsplash] = await Promise.all([
+    probeDatabase(), probeStorage(), probeAnthropic(), probeOpenAI(), probeN8n(), probeUnsplash(),
   ]);
   return {
     generated_at: new Date().toISOString(),
@@ -198,6 +235,7 @@ async function probeAll() {
       anthropic,
       openai,
       n8n,
+      unsplash,
       process: probeProcess(),
     },
   };
@@ -210,6 +248,7 @@ async function probe(name) {
     case 'anthropic': return await probeAnthropic();
     case 'openai':    return await probeOpenAI();
     case 'n8n':       return await probeN8n();
+    case 'unsplash':  return await probeUnsplash();
     case 'process':   return probeProcess();
     default: return { ok: false, error: `unknown service: ${name}` };
   }

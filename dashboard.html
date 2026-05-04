@@ -4155,6 +4155,7 @@ const SERVICE_META = {
   anthropic: { label: 'Anthropic API',     accent: 'amber',   icon: 'pipelines', sub: 'Claude · LLM provider' },
   openai:    { label: 'OpenAI API',        accent: 'emerald', icon: 'pipelines', sub: 'GPT-5.x / o3 · LLM provider' },
   n8n:       { label: 'n8n',               accent: 'rose',    icon: 'workflows', sub: 'Workflow engine · self-hosted' },
+  unsplash:  { label: 'Unsplash',          accent: 'teal',    icon: 'pipelines', sub: 'Stock photos · mixed/unsplash slide hero' },
   process:   { label: 'Proxy process',     accent: 'copper',  icon: 'services',  sub: 'Node + Express runtime' },
 };
 
@@ -4189,7 +4190,7 @@ async function loadServices() {
     const j = await r.json();
     if (!j.ok) throw new Error(j.error || 'failed');
     const grid = $('services-grid');
-    const order = ['database', 'storage', 'anthropic', 'openai', 'n8n', 'process'];
+    const order = ['database', 'storage', 'anthropic', 'openai', 'n8n', 'unsplash', 'process'];
     grid.innerHTML = order
       .filter(name => j.services && (name in j.services))
       .map(name => {
@@ -4231,6 +4232,14 @@ async function loadServices() {
           rows.push(`<div class="service-meta"><span class="service-meta-label">API key</span>
             <span class="service-meta-value mono" style="color:${s.api_key_valid ? 'var(--ok)' : 'var(--err)'};">
               ${s.api_key_valid ? 'valid' : 'invalid'}</span></div>`);
+        }
+        // M101c · Unsplash rate-limit display. Free tier = 50 req/hr.
+        // Demo apps before approval are even tighter. Yellow if low.
+        if (typeof s.rate_remaining === 'number' && typeof s.rate_limit === 'number') {
+          const ratio = s.rate_limit > 0 ? s.rate_remaining / s.rate_limit : 0;
+          const color = ratio > 0.5 ? 'var(--ok)' : ratio > 0.2 ? 'var(--warn)' : 'var(--err)';
+          rows.push(`<div class="service-meta"><span class="service-meta-label">Rate limit</span>
+            <span class="service-meta-value mono" style="color:${color};">${s.rate_remaining} / ${s.rate_limit}</span></div>`);
         }
 
         const errorRow = s.ok === false && s.error
