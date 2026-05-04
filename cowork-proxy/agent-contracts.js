@@ -120,6 +120,22 @@ const SCHEMAS = {
     },
   },
 
+  // M98 · Tarrah's carousel-plan output contract — enforces harmony fields
+  // so the run fails loudly if Tarrah skips concept / visual_consistency_rules.
+  // Without these, slides have no narrative arc and Afshin can't maintain
+  // visual harmony.
+  'carousel-plan': {
+    type: 'object',
+    properties: {
+      concept:                  { type: 'string', required: true, minLength: 30 },
+      audience_journey:         { type: 'string', required: true, minLength: 20 },
+      slide_count:              { type: 'number', required: true },
+      visual_consistency_rules: { type: 'array',  required: true, items: { type: 'string' } },
+      tagline_text:             { type: 'string', required: true, minLength: 5 },
+      slides:                   { type: 'array',  required: true, items: { type: 'object' } },
+    },
+  },
+
   // M50 · Voice fingerprint critic
   'voice-critic': {
     type: 'object',

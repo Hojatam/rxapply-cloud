@@ -3,34 +3,114 @@
   "label": "X thread",
   "icon": "twitter",
   "description": "Multi-tweet thread for X (Twitter): hook tweet + 4-12 body tweets + closing tweet with CTA. Auto-split per 280-char tweets. Optional cover for the first tweet.",
-  "version": "4",
+  "version": "5",
   "length_target_words": "350–800 (multi-tweet thread, total across all tweets)",
-
   "stages": [
-    { "name": "plan",     "capability": "plan" },
-    { "name": "draft",    "capability": "draft", "params": { "length_words": [350, 800] } },
-    { "name": "critique", "capability": "critique" },
-    { "name": "verify",   "capability": "verify" },
-    { "name": "voice-critic", "capability": "voice-critic" },
-    { "name": "audit",    "capability": "audit", "if_complexity_at_least": "deep" },
-    { "name": "adapt",    "capability": "adapt",
-      "params": { "produce": ["hook_tweet", "body_tweets", "closing_tweet", "design_brief"] } },
-    { "name": "render",   "renderer": "x-thread" },
-    { "name": "design",   "capability": "design", "if_option": "with_image" },
-    { "name": "image",    "renderer": "image-cover", "if_option": "with_image" }
+    {
+      "name": "plan",
+      "capability": "plan"
+    },
+    {
+      "name": "research",
+      "capability": "research",
+      "if_complexity_at_least": "standard"
+    },
+    {
+      "name": "draft",
+      "capability": "draft",
+      "params": {
+        "length_words": [
+          350,
+          800
+        ]
+      }
+    },
+    {
+      "name": "critique",
+      "capability": "critique"
+    },
+    {
+      "name": "verify",
+      "capability": "verify"
+    },
+    {
+      "name": "voice-critic",
+      "capability": "voice-critic"
+    },
+    {
+      "name": "audit",
+      "capability": "audit",
+      "if_complexity_at_least": "deep"
+    },
+    {
+      "name": "adapt",
+      "capability": "adapt",
+      "params": {
+        "produce": [
+          "hook_tweet",
+          "body_tweets",
+          "closing_tweet",
+          "design_brief"
+        ]
+      }
+    },
+    {
+      "name": "render",
+      "renderer": "x-thread"
+    },
+    {
+      "name": "design",
+      "capability": "design",
+      "if_option": "with_image"
+    },
+    {
+      "name": "image",
+      "renderer": "image-cover",
+      "if_option": "with_image"
+    }
   ],
-
-  "gateable_stages": ["critique", "verify", "voice-critic", "audit", "adapt", "design"],
-
+  "gateable_stages": [
+    "critique",
+    "verify",
+    "voice-critic",
+    "audit",
+    "adapt",
+    "design"
+  ],
   "translate": {
     "capability": "translate",
-    "stages_to_retranslate": ["hook_tweet", "body_tweets", "closing_tweet"]
+    "stages_to_retranslate": [
+      "hook_tweet",
+      "body_tweets",
+      "closing_tweet"
+    ]
   },
-
   "options_schema": [
-    { "key": "max_tweets",   "label": "Max tweets in thread", "type": "number", "default": 10, "min": 5, "max": 20 },
-    { "key": "primary_cta",  "label": "CTA URL (last tweet)", "type": "text", "placeholder": "https://rxapply.com" },
-    { "key": "use_emoji",    "label": "Use emoji",            "type": "checkbox", "default": true },
-    { "key": "with_image",   "label": "Generate cover image for hook tweet (~$0.04)", "type": "checkbox", "default": false }
+    {
+      "key": "max_tweets",
+      "label": "Max tweets in thread",
+      "type": "number",
+      "default": 10,
+      "min": 5,
+      "max": 20
+    },
+    {
+      "key": "primary_cta",
+      "label": "CTA URL (last tweet)",
+      "type": "text",
+      "placeholder": "https://rxapply.com"
+    },
+    {
+      "key": "use_emoji",
+      "label": "Use emoji",
+      "type": "checkbox",
+      "default": true
+    },
+    {
+      "key": "with_image",
+      "label": "Generate cover image for hook tweet (~$0.04)",
+      "type": "checkbox",
+      "default": false
+    }
   ]
 }

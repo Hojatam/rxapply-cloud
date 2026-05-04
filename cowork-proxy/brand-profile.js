@@ -25,7 +25,8 @@ const { query, queryValue, q } = require('./db');
 // + Afshin + the actual logo file all agree on #00a69c teal.
 const DEFAULT_PROFILE = {
   name: 'RxApply',
-  tagline: 'We help internationally-trained dentists migrate, calmly.',
+  tagline: 'RxApply, Elucidates The Road',
+  tagline_short: 'Elucidates The Road',
   primary_color: '#00a69c',
   secondary_colors: ['#1c3a52', '#f0f1ee'],
   typography: 'Peyda (FA) / Inter (EN)',

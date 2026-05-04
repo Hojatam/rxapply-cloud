@@ -31,11 +31,17 @@ const CAPABILITY_REGISTRY = {
   // Drafting (long-form, master voice)
   sepehr:    ['draft'],
 
-  // Critique / scoring
+  // Critique / scoring — kherad is SOLE owner (M98 dedup).
+  // Bidar previously declared 'critique' as backup; removed because
+  // first-match-wins meant we never used Bidar for critique anyway.
+  // Bidar now focuses on his specialty: judge + voice-critic.
   kherad:    ['critique'],
-  bidar:     ['critique', 'audit', 'judge', 'voice-critic'],   // M43 · pairwise eval judge · M50 · voice fingerprint critic
+  bidar:     ['judge', 'voice-critic'],   // M43 · pairwise eval judge · M50 · voice fingerprint critic
 
   // Adversarial audit (escalation when critique flags red)
+  // M98 · davari is SOLE owner (audit removed from bidar — was first-match
+  // ambiguity). Bidar's strengths are pairwise judging + voice-fingerprint
+  // critique, not red-team adversarial audit.
   davari:    ['audit'],
 
   // Translation
