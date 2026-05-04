@@ -5788,10 +5788,11 @@ function renderPipelines() {
             <button class="btn btn-ghost btn-xs" onclick="plRevertChanges()" id="pl-revert-btn" disabled>Revert changes</button>
           </div>
         </div>
-        <div id="pl-canvas" style="flex:1;background:#f8fafc;position:relative;">
-          <div id="drawflow" style="width:100%;height:100%;"></div>
-          <div id="pl-canvas-empty" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:13px;">
-            Pick a pipeline from the left to see its graph.
+        <div id="pl-canvas" style="flex:1;background:#f8fafc;overflow-y:auto;padding:16px;">
+          <div id="pl-stages-list">
+            <div id="pl-canvas-empty" style="display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:13px;padding:60px 20px;">
+              Pick a pipeline from the left to see its stages.
+            </div>
           </div>
         </div>
       </div>
@@ -5966,109 +5967,111 @@ async function plLoad(id) {
   } catch (e) { alert(e.message); }
 }
 
-// ── Center panel · render Drawflow graph from definition.stages ───
-function _plInitDrawflow() {
-  const container = document.getElementById('drawflow');
-  if (!container) return null;
-  // Drawflow holds a reference to the DOM; clear children before reinit to
-  // avoid stale event handlers and ghost nodes when switching pipelines.
-  container.innerHTML = '';
-  _plState.editor = new Drawflow(container);
-  _plState.editor.reroute = true;
-  _plState.editor.reroute_fix_curvature = true;
-  _plState.editor.editor_mode = 'edit';
-  _plState.editor.start();
-  // Wire selection event
-  _plState.editor.on('nodeSelected', (drawflowNodeId) => {
-    const stageId = _plState.nodeIdMap.get(String(drawflowNodeId));
-    if (stageId) {
-      _plState.selectedStageId = stageId;
-      _plRenderDrawer();
-      // M77b · Auto-load the stage prompt — saves the founder a click
-      // every time they pick a different stage. Skip when the stage is
-      // a pure renderer (no LLM, no per-agent file).
-      setTimeout(() => {
-        const stages = (_plState.current && _plState.current.definition && _plState.current.definition.stages) || [];
-        const stage = stages.find(s => (s.id || s.name) === stageId);
-        if (stage && !stage.renderer && stage.capability) plLoadStagePrompt();
-      }, 50);
-    }
-  });
-  _plState.editor.on('nodeUnselected', () => {
-    _plState.selectedStageId = null;
-    _plRenderDrawer();
-  });
-  _plState.editor.on('nodeMoved', () => { _plState.dirty = true; _plUpdateSaveButton(); });
-  _plState.editor.on('connectionCreated', () => { _plState.dirty = true; _plUpdateSaveButton(); });
-  _plState.editor.on('connectionRemoved', () => { _plState.dirty = true; _plUpdateSaveButton(); });
-  return _plState.editor;
-}
-
+// ── Center panel · vertical cascade of stage cards ────────────────
+// Replaced the Drawflow whiteboard (M72B) with a clean vertical list.
+// All compose pipelines are sequential; the cascade view is much easier
+// to scan than a draggable canvas. Each card shows stage info inline,
+// click → select + open drawer + auto-load prompt.
 function _plRenderGraph() {
-  const empty = $('pl-canvas-empty');
-  if (empty) empty.style.display = 'none';
+  const list = $('pl-stages-list');
   const title = $('pl-canvas-title');
   const meta  = $('pl-canvas-meta');
+  if (!list) return;
   if (title) title.textContent = `${_plState.current.label} (${_plState.current.id})`;
   if (meta)  meta.textContent  = `v${_plState.current.version} · updated ${fmtTime(_plState.current.updated_at)}`;
 
-  _plInitDrawflow();
-  const editor = _plState.editor;
   const def = _plState.current.definition || {};
   const stages = Array.isArray(def.stages) ? def.stages : [];
-  _plState.nodeIdMap.clear();
   _plState.stageIdMap.clear();
 
-  // Layout: linear chain, x = idx * 260
-  const X_GAP = 260, Y_BASE = 80;
-  stages.forEach((stage, idx) => {
-    const x = 40 + idx * X_GAP;
-    const y = Y_BASE;
+  // Build refine-target map so each refining stage shows a "↺ refines X" badge.
+  // M69 default refine targets:
+  const refineMap = { critique: 'draft', verify: 'draft', audit: 'draft', 'voice-critic': 'draft', 'verify-translation': 'translate' };
+
+  if (stages.length === 0) {
+    list.innerHTML = '<div class="empty" style="padding:40px;text-align:center;color:#94a3b8;">No stages defined.</div>';
+    return;
+  }
+
+  list.innerHTML = stages.map((stage, idx) => {
     const stageId = stage.id || stage.name || `stage_${idx}`;
-    const html = _plNodeHtml(stage);
-    const className = _plNodeClass(stage);
-    const dfId = editor.addNode(
-      stageId,
-      idx > 0 ? 1 : 0,                      // inputs
-      idx < stages.length - 1 ? 1 : 0,      // outputs
-      x, y,
-      className,
-      { stageId },
-      html
-    );
-    _plState.nodeIdMap.set(String(dfId), stageId);
-    _plState.stageIdMap.set(stageId, dfId);
-  });
-  // Linear edges
-  stages.forEach((stage, idx) => {
-    if (idx >= stages.length - 1) return;
-    const fromId = _plState.stageIdMap.get(stage.id || stage.name || `stage_${idx}`);
-    const toId   = _plState.stageIdMap.get(stages[idx+1].id || stages[idx+1].name || `stage_${idx+1}`);
-    if (fromId != null && toId != null) {
-      try { editor.addConnection(fromId, toId, 'output_1', 'input_1'); } catch (_) {}
-    }
-  });
+    const isSelected = _plState.selectedStageId === stageId;
+    const isLast = idx === stages.length - 1;
+    return _plStageCard(stage, idx, stageId, isSelected, isLast, refineMap);
+  }).join('');
 }
 
-function _plNodeClass(stage) {
-  if (stage.if_complexity_at_least || stage.if_option || (stage.conditions||[]).length) return 'conditional-node';
-  if (stage.renderer) return 'output-node';
-  return 'agent-node';
-}
+// One stage card. Vertical cascade with a connector line between cards.
+function _plStageCard(stage, idx, stageId, isSelected, isLast, refineMap) {
+  const sName = stage.name || stage.id || `stage_${idx}`;
+  const cap = stage.capability || (stage.renderer ? `renderer:${stage.renderer}` : '—');
+  const isRenderer = !!stage.renderer;
+  const cond = stage.if_complexity_at_least
+    ? `if complexity ≥ ${stage.if_complexity_at_least}`
+    : (stage.if_option ? `if option: ${stage.if_option}` : '');
+  const gate = stage.gate || ((_plState.current && _plState.current.definition && (_plState.current.definition.gateable_stages || []).includes(sName)) ? 'gateable' : '');
+  const retryCap = stage.retry_cap != null ? stage.retry_cap : null;
+  const refines = refineMap[sName];
+  const agent = stage.default_agent || _plDefaultAgentFor(cap);
 
-function _plNodeHtml(stage) {
-  const name = stage.name || stage.id || '?';
-  const cap  = stage.capability || (stage.renderer ? `renderer:${stage.renderer}` : '—');
-  const cond = stage.if_complexity_at_least ? `if ≥${stage.if_complexity_at_least}` : (stage.if_option ? `if ${stage.if_option}` : '');
-  const gate = stage.gate || ((_plState.current && _plState.current.definition && (_plState.current.definition.gateable_stages || []).includes(name)) ? 'gateable' : '');
+  // Card visual style varies by stage type
+  const accentColor = isRenderer ? '#0891b2' : (cond ? '#d97706' : '#4338ca');
+  const accentBg    = isRenderer ? '#cffafe' : (cond ? '#fef3c7' : '#eef2ff');
+  const cardBg      = isSelected ? '#fafbff' : '#ffffff';
+  const cardBorder  = isSelected ? `2px solid ${accentColor}` : '1px solid #e2e8f0';
+
+  // Badges row
+  const badges = [];
+  badges.push(`<span style="background:${accentBg};color:${accentColor};padding:1px 8px;border-radius:3px;font-size:10px;font-weight:600;letter-spacing:.02em;">${escapeHtml(cap)}</span>`);
+  if (agent && !isRenderer) badges.push(`<span style="background:#f1f5f9;color:#475569;padding:1px 8px;border-radius:3px;font-size:10px;">👤 ${escapeHtml(agent)}</span>`);
+  if (cond) badges.push(`<span style="background:#fef3c7;color:#92400e;padding:1px 8px;border-radius:3px;font-size:10px;">⚡ ${escapeHtml(cond)}</span>`);
+  if (gate) badges.push(`<span style="background:#ede9fe;color:#5b21b6;padding:1px 8px;border-radius:3px;font-size:10px;">⏸ ${escapeHtml(gate)}</span>`);
+  if (refines) badges.push(`<span style="background:#fef3c7;color:#92400e;padding:1px 8px;border-radius:3px;font-size:10px;" title="On verdict failure, re-runs '${refines}' (M69 refine loop)">↺ refines ${escapeHtml(refines)}${retryCap != null ? ` ×${retryCap}` : ''}</span>`);
+  if (isRenderer) badges.push(`<span style="background:#cffafe;color:#0e7490;padding:1px 8px;border-radius:3px;font-size:10px;">🛠 deterministic</span>`);
+
   return `
-    <div class="title-box" style="font-size:12px;font-weight:600;padding:6px 10px;">${escapeHtml(name)}</div>
-    <div class="box" style="font-size:11px;padding:8px 10px;">
-      <div style="color:#64748b;">${escapeHtml(cap)}</div>
-      ${cond ? `<div style="color:#d97706;font-size:10px;margin-top:3px;">${escapeHtml(cond)}</div>` : ''}
-      ${gate ? `<div style="color:#7c3aed;font-size:10px;margin-top:3px;">⏸ ${escapeHtml(gate)}</div>` : ''}
+    <div class="pl-stage-card" onclick="_plSelectStage('${escapeHtml(stageId)}')"
+         data-stage-id="${escapeHtml(stageId)}"
+         style="background:${cardBg};border:${cardBorder};border-radius:8px;padding:12px 16px;margin-bottom:8px;cursor:pointer;display:flex;align-items:center;gap:14px;transition:all .15s;">
+      <div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0;">
+        <div style="width:32px;height:32px;border-radius:50%;background:${accentBg};color:${accentColor};display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;">${idx + 1}</div>
+      </div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:14px;font-weight:600;color:#1e293b;margin-bottom:4px;">${escapeHtml(sName)}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;">${badges.join('')}</div>
+      </div>
+      <div style="color:${isSelected ? accentColor : '#cbd5e1'};font-size:18px;font-weight:300;flex-shrink:0;">${isSelected ? '◆' : '›'}</div>
     </div>
+    ${isLast ? '' : `<div style="margin-left:31px;width:2px;height:8px;background:#e2e8f0;margin-bottom:0;"></div>`}
   `;
+}
+
+// Map capability → default agent (for the badge before the founder loads
+// the actual override). Mirrors agent-capabilities.js.
+function _plDefaultAgentFor(cap) {
+  const REG = {
+    plan: 'pooya', research: 'pooya', verify: 'daneshyar', 'verify-translation': 'daneshyar',
+    draft: 'sepehr', critique: 'kherad', audit: 'davari', 'voice-critic': 'bidar',
+    judge: 'bidar', adapt: 'avang', translate: 'goyesh', design: 'afshin',
+    triage: 'bineh', 'reply-draft': 'mehrban', 'carousel-plan': 'tarrah',
+    image: 'afshin', render: 'payvand',
+  };
+  return REG[cap] || null;
+}
+
+// Centralized stage-selection handler — called from card onclick.
+// Updates state, re-renders cards (so selection highlight moves), opens
+// the drawer, and auto-loads the per-agent stage prompt.
+function _plSelectStage(stageId) {
+  if (!_plState.current) return;
+  _plState.selectedStageId = stageId;
+  _plRenderGraph();    // re-render so the new card highlights
+  _plRenderDrawer();
+  setTimeout(() => {
+    const stages = (_plState.current.definition && _plState.current.definition.stages) || [];
+    const stage = stages.find(s => (s.id || s.name) === stageId);
+    if (stage && !stage.renderer && stage.capability) plLoadStagePrompt();
+  }, 50);
 }
 
 // ── Right panel · stage drawer ─────────────────────────────────────
