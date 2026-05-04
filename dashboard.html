@@ -2840,39 +2840,71 @@ async function authFetch(url, opts = {}) {
   return fetch(url, { ...opts, headers });
 }
 
-// 23-agent registry (22 + Daneshyar K6)
-const AGENTS = [
-  // Content
-  { name: 'pooya', role: 'Intel → 3 weekly briefs', group: 'Content' },
-  { name: 'sepehr', role: 'Brief → 1500-word EN master', group: 'Content' },
-  { name: 'goyesh', role: 'EN → FA + AR translations', group: 'Content' },
-  { name: 'avang', role: 'Master → 11 platform fan-outs', group: 'Content' },
-  // Engagement
-  { name: 'rahnama', role: 'Destination Advisor scoring', group: 'Engagement' },
-  { name: 'rahbar', role: 'Lead-ingress nurture enrol', group: 'Engagement' },
-  { name: 'bineh', role: 'Engagement score 0–1', group: 'Engagement' },
-  { name: 'mehrban', role: 'Farsi DM reply with disclaimer', group: 'Engagement' },
-  // Intel
-  { name: 'roya', role: 'market_heatmap', group: 'Intel' },
-  { name: 'shahed', role: 'competitor_diff', group: 'Intel' },
-  { name: 'dadbeh', role: 'regulatory_change', group: 'Intel' },
-  { name: 'nasim', role: 'trend_spike', group: 'Intel' },
-  { name: 'ramin', role: 'keyword_candidates', group: 'Intel' },
-  // Inspection
-  { name: 'kherad', role: 'G2 voice scoring', group: 'Inspection' },
-  { name: 'bidar', role: 'Nightly efficiency rollup', group: 'Inspection' },
-  { name: 'davari', role: 'n8n flow-health audit', group: 'Inspection' },
-  // Operations
-  { name: 'zirak', role: 'Append journal writer', group: 'Operations' },
-  { name: 'paya', role: 'intel_snapshots writer', group: 'Operations' },
-  { name: 'ravi', role: 'Monday narrative email', group: 'Operations' },
-  { name: 'payvand', role: 'Partnership outreach', group: 'Operations' },
-  { name: 'mehmandar', role: 'Guest pipeline curator', group: 'Operations' },
-  // Design (F8)
-  { name: 'afshin', role: 'Designs · IG / TG / YT / web (F8)', group: 'Design', deferred: true },
-  // Knowledge (K6)
-  { name: 'daneshyar', role: 'KB scholar · parse / verify / refine / enrich', group: 'Knowledge' },
-];
+// M79 · Agent list is now AUTO-DERIVED from the /agents API (which scans
+// agents/*/SKILL.md on disk). No more hardcoded array — Tarrah and any
+// future agents appear immediately.
+//
+// Group + role are inferred from each agent's capabilities (when known)
+// + their SKILL.md frontmatter `description` field.
+let AGENTS = [];   // populated by _loadAgents() on dashboard boot
+
+// Capability → division mapping (used to group agents in the tab).
+// Keep this aligned with agent-capabilities.js on the backend.
+const _CAP_DIVISION = {
+  plan: 'Content', research: 'Intel', draft: 'Content', critique: 'Inspection',
+  audit: 'Inspection', verify: 'Knowledge', 'verify-translation': 'Knowledge',
+  adapt: 'Content', translate: 'Content', design: 'Design', image: 'Design',
+  'voice-critic': 'Inspection', judge: 'Inspection', 'carousel-plan': 'Design',
+  triage: 'Engagement', 'reply-draft': 'Engagement', render: 'Operations',
+  train: 'Inspection',
+};
+
+// Hand-curated agent → division override for agents whose primary purpose
+// isn't fully captured by capabilities (helpers, scripts, etc).
+const _AGENT_DIVISION_HINTS = {
+  rahnama: 'Engagement', rahbar: 'Engagement',
+  roya: 'Intel', shahed: 'Intel', dadbeh: 'Intel', nasim: 'Intel', ramin: 'Intel',
+  zirak: 'Operations', paya: 'Operations', ravi: 'Operations',
+  payvand: 'Operations', mehmandar: 'Operations',
+  daneshyar: 'Knowledge',
+  pooya: 'Content', sepehr: 'Content', goyesh: 'Content', avang: 'Content',
+  afshin: 'Design', tarrah: 'Design',
+  bineh: 'Engagement', mehrban: 'Engagement',
+  kherad: 'Inspection', bidar: 'Inspection', davari: 'Inspection',
+};
+
+async function _loadAgents() {
+  try {
+    const r = await fetch(`${PROXY}/agents`);
+    const j = await r.json();
+    if (!j.ok) return;
+    AGENTS = (j.agents || [])
+      .filter(a => a.hasSkill)   // hide skeletons that have no SKILL.md
+      .map(a => {
+        // Group: capability-derived first, fallback to hand-curated hint
+        let group = _AGENT_DIVISION_HINTS[a.agent] || null;
+        if (!group && Array.isArray(a.capabilities)) {
+          for (const c of a.capabilities) {
+            if (_CAP_DIVISION[c]) { group = _CAP_DIVISION[c]; break; }
+          }
+        }
+        // Role: comma-joined capabilities, plus stage count
+        const caps = (a.capabilities || []).join(', ');
+        const stageNote = a.stageCount ? ` · ${a.stageCount} stage${a.stageCount === 1 ? '' : 's'}` : '';
+        const role = caps ? `${caps}${stageNote}` : (stageNote ? stageNote.slice(3) : 'helper / specialist');
+        return {
+          name: a.agent,
+          role,
+          capabilities: a.capabilities || [],
+          stageCount: a.stageCount || 0,
+          group: group || 'Operations',
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  } catch (e) {
+    console.warn('[agents] /agents fetch failed:', e.message);
+  }
+}
 
 // ── SVG icon library (Lucide-style, 16×16, 1.5px stroke) ────────────
 // Inline SVG paints faster + recolors via currentColor. One source of truth
@@ -2935,6 +2967,12 @@ function _paintNavIcons() {
 }
 // Run once after DOM parses (script is at top, so defer to load).
 window.addEventListener('DOMContentLoaded', _paintNavIcons);
+// M79 · Populate AGENTS from API on boot. Re-render Agents tab if it's
+// the current view, so the list updates without manual refresh.
+window.addEventListener('DOMContentLoaded', async () => {
+  await _loadAgents();
+  if (window.SELECTED_ROUTE === 'agents') renderAgents();
+});
 
 // ── Tiny inline-SVG chart helpers (no chart libraries) ──────────────
 // `sparkline(values, opts)` renders a small line + filled area trend line,
@@ -4698,6 +4736,16 @@ async function wfImport(filename) {
 }
 
 function renderAgents() {
+  // M79 · If the API list hasn't loaded yet, kick off the load and show a
+  // skeleton. Re-renders when the load completes.
+  if (!AGENTS || AGENTS.length === 0) {
+    $('main').innerHTML = `
+      <div class="section-h"><div><h1>Agents</h1><div class="breadcrumb">Loading from /agents …</div></div></div>
+      <div class="empty" style="padding:40px;text-align:center;color:#94a3b8;">Loading agents …</div>
+    `;
+    _loadAgents().then(() => renderAgents());
+    return;
+  }
   // Build group order dynamically from AGENTS so any new division (Knowledge,
   // future …) shows up automatically. Preferred order first, anything else
   // appended in first-seen order.
@@ -4775,8 +4823,9 @@ function _applyAgentFilter() {
 
 function openAgent(name) {
   window.SELECTED_AGENT = name;
-  // S6 · Default to Chat — the action 90% of founder visits actually want.
-  window.SELECTED_TAB = 'chat';
+  // M79 · Default to Brain — single source of truth for agent inputs.
+  // Founder needs to see what the agent actually receives BEFORE chatting.
+  window.SELECTED_TAB = 'brain';
   renderAgents();
 }
 
@@ -4830,14 +4879,16 @@ async function loadAgentDetail(name) {
                 Run + Forward tabs dropped: Run was a CLI form (founder doesn't
                 want raw mechanics) and Forward was a single-target chain made
                 redundant by K4 handoffs. */''}
-          ${['chat','memory','train','history','skill'].map(t => `
-            <button class="px-3 py-2 text-sm font-medium ${t===tab?'border-b-2 border-indigo-600 text-indigo-600':'text-slate-500 hover:text-slate-900'}" onclick="setAgentTab('${t}')">${t[0].toUpperCase()+t.slice(1)}</button>
-          `).join('')}
+          ${['brain','chat','memory','train','history','skill'].map(t => {
+            const labels = { brain: '🧠 Brain', chat: 'Chat', memory: 'Memory', train: 'Train', history: 'History', skill: 'Skill' };
+            return `<button class="px-3 py-2 text-sm font-medium ${t===tab?'border-b-2 border-indigo-600 text-indigo-600':'text-slate-500 hover:text-slate-900'}" onclick="setAgentTab('${t}')">${labels[t] || (t[0].toUpperCase()+t.slice(1))}</button>`;
+          }).join('')}
         </div>
       </div>
       <div id="ad-tab-content">${loadingPanel('Loading')}</div>
     </div>
   `;
+  if (tab === 'brain')   loadAdBrain(name);
   if (tab === 'skill')   loadAdSkill(name);
   if (tab === 'chat')    loadAdChat(name);
   if (tab === 'memory')  loadAdMemory(name);
@@ -4845,6 +4896,214 @@ async function loadAgentDetail(name) {
   if (tab === 'history') loadAdHistory(name);
   if (tab === 'forward') loadAdForward(name);
   loadAdModelPicker(name);
+}
+
+// ── M79 · Brain tab — single source of truth ─────────────────────
+// Shows EVERY input that goes into the agent's prompt:
+//   1. Live preview — assembled prompt for a chosen (stage, platform,
+//      lang, topic), color-coded by source
+//   2. Constitution — brand_intelligence rules at importance 5 that
+//      apply to this agent
+//   3. Stage files — per-agent stage instructions (M68)
+//   4. Pipelines I appear in — capability resolution map
+//   5. Capabilities + summary stats
+async function loadAdBrain(name) {
+  const el = $('ad-tab-content');
+  if (!el) return;
+  el.innerHTML = loadingPanel('Loading agent context');
+  try {
+    const r = await fetch(`${PROXY}/agents/${encodeURIComponent(name)}/full-context`);
+    const j = await r.json();
+    if (!j.ok) { el.innerHTML = `<div class="text-rose-600 text-sm">${escapeHtml(j.error || 'failed')}</div>`; return; }
+    const ctx = j;
+
+    // Build the tab content
+    const sectionH = (label, count) => `
+      <div style="font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-top:18px;margin-bottom:6px;">
+        ${escapeHtml(label)}${count != null ? ` <span style="color:#cbd5e1;font-weight:500;">(${count})</span>` : ''}
+      </div>
+    `;
+
+    const constitutionRules = (ctx.rules || []).filter(r => r.importance >= 5);
+    const otherRules        = (ctx.rules || []).filter(r => r.importance < 5);
+
+    el.innerHTML = `
+      <!-- Live preview controls -->
+      <div class="card-tight" style="background:#fafbff;border:1px solid #e0e7ff;border-radius:8px;padding:12px;margin-bottom:14px;">
+        <div style="font-weight:600;color:#3730a3;font-size:13px;margin-bottom:8px;">🧠 Live prompt preview</div>
+        <div style="font-size:12px;color:#64748b;margin-bottom:10px;">See the EXACT prompt this agent will receive on its next call. Every block is editable somewhere — click "Source" to find where.</div>
+        <div class="flex gap-2 flex-wrap" style="font-size:12px;">
+          <label>Stage
+            <select id="brain-stage" class="border border-slate-200 rounded px-2 py-1 text-xs ml-1" onchange="_loadBrainPreview('${escapeHtml(name)}')">
+              ${(ctx.stages || []).map(s => `<option value="${escapeHtml(s.stage)}">${escapeHtml(s.stage)}</option>`).join('')}
+              ${(ctx.stages || []).length === 0 ? '<option value="">(no stage files)</option>' : ''}
+            </select>
+          </label>
+          <label>Platform
+            <select id="brain-platform" class="border border-slate-200 rounded px-2 py-1 text-xs ml-1" onchange="_loadBrainPreview('${escapeHtml(name)}')">
+              <option value="">any</option>
+              <option value="instagram">instagram</option>
+              <option value="telegram">telegram</option>
+              <option value="email">email</option>
+              <option value="x-thread">x-thread</option>
+              <option value="facebook">facebook</option>
+              <option value="seo-article">seo-article</option>
+            </select>
+          </label>
+          <label>Language
+            <select id="brain-lang" class="border border-slate-200 rounded px-2 py-1 text-xs ml-1" onchange="_loadBrainPreview('${escapeHtml(name)}')">
+              <option value="fa" selected>fa</option>
+              <option value="en">en</option>
+              <option value="ar">ar</option>
+            </select>
+          </label>
+          <label class="flex-1">Topic
+            <input id="brain-topic" type="text" class="border border-slate-200 rounded px-2 py-1 text-xs ml-1 w-full" placeholder="e.g. Canada NDEB exam deadline" oninput="_brainTopicTimer && clearTimeout(_brainTopicTimer); _brainTopicTimer = setTimeout(() => _loadBrainPreview('${escapeHtml(name)}'), 600);">
+          </label>
+        </div>
+        <div id="brain-preview-out" style="margin-top:14px;">
+          <div class="empty" style="padding:20px;color:#94a3b8;font-size:12px;font-style:italic;text-align:center;">Pick a stage above to assemble the live prompt.</div>
+        </div>
+      </div>
+
+      <!-- Capability summary -->
+      ${sectionH('Capabilities')}
+      <div style="font-size:13px;color:#1e293b;">
+        ${(ctx.capabilities || []).length
+          ? (ctx.capabilities || []).map(c => `<span class="mono" style="background:#eef2ff;color:#4338ca;padding:2px 8px;border-radius:3px;margin-right:4px;">${escapeHtml(c)}</span>`).join('')
+          : '<span class="text-slate-400 italic">No capabilities registered. Edit cowork-proxy/agent-capabilities.js to assign.</span>'}
+      </div>
+
+      <!-- Constitution -->
+      ${sectionH('🏛 Constitution (importance ≥ 5)', constitutionRules.length)}
+      <div style="font-size:12px;color:#64748b;margin-bottom:6px;">These rules ALWAYS appear in this agent's prompt and override everything else.</div>
+      ${constitutionRules.length
+        ? '<div class="space-y-1">' + constitutionRules.map(r => `
+            <div style="background:#fef3c7;border-left:3px solid #d97706;padding:8px 10px;border-radius:4px;font-size:12px;">
+              <div style="color:#92400e;">${escapeHtml(r.rule_text)}</div>
+              <div class="mono" style="font-size:10px;color:#a16207;margin-top:2px;">imp ${r.importance} · ${escapeHtml(r.kind)}${r.scope_platform ? ' · '+escapeHtml(r.scope_platform) : ''}${r.scope_language ? ' · '+escapeHtml(r.scope_language) : ''} · <a href="#" onclick="navigate('brand');return false;" style="text-decoration:underline;">edit in Brand tab</a></div>
+            </div>
+          `).join('') + '</div>'
+        : '<div class="text-slate-400 italic text-xs">No constitutional rules apply yet.</div>'}
+
+      <!-- Other rules (lower importance) -->
+      ${sectionH('Other brand rules applying to me', otherRules.length)}
+      <div style="font-size:12px;color:#64748b;">${otherRules.length} additional rules at importance &lt;5. Top-3 win the prompt budget per stage.</div>
+      ${otherRules.length > 0 ? `<details><summary class="text-xs text-indigo-600 cursor-pointer mt-1">Show all ${otherRules.length}</summary><div class="space-y-1 mt-2">${otherRules.slice(0, 30).map(r => `
+        <div style="background:#f8fafc;border-left:2px solid #cbd5e1;padding:6px 10px;border-radius:3px;font-size:12px;">
+          <div>${escapeHtml(r.rule_text)}</div>
+          <div class="mono" style="font-size:10px;color:#94a3b8;margin-top:1px;">imp ${r.importance} · ${escapeHtml(r.kind)}</div>
+        </div>
+      `).join('')}</div></details>` : ''}
+
+      <!-- Stage files -->
+      ${sectionH('Per-stage instructions (agents/' + name + '/stages/)', (ctx.stages || []).length)}
+      ${(ctx.stages || []).length
+        ? '<div class="space-y-1">' + (ctx.stages || []).map(s => `
+            <div style="background:#f0fdf4;border-left:2px solid #86efac;padding:8px 10px;border-radius:3px;font-size:12px;">
+              <div style="font-weight:600;color:#065f46;">${escapeHtml(s.stage)}</div>
+              <div style="font-size:10px;color:#16a34a;margin-top:1px;">${s.bytes} bytes · <a href="#" onclick="navigate('pipelines');return false;" style="text-decoration:underline;">edit via Pipeline tab</a> or directly: PUT /agents/${escapeHtml(name)}/stages/${escapeHtml(s.stage)}</div>
+            </div>
+          `).join('') + '</div>'
+        : '<div class="text-slate-400 italic text-xs">No per-stage files. This agent uses default stage prompts only.</div>'}
+
+      <!-- Pipelines I appear in -->
+      ${sectionH('Pipelines I appear in', (ctx.pipelines_appearing_in || []).length)}
+      ${(ctx.pipelines_appearing_in || []).length
+        ? '<div class="space-y-1">' + (ctx.pipelines_appearing_in || []).map(p => `
+            <div style="background:#fafbff;border-left:2px solid #c7d2fe;padding:6px 10px;border-radius:3px;font-size:12px;">
+              <span style="font-weight:600;color:#3730a3;">${escapeHtml(p.label)}</span>
+              <span class="mono" style="color:#94a3b8;font-size:10px;"> · ${escapeHtml(p.pipeline_id)}</span>
+              · ${p.stages.map(s => `<span class="mono" style="background:#fff;color:#475569;padding:1px 4px;border-radius:2px;font-size:10px;">${escapeHtml(s.stage)} (${escapeHtml(s.why)})</span>`).join(' ')}
+            </div>
+          `).join('') + '</div>'
+        : '<div class="text-slate-400 italic text-xs">Not assigned to any pipeline.</div>'}
+
+      <!-- Recent ratings -->
+      ${ctx.kpis ? `
+        ${sectionH('Recent ratings (last 30d)')}
+        <div class="flex gap-3 flex-wrap text-xs">
+          <span style="background:#f1f5f9;padding:4px 10px;border-radius:3px;">${ctx.kpis.rating_count || 0} ratings</span>
+          <span style="background:${ctx.kpis.rating_avg >= 3.5 ? '#dcfce7' : ctx.kpis.rating_avg != null ? '#fef3c7' : '#f1f5f9'};padding:4px 10px;border-radius:3px;color:${ctx.kpis.rating_avg >= 3.5 ? '#15803d' : '#92400e'};font-weight:600;">avg ${ctx.kpis.rating_avg != null ? ctx.kpis.rating_avg.toFixed(2) : '—'}/5</span>
+          <span style="background:#f1f5f9;padding:4px 10px;border-radius:3px;">${ctx.kpis.corrections || 0} corrections</span>
+          <span style="background:#f1f5f9;padding:4px 10px;border-radius:3px;">${ctx.kpis.examples || 0} examples</span>
+        </div>
+        ${ctx.kpis.low_scoring && ctx.kpis.low_scoring.length ? `
+          <div class="mt-2 space-y-1">
+            <div class="text-xs text-rose-700 font-semibold">Recent low-rated runs:</div>
+            ${ctx.kpis.low_scoring.map(l => `
+              <div style="background:#fef2f2;border-left:2px solid #fca5a5;padding:6px 10px;border-radius:3px;font-size:11px;">
+                <span class="mono" style="color:#991b1b;font-weight:600;">${l.score}/5</span>
+                ${l.note ? ` · ${escapeHtml(l.note)}` : ''}
+                <span style="color:#94a3b8;font-size:10px;"> · ${fmtTime(l.created_at)}</span>
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+      ` : ''}
+    `;
+
+    // Auto-load preview if there's a stage to show
+    if ((ctx.stages || []).length > 0) {
+      _loadBrainPreview(name);
+    }
+  } catch (e) {
+    el.innerHTML = `<div class="text-rose-600 text-sm">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+let _brainTopicTimer = null;
+async function _loadBrainPreview(name) {
+  const out = $('brain-preview-out');
+  if (!out) return;
+  const stage = $('brain-stage') ? $('brain-stage').value : '';
+  if (!stage) { out.innerHTML = '<div class="empty" style="padding:20px;color:#94a3b8;font-size:12px;font-style:italic;text-align:center;">Pick a stage to assemble the prompt.</div>'; return; }
+  const platform = $('brain-platform') ? $('brain-platform').value : '';
+  const lang = $('brain-lang') ? $('brain-lang').value : 'fa';
+  const topic = $('brain-topic') ? $('brain-topic').value : '';
+  out.innerHTML = '<div class="empty" style="padding:14px;color:#94a3b8;font-size:12px;font-style:italic;text-align:center;">Assembling prompt …</div>';
+  try {
+    const r = await fetch(`${PROXY}/agents/${encodeURIComponent(name)}/prompt-preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stage, platform: platform || null, language: lang, topic }),
+    });
+    const j = await r.json();
+    if (!j.ok) { out.innerHTML = `<div class="text-rose-600 text-sm">${escapeHtml(j.error || 'failed')}</div>`; return; }
+    // Per-source colors
+    const COLORS = {
+      skill:           { bg: '#eef2ff', border: '#818cf8', text: '#3730a3', label: '🟦 SKILL' },
+      stage_file:      { bg: '#f0fdf4', border: '#86efac', text: '#15803d', label: '🟩 STAGE FILE' },
+      brand_profile:   { bg: '#fef3c7', border: '#fbbf24', text: '#92400e', label: '🟨 BRAND PROFILE' },
+      knowledge_base:  { bg: '#fef3c7', border: '#fbbf24', text: '#92400e', label: '🟨 KB' },
+      brand_rules:     { bg: '#fff7ed', border: '#fb923c', text: '#9a3412', label: '🟧 BRAND RULES' },
+      brand_exemplars: { bg: '#fff7ed', border: '#fb923c', text: '#9a3412', label: '🟧 EXEMPLARS' },
+      agent_memory:    { bg: '#faf5ff', border: '#c4b5fd', text: '#6b21a8', label: '🟪 MEMORY' },
+      conflicts:       { bg: '#fef2f2', border: '#fca5a5', text: '#991b1b', label: '🟥 CONFLICTS' },
+      rating_signal:   { bg: '#fef2f2', border: '#fca5a5', text: '#991b1b', label: '🟥 RATING SIGNAL' },
+      error:           { bg: '#fee2e2', border: '#dc2626', text: '#7f1d1d', label: '⚠ ERROR' },
+    };
+    out.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:12px;color:#64748b;">
+        <span><strong style="color:#1e293b;">${j.block_count}</strong> blocks · <strong>${j.total_chars.toLocaleString()}</strong> chars total</span>
+        <span class="mono" style="font-size:10px;">stage=${escapeHtml(j.stage)} · platform=${escapeHtml(j.platform || 'any')} · lang=${escapeHtml(j.language)}</span>
+      </div>
+      ${(j.blocks || []).map(b => {
+        const c = COLORS[b.source] || { bg: '#f8fafc', border: '#cbd5e1', text: '#475569', label: b.source.toUpperCase() };
+        return `
+          <div style="background:${c.bg};border-left:4px solid ${c.border};border-radius:4px;padding:10px 12px;margin-bottom:6px;font-size:12px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+              <span style="font-weight:600;color:${c.text};font-size:11px;letter-spacing:.02em;">${c.label} · ${escapeHtml(b.label || '')}</span>
+              ${b.editable_at ? `<span class="mono" style="font-size:10px;color:${c.text};opacity:.7;">source: ${escapeHtml(b.editable_at)}</span>` : ''}
+            </div>
+            <pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,monospace;color:#1e293b;font-size:11px;line-height:1.5;margin:0;max-height:240px;overflow-y:auto;">${escapeHtml((b.text || '').slice(0, 2000))}${(b.text || '').length > 2000 ? '\n…(truncated)' : ''}</pre>
+          </div>
+        `;
+      }).join('')}
+    `;
+  } catch (e) {
+    out.innerHTML = `<div class="text-rose-600 text-sm">${escapeHtml(e.message)}</div>`;
+  }
 }
 
 // Per-agent model picker (top-right of the detail card).

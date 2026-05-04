@@ -412,6 +412,7 @@ function renderUnifiedBlock(packet) {
 
 module.exports = {
   STAGE_BUDGETS,
+  STAGE_EXEMPLAR_KIND,       // M79 · used by /agents/:name/full-context
   getTrainingPacket,
   renderUnifiedBlock,
   expandTopicTags,           // M73 · canonicalize bare words → namespaced tags

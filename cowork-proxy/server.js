@@ -581,6 +581,238 @@ app.put('/agents/:agent/stages/:stage', auth.middleware, async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ── M79 · Agent operating-surface endpoints ──────────────────────────
+// Single-call data fetch: everything that defines this agent's behavior,
+// in one payload. Powers the rebuilt Agents tab (M79) which is the
+// founder's only place to see/edit agent state — no hidden inputs.
+app.get('/agents/:agent/full-context', async (req, res) => {
+  try {
+    const { agent } = req.params;
+    if (!AGENT_NAME_RE.test(agent)) return res.status(400).json({ ok: false, error: 'invalid agent name' });
+    const agentDir = path.join(AGENTS_DIR, agent);
+    if (!fs.existsSync(agentDir)) return res.status(404).json({ ok: false, error: 'agent not found' });
+
+    // 1. SKILL.md
+    let skill_md = null;
+    try {
+      const sp = path.join(agentDir, 'SKILL.md');
+      if (fs.existsSync(sp)) skill_md = fs.readFileSync(sp, 'utf8');
+    } catch (_) {}
+
+    // 2. Stage files this agent owns
+    const stagesDir = path.join(agentDir, 'stages');
+    let stages = [];
+    if (fs.existsSync(stagesDir)) {
+      try {
+        stages = fs.readdirSync(stagesDir)
+          .filter(f => f.endsWith('.md'))
+          .map(f => {
+            const stage = f.replace(/\.md$/, '');
+            const fp = path.join(stagesDir, f);
+            const stat = fs.statSync(fp);
+            const body = fs.readFileSync(fp, 'utf8');
+            return { stage, path: fp, bytes: stat.size, mtime: stat.mtime.toISOString(), markdown: body };
+          })
+          .sort((a, b) => a.stage.localeCompare(b.stage));
+      } catch (_) {}
+    }
+
+    // 3. Capabilities + agents-section grouping (from agent-capabilities.js)
+    let capabilities = [];
+    try {
+      const caps = require('./agent-capabilities');
+      capabilities = caps.capabilitiesFor(agent) || [];
+    } catch (_) {}
+
+    // 4. Constitution rules — brand_intelligence with importance >= 5
+    //    (target this agent OR null = applies-to-all). M58/M76 wiring.
+    let rules = [];
+    try {
+      rules = await queryRows(`
+        SELECT id::text, kind, target_agent, scope_platform, scope_language,
+                rule_text, importance, topic_tags, source, founder_edited, enabled
+          FROM brand_intelligence
+         WHERE enabled = TRUE
+           AND (target_agent = ${q(agent)} OR target_agent IS NULL)
+         ORDER BY importance DESC, founder_edited DESC, updated_at DESC
+         LIMIT 200;`);
+    } catch (_) {}
+
+    // 5. Exemplars — by inferred kind from agent's capabilities (e.g.
+    //    Sepehr → post_caption; Afshin → design_brief).
+    let exemplars = [];
+    try {
+      const STAGE_EXEMPLAR_KIND = require('./agent-training-retrieval').STAGE_EXEMPLAR_KIND || {};
+      const myKinds = new Set();
+      for (const cap of capabilities) {
+        const k = STAGE_EXEMPLAR_KIND && STAGE_EXEMPLAR_KIND[cap];
+        if (k) myKinds.add(k);
+        // Also try direct stage-name lookup (carousel-plan → design_brief)
+      }
+      // Fallback: include the few common kinds if no map hit
+      if (myKinds.size === 0) {
+        if (capabilities.includes('draft')) myKinds.add('post_caption');
+        if (capabilities.includes('design')) myKinds.add('design_brief');
+        if (capabilities.includes('carousel-plan')) myKinds.add('design_brief');
+        if (capabilities.includes('reply-draft')) myKinds.add('dm_reply');
+        if (capabilities.includes('triage')) myKinds.add('intent_example_hot');
+      }
+      if (myKinds.size > 0) {
+        const kindsArr = Array.from(myKinds).map(k => `'${String(k).replace(/'/g, "''")}'`).join(',');
+        exemplars = await queryRows(`
+          SELECT id::text, kind, platform, language, body, context, importance,
+                  outcome, topic_tags, source
+            FROM brand_exemplars
+           WHERE enabled = TRUE AND kind IN (${kindsArr})
+           ORDER BY importance DESC, updated_at DESC
+           LIMIT 50;`);
+      }
+    } catch (_) {}
+
+    // 6. Memory entries
+    let memory = [];
+    try {
+      memory = await agentMemory.list(agent, { limit: 100 });
+    } catch (_) {}
+
+    // 7. KPIs (last 30 days)
+    let kpis = null;
+    try { kpis = await agentEvals.getKPIsForAgent(agent, 30); } catch (_) {}
+
+    // 8. Pipelines this agent appears in (capability resolution from agent-capabilities)
+    let pipelines_appearing_in = [];
+    try {
+      const pipelines = require('./pipelines');
+      const allPipes = pipelines.listCachedSync ? pipelines.listCachedSync() : [];
+      for (const p of allPipes) {
+        const pStages = (p.definition && p.definition.stages) || [];
+        const matches = [];
+        for (const s of pStages) {
+          if (s.default_agent === agent) {
+            matches.push({ stage: s.name, why: 'pinned' });
+          } else if (s.capability && capabilities.includes(s.capability)) {
+            matches.push({ stage: s.name, why: 'capability' });
+          }
+        }
+        if (matches.length) {
+          pipelines_appearing_in.push({ pipeline_id: p.id, label: p.label, stages: matches });
+        }
+      }
+    } catch (_) {}
+
+    res.json({
+      ok: true,
+      agent,
+      skill_md,
+      stages,
+      capabilities,
+      rules,
+      exemplars,
+      memory,
+      kpis,
+      pipelines_appearing_in,
+    });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// POST /agents/:agent/prompt-preview {stage, platform, language, topic}
+// Returns the EXACT system prompt the agent will see at runtime, with
+// each block annotated by source so the founder knows where every line
+// came from (skill / stage / rule / exemplar / memory / refine notes).
+// This is THE feature for "no hidden instructions."
+app.post('/agents/:agent/prompt-preview', async (req, res) => {
+  try {
+    const { agent } = req.params;
+    if (!AGENT_NAME_RE.test(agent)) return res.status(400).json({ ok: false, error: 'invalid agent name' });
+    const body = req.body || {};
+    const stageName = body.stage || 'draft';
+    const platform = body.platform || null;
+    const language = body.language || 'fa';
+    const topic = body.topic || '';
+
+    const blocks = [];
+
+    // Block 1 · SKILL.md
+    try {
+      const sp = path.join(AGENTS_DIR, agent, 'SKILL.md');
+      if (fs.existsSync(sp)) {
+        const md = fs.readFileSync(sp, 'utf8');
+        if (md.trim()) blocks.push({ source: 'skill', label: `${agent} · SKILL.md`, text: `# ${agent}'s base brief\n${md}`, editable_at: `/agents/${agent} (SKILL.md)` });
+      }
+    } catch (_) {}
+
+    // Block 2 · per-agent stage file
+    try {
+      const co = require('./compose-orchestrator');
+      const stagePrompt = co._loadStagePrompt(agent, stageName);
+      if (stagePrompt) blocks.push({ source: 'stage_file', label: `${agent}/stages/${stageName}.md`, text: `# This stage: ${stageName}\n${stagePrompt}`, editable_at: `/agents/${agent}/stages/${stageName}` });
+    } catch (_) {}
+
+    // Block 3 · brand profile
+    try {
+      const brandProfile = require('./brand-profile');
+      const block = brandProfile.renderAsPromptBlock();
+      if (block) blocks.push({ source: 'brand_profile', label: 'Brand profile (singleton)', text: block, editable_at: '/brand-profile' });
+    } catch (_) {}
+
+    // Block 4 · KB grounding (only injected for certain stages)
+    if (['research', 'verify', 'verify-translation', 'draft', 'critique', 'audit'].includes(stageName)) {
+      try {
+        const KB = require('./knowledge-base');
+        const country = KB.detectCountry(topic);
+        const kb = KB.renderAsBlock({ country, query: topic, limit: 6 });
+        if (kb) blocks.push({ source: 'knowledge_base', label: `Knowledge base (country=${country}, topic=${(topic || '').slice(0, 50)})`, text: kb, editable_at: '/knowledge' });
+      } catch (_) {}
+    }
+
+    // Block 5 · M56 unified retrieval (rules + exemplars + memory + conflicts)
+    try {
+      const trainingRetrieval = require('./agent-training-retrieval');
+      const topicTags = trainingRetrieval.expandTopicTags ? trainingRetrieval.expandTopicTags(topic) : [];
+      const packet = await trainingRetrieval.getTrainingPacket({
+        agent, stageName, platform, language, topicTags,
+      });
+      if (packet.rules && packet.rules.length) {
+        blocks.push({ source: 'brand_rules', label: `Brand intelligence (${packet.rules.length} rules — ${packet.budget?.rules || '?'} budget)`, text: packet.rules.map(r => `[imp=${r.importance}] ${r.rule_text}`).join('\n'), editable_at: '/brand', items: packet.rules });
+      }
+      if (packet.exemplars && packet.exemplars.length) {
+        blocks.push({ source: 'brand_exemplars', label: `Reference exemplars (${packet.exemplars.length})`, text: packet.exemplars.map(e => `--- ${e.kind}${e.outcome ? ` · ${e.outcome}` : ''} ---\n${e.body}`).join('\n\n'), editable_at: '/brand/exemplars', items: packet.exemplars });
+      }
+      if (packet.memories && packet.memories.length) {
+        blocks.push({ source: 'agent_memory', label: `${agent}'s memory (${packet.memories.length})`, text: packet.memories.map(m => `[${m.type}] ${m.content}`).join('\n'), editable_at: `/agents/${agent}/memory`, items: packet.memories });
+      }
+      if (packet.conflicts && packet.conflicts.length) {
+        blocks.push({ source: 'conflicts', label: `⚠ Conflicts auto-detected (${packet.conflicts.length})`, text: packet.conflicts.map(c => `Global rule: "${c.rule.rule_text}"\nYour correction: "${c.memory.content}"`).join('\n\n'), editable_at: '/brand AND /agents/' + agent + '/memory' });
+      }
+      if (packet.rating_signal) {
+        const rs = packet.rating_signal;
+        const lines = [`📊 Recent founder feedback`];
+        lines.push(`Last ${rs.window_days} days: ${rs.n} ratings · avg ${rs.avg}/5${rs.low_count ? ` · ${rs.low_count} low-rated (≤2)` : ''}`);
+        if (rs.recent_low?.length) {
+          lines.push(`Examples to learn from:`);
+          for (const r of rs.recent_low) lines.push(`  · ${r.score}/5${r.note ? ` — "${(r.note || '').slice(0, 200)}"` : ''}`);
+        }
+        blocks.push({ source: 'rating_signal', label: `M58 rating signal (${rs.n} ratings)`, text: lines.join('\n'), editable_at: 'agent_evals (read-only — derived)' });
+      }
+    } catch (e) {
+      blocks.push({ source: 'error', label: 'retrieval failed', text: String(e.message), editable_at: null });
+    }
+
+    const full_text = blocks.map(b => `# [${b.source}] ${b.label}\n${b.text}`).join('\n\n────────────────────────────────────────────────\n\n');
+
+    res.json({
+      ok: true,
+      agent,
+      stage: stageName,
+      platform, language, topic,
+      blocks,
+      full_text,
+      total_chars: full_text.length,
+      block_count: blocks.length,
+    });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ── F7 · auth routes ────────────────────────────────────────────────────
 app.get('/auth/status', (_, res) => {
   res.json({
@@ -3142,8 +3374,13 @@ app.post('/pipeline-runner/:name/run', auth.middleware, async (req, res) => {
 });
 
 // GET /agents — list known agent folders
+// M79 · Now also includes capabilities (from agent-capabilities.js) and
+// stage-file count so the Agents tab can show what each agent does
+// without a second API call.
 app.get('/agents', (_, res) => {
   if (!fs.existsSync(AGENTS_DIR)) return res.json({ ok: true, agents: [], dir: AGENTS_DIR });
+  let caps = null;
+  try { caps = require('./agent-capabilities'); } catch (_) {}
   const entries = fs.readdirSync(AGENTS_DIR, { withFileTypes: true });
   const agents = entries
     .filter(d => d.isDirectory() && AGENT_NAME_RE.test(d.name))
@@ -3152,7 +3389,13 @@ app.get('/agents', (_, res) => {
       const hasSkill = fs.existsSync(path.join(dir, 'SKILL.md'));
       const helperPath = path.join(dir, `${d.name}.py`);
       const hasHelper = fs.existsSync(helperPath);
-      return { agent: d.name, dir, hasSkill, hasHelper };
+      const capabilities = caps ? (caps.capabilitiesFor(d.name) || []) : [];
+      const stagesDir = path.join(dir, 'stages');
+      let stageCount = 0;
+      if (fs.existsSync(stagesDir)) {
+        try { stageCount = fs.readdirSync(stagesDir).filter(f => f.endsWith('.md')).length; } catch (_) {}
+      }
+      return { agent: d.name, dir, hasSkill, hasHelper, capabilities, stageCount };
     });
   res.json({ ok: true, count: agents.length, agents });
 });
