@@ -24,6 +24,68 @@
 const crypto = require('crypto');
 const { queryRows } = require('./db');
 
+// ── M73 · Topic-tag canonicalization ─────────────────────────────────
+// Bare words from the topic ("canada", "deadline", "workshop") get expanded
+// to the canonical namespaced tag families used on brand_exemplars
+// ("country-canada", "template-deadline-poster", "template-workshop-poster")
+// AND the bare words are kept for backwards-compat matching.
+//
+// Both directions match because _scoreExemplar uses set-intersection on
+// strings — having both bare and canonical variants in the query maximizes
+// hit rate without any code change to scoring.
+// Note on regex boundaries: JavaScript \b is ASCII-only. For Persian/Arabic
+// terms we use plain substring match (no \b). For ASCII terms we still use
+// \b to avoid false positives like "canadagram" matching "canada". Each
+// entry has both an ascii pattern (with \b) and a unicode pattern (substring).
+const _CANON_TAG_PATTERNS = [
+  // Countries. ASCII-bounded variants + Persian substring variants.
+  { canon: 'country-germany',   ascii: /\b(germany|german|deutschland)\b/i,             unicode: /(آلمان)/ },
+  { canon: 'country-usa',       ascii: /\b(usa|u\.s\.|america|american)\b/i,            unicode: /(آمریکا|آمريكا)/ },
+  { canon: 'country-canada',    ascii: /\b(canada|canadian)\b/i,                        unicode: /(کانادا)/ },
+  { canon: 'country-australia', ascii: /\b(australia|australian)\b/i,                   unicode: /(استرالیا)/ },
+  { canon: 'country-uk',        ascii: /\b(uk|britain|british|england|english)\b/i,     unicode: /(انگلستان|انگلیس)/ },
+  { canon: 'country-iran',      ascii: /\b(iran|iranian|persian)\b/i,                   unicode: /(ایران|ایرانی)/ },
+  { canon: 'country-saudi',     ascii: /\b(saudi)\b/i,                                  unicode: /(عربستان)/ },
+  { canon: 'country-uae',       ascii: /\b(uae|emirates|dubai)\b/i,                     unicode: /(امارات)/ },
+  { canon: 'country-denmark',   ascii: /\b(denmark|danish)\b/i,                         unicode: /(دانمارک)/ },
+  { canon: 'country-france',    ascii: /\b(france|french)\b/i,                          unicode: /(فرانسه)/ },
+  // Templates.
+  { canon: 'template-deadline-poster',     ascii: /\b(deadline|due|cutoff)\b/i,         unicode: /(آخرین\s*مهلت|مهلت)/ },
+  { canon: 'template-workshop-poster',     ascii: /\b(workshop|seminar|webinar)\b/i,    unicode: /(کارگاه|همایش)/ },
+  { canon: 'template-photoreal-hero',      ascii: /\bportrait\b/i,                      unicode: null },
+  { canon: 'template-photoreal-cityscape', ascii: /\b(skyline|cityscape|landmark)\b/i,  unicode: null },
+  { canon: 'template-watercolor-occasion', ascii: /\b(occasion|greeting)\b/i,           unicode: /(روز|عید)/ },
+  // Moods.
+  { canon: 'mood-urgent',     ascii: /\b(urgent|deadline|hurry|emergency)\b/i,          unicode: /(فوری)/ },
+  { canon: 'mood-occasion',   ascii: /\b(celebration|festival|holiday)\b/i,             unicode: /(جشن|تبریک|عید)/ },
+  { canon: 'mood-clinical',   ascii: /\bclinical\b/i,                                   unicode: null },
+  { canon: 'mood-warm',       ascii: /\b(warm|optimistic|hopeful)\b/i,                  unicode: null },
+  // Subjects.
+  { canon: 'subject-doctor',    ascii: /\b(doctor|dentist|physician)\b/i,               unicode: /(دکتر|دندانپزشک|پزشک)/ },
+  { canon: 'subject-student',   ascii: /\b(student|studying)\b/i,                       unicode: /(دانشجو)/ },
+  { canon: 'subject-clinic',    ascii: /\b(clinic|operatory)\b/i,                       unicode: /(دفتر|کلینیک)/ },
+  { canon: 'subject-cityscape', ascii: /\b(skyline|cityscape|building)\b/i,             unicode: null },
+];
+
+// Expand a list of bare topic words / a free-text topic into the union of
+// (bare lowercase words) ∪ (canonical namespaced tags they imply). Both go
+// to the retriever so exemplars tagged either way still match.
+function expandTopicTags(input, opts = {}) {
+  const text = Array.isArray(input) ? input.join(' ') : String(input || '');
+  const lower = text.toLowerCase();
+  const words = Array.isArray(input)
+    ? input.map(s => String(s).toLowerCase())
+    : lower.split(/\s+/).filter(w => w.length >= 3);
+  const tags = new Set(words);
+  for (const { canon, ascii, unicode } of _CANON_TAG_PATTERNS) {
+    if ((ascii && ascii.test(lower)) || (unicode && unicode.test(text))) {
+      tags.add(canon);
+    }
+  }
+  if (Array.isArray(opts.extra)) for (const t of opts.extra) tags.add(t);
+  return Array.from(tags);
+}
+
 // ── Per-stage budgets ────────────────────────────────────────────────
 // Tuned by stage type. Never inject everything; agents perform better
 // with a curated few than a flooded prompt.
@@ -251,7 +313,7 @@ async function getTrainingPacket({
                 importance, source, outcome
           FROM brand_exemplars
          WHERE ${conds.join(' AND ')}
-         ORDER BY importance DESC, updated_at DESC LIMIT 30;
+         ORDER BY importance DESC, updated_at DESC LIMIT 200;
       `);
       const ranked = fetched
         .map(e => ({ ...e, _score: _scoreExemplar(e, { agent, platform, language, topicTags }) }))
@@ -352,4 +414,5 @@ module.exports = {
   STAGE_BUDGETS,
   getTrainingPacket,
   renderUnifiedBlock,
+  expandTopicTags,           // M73 · canonicalize bare words → namespaced tags
 };

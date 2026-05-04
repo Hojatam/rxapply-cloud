@@ -454,7 +454,7 @@ async function _renderCarousel({ source, carouselSpec, run, recipe, lang }) {
   let designBriefs = [];
   try {
     const trainingRetrieval = require('./agent-training-retrieval');
-    const topicKw = (run.topic || '').toLowerCase().split(/\s+/).filter(w => w.length >= 4).slice(0, 5);
+    const topicKw = require('./agent-training-retrieval').expandTopicTags(run.topic || '');
     const packet = await trainingRetrieval.getTrainingPacket({
       agent: 'afshin', stageName: 'design',
       platform: recipe && recipe.id, language: lang || run.master_lang,
@@ -759,7 +759,7 @@ async function imageCover({ source, run, recipe, lang }) {
     }
     const qText = (source && source.unsplash_query) || (f && f.unsplash_query) || run.topic;
     const orientation = (source && source.unsplash_orientation) || (f && f.unsplash_orientation) || null;
-    const topicKw = (run.topic || '').toLowerCase().split(/\s+/).filter(w => w.length >= 4).slice(0, 5);
+    const topicKw = require('./agent-training-retrieval').expandTopicTags(run.topic || '');
     const r = await unsplash.quickPick({
       query: qText,
       orientation,
@@ -816,7 +816,7 @@ async function imageCover({ source, run, recipe, lang }) {
   let designBriefs = [];
   try {
     const trainingRetrieval = require('./agent-training-retrieval');
-    const topicKw = (run.topic || '').toLowerCase().split(/\s+/).filter(w => w.length >= 4).slice(0, 5);
+    const topicKw = require('./agent-training-retrieval').expandTopicTags(run.topic || '');
     const packet = await trainingRetrieval.getTrainingPacket({
       agent: 'afshin', stageName: 'design',
       platform: recipe && recipe.id, language: lang || run.master_lang,

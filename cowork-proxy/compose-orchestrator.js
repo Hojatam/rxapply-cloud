@@ -244,7 +244,7 @@ async function _buildSystemPrompt({ agent, stageName, recipe, run, masterDraft, 
   // so the model resolves toward the more-specific instruction explicitly.
   try {
     const platform = recipe && recipe.id;
-    const topicKw = String(run.topic || '').split(/\s+/).filter(w => w.length >= 4).slice(0, 5).map(s => s.toLowerCase());
+    const topicKw = trainingRetrieval.expandTopicTags(run.topic || '');
     const packet = await trainingRetrieval.getTrainingPacket({
       agent, stageName, platform,
       language: lang || run.master_lang,
