@@ -6614,9 +6614,11 @@ function renderPipelines() {
       </div>
       <div class="flex gap-2">
         <button class="btn btn-ghost btn-xs" onclick="plRefresh()">↻ Refresh</button>
+        <button class="btn btn-ghost btn-xs" onclick="plNewPipeline()">+ New pipeline</button>
         <button class="btn btn-ghost btn-xs" onclick="plClone()" id="pl-clone-btn" disabled>⎘ Clone</button>
         <button class="btn btn-ghost btn-xs" onclick="plImport()">⬆ Import</button>
         <button class="btn btn-ghost btn-xs" onclick="plExport()" id="pl-export-btn" disabled>⬇ Export</button>
+        <button class="btn btn-danger btn-xs" onclick="plDeletePipeline()" id="pl-delete-btn" disabled>🗑 Delete</button>
         <button class="btn btn-primary btn-xs" onclick="plSave()" id="pl-save-btn" disabled>💾 Save pipeline</button>
       </div>
     </div>
@@ -6840,17 +6842,147 @@ function _plRenderGraph() {
   // M69 default refine targets:
   const refineMap = { critique: 'draft', verify: 'draft', audit: 'draft', 'voice-critic': 'draft', 'verify-translation': 'translate' };
 
+  // M92 · "Insert at top" button shown when no stages or before first
+  const insertAtTopBtn = `
+    <div style="display:flex;justify-content:center;margin-bottom:6px;">
+      <button onclick="plInsertStageAt(0);" title="Add a stage at the very start of the pipeline"
+              style="font-size:11px;background:#fafbff;border:1px dashed #c7d2fe;color:#4338ca;padding:4px 12px;border-radius:12px;cursor:pointer;">+ insert stage at top</button>
+    </div>
+  `;
+
   if (stages.length === 0) {
-    list.innerHTML = '<div class="empty" style="padding:40px;text-align:center;color:#94a3b8;">No stages defined.</div>';
+    list.innerHTML = `
+      <div class="empty" style="padding:30px;text-align:center;color:#94a3b8;">No stages yet — add the first one below.</div>
+      ${insertAtTopBtn}
+    `;
     return;
   }
 
-  list.innerHTML = stages.map((stage, idx) => {
+  list.innerHTML = insertAtTopBtn + stages.map((stage, idx) => {
     const stageId = stage.id || stage.name || `stage_${idx}`;
     const isSelected = _plState.selectedStageId === stageId;
     const isLast = idx === stages.length - 1;
     return _plStageCard(stage, idx, stageId, isSelected, isLast, refineMap);
   }).join('');
+}
+
+// ── M92 · Pipeline structural CRUD ────────────────────────────────
+
+function plMoveStage(idx, delta) {
+  if (!_plState.current || !_plState.current.definition) return;
+  const stages = _plState.current.definition.stages || [];
+  const newIdx = idx + delta;
+  if (newIdx < 0 || newIdx >= stages.length) return;
+  const tmp = stages[newIdx];
+  stages[newIdx] = stages[idx];
+  stages[idx] = tmp;
+  _plState.dirty = true;
+  _plUpdateSaveButton();
+  _plRenderGraph();
+}
+
+function plRemoveStage(idx) {
+  if (!_plState.current || !_plState.current.definition) return;
+  const stages = _plState.current.definition.stages || [];
+  if (idx < 0 || idx >= stages.length) return;
+  const stage = stages[idx];
+  if (!confirm(`Remove stage "${stage.name}" from this pipeline? The agent's stage file (agents/<agent>/stages/${stage.name}.md) is NOT deleted — only the pipeline's reference to it.`)) return;
+  stages.splice(idx, 1);
+  if (_plState.selectedStageId === (stage.id || stage.name)) {
+    _plState.selectedStageId = null;
+    _plRenderDrawer();
+  }
+  _plState.dirty = true;
+  _plUpdateSaveButton();
+  _plRenderGraph();
+}
+
+async function plInsertStageAt(idx) {
+  // Prompt founder for stage details
+  const name = prompt('Stage name (lowercase, dashes ok):');
+  if (!name || !name.match(/^[a-z][a-z0-9_-]*$/)) {
+    if (name !== null) alert('Invalid name. Use lowercase letters, numbers, dashes (e.g. "research" or "carousel-plan").');
+    return;
+  }
+  // Capability picker via simple prompt — full picker can come later
+  const KNOWN_CAPS = [
+    'plan', 'research', 'verify', 'verify-translation', 'draft', 'critique',
+    'audit', 'voice-critic', 'judge', 'adapt', 'translate', 'design', 'image',
+    'triage', 'reply-draft', 'carousel-plan', 'render', 'train',
+  ];
+  const cap = prompt(`Capability (one of):\n${KNOWN_CAPS.join(', ')}\n\nOr leave blank for a renderer stage.`);
+  if (cap === null) return;
+  const newStage = { name };
+  if (cap && cap.trim()) newStage.capability = cap.trim();
+  // For renderer stages, prompt for renderer type
+  if (!newStage.capability) {
+    const rend = prompt('Renderer type (e.g. "ig", "telegram", "image-cover"):');
+    if (rend && rend.trim()) newStage.renderer = rend.trim();
+  }
+  // Optional: auto-create the per-agent stage file (M92 Q3 — yes)
+  if (newStage.capability) {
+    const resolvedAgent = _plDefaultAgentFor(newStage.capability);
+    if (resolvedAgent) {
+      const stub = `---\nagent: ${resolvedAgent}\nstage: ${name}\ndefault_model_tier: standard\nretry_cap: 1\noutputs_schema: []\n---\n\n# This stage: ${name}\n\nDescribe what ${resolvedAgent} should do during this stage.\n\nReturn ONLY the JSON described in your output schema.\n`;
+      try {
+        await authFetch(`${PROXY}/agents/${encodeURIComponent(resolvedAgent)}/stages/${encodeURIComponent(name)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ markdown: stub, reason: 'auto-created via Pipeline tab insert' }),
+        });
+        console.log(`[M92] auto-created agents/${resolvedAgent}/stages/${name}.md`);
+      } catch (e) { console.warn('[M92] failed to auto-create stage file:', e.message); }
+    }
+  }
+  // Insert at position
+  const stages = _plState.current.definition.stages || [];
+  stages.splice(idx, 0, newStage);
+  _plState.dirty = true;
+  _plUpdateSaveButton();
+  _plRenderGraph();
+}
+
+function plNewPipeline() {
+  if (_plState.dirty || _plState.promptDirty) {
+    if (!confirm('Unsaved changes will be lost. Create new pipeline?')) return;
+  }
+  const id = prompt('New pipeline id (lowercase, dashes ok — e.g. "x-thread-2"):');
+  if (!id || !id.match(/^[a-z0-9][a-z0-9_-]*$/)) {
+    if (id !== null) alert('Invalid id.');
+    return;
+  }
+  const label = prompt('Display label:', id);
+  if (!label) return;
+  _plState.current = {
+    id, label,
+    description: '',
+    category: 'compose',
+    version: 0,   // unsaved → save creates v1
+    enabled: true,
+    definition: { id, label, description: '', stages: [], options_schema: [] },
+  };
+  _plState.selectedStageId = null;
+  _plState.dirty = true;
+  ['pl-clone-btn','pl-export-btn','pl-versions-btn','pl-runs-refresh-btn','pl-delete-btn'].forEach(b => { const el = $(b); if (el) el.disabled = false; });
+  _plRenderGraph();
+  _plRenderDrawer();
+  _plUpdateSaveButton();
+}
+
+async function plDeletePipeline() {
+  if (!_plState.current) return;
+  if (!confirm(`Delete pipeline "${_plState.current.id}"? This soft-disables it (use ?hard=true on the API for permanent delete).`)) return;
+  try {
+    const r = await authFetch(`${PROXY}/pipelines/${encodeURIComponent(_plState.current.id)}`, { method: 'DELETE' });
+    const j = await r.json();
+    if (!j.ok) { alert(j.error || 'failed'); return; }
+    _plState.current = null;
+    _plState.dirty = false;
+    plRefresh();
+    const list = $('pl-stages-list');
+    if (list) list.innerHTML = '<div class="empty" style="padding:40px;text-align:center;color:#94a3b8;">Pipeline disabled.</div>';
+    _plRenderDrawer();
+  } catch (e) { alert(e.message); }
 }
 
 // One stage card. Vertical cascade with a connector line between cards.
@@ -6881,20 +7013,38 @@ function _plStageCard(stage, idx, stageId, isSelected, isLast, refineMap) {
   if (refines) badges.push(`<span style="background:#fef3c7;color:#92400e;padding:1px 8px;border-radius:3px;font-size:10px;" title="On verdict failure, re-runs '${refines}' (M69 refine loop)">↺ refines ${escapeHtml(refines)}${retryCap != null ? ` ×${retryCap}` : ''}</span>`);
   if (isRenderer) badges.push(`<span style="background:#cffafe;color:#0e7490;padding:1px 8px;border-radius:3px;font-size:10px;">🛠 deterministic</span>`);
 
+  // M92 · Structural CRUD controls per stage card
+  const totalStages = (_plState.current && _plState.current.definition && _plState.current.definition.stages || []).length;
+  const canMoveUp = idx > 0;
+  const canMoveDown = idx < totalStages - 1;
+
   return `
-    <div class="pl-stage-card" onclick="_plSelectStage('${escapeHtml(stageId)}')"
-         data-stage-id="${escapeHtml(stageId)}"
-         style="background:${cardBg};border:${cardBorder};border-radius:8px;padding:12px 16px;margin-bottom:8px;cursor:pointer;display:flex;align-items:center;gap:14px;transition:all .15s;">
-      <div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0;">
+    <div class="pl-stage-card" data-stage-id="${escapeHtml(stageId)}"
+         style="background:${cardBg};border:${cardBorder};border-radius:8px;padding:12px 16px;margin-bottom:6px;display:flex;align-items:center;gap:14px;transition:all .15s;">
+      <div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0;cursor:pointer;" onclick="_plSelectStage('${escapeHtml(stageId)}')">
         <div style="width:32px;height:32px;border-radius:50%;background:${accentBg};color:${accentColor};display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;">${idx + 1}</div>
       </div>
-      <div style="flex:1;min-width:0;">
+      <div style="flex:1;min-width:0;cursor:pointer;" onclick="_plSelectStage('${escapeHtml(stageId)}')">
         <div style="font-size:14px;font-weight:600;color:#1e293b;margin-bottom:4px;">${escapeHtml(sName)}</div>
         <div style="display:flex;flex-wrap:wrap;gap:4px;">${badges.join('')}</div>
       </div>
-      <div style="color:${isSelected ? accentColor : '#cbd5e1'};font-size:18px;font-weight:300;flex-shrink:0;">${isSelected ? '◆' : '›'}</div>
+      <div style="display:flex;align-items:center;gap:2px;flex-shrink:0;">
+        <button title="Move up" onclick="event.stopPropagation();plMoveStage(${idx}, -1);" ${canMoveUp ? '' : 'disabled'}
+                style="background:none;border:none;cursor:${canMoveUp?'pointer':'not-allowed'};padding:4px 6px;color:${canMoveUp?'#475569':'#cbd5e1'};font-size:14px;">↑</button>
+        <button title="Move down" onclick="event.stopPropagation();plMoveStage(${idx}, 1);" ${canMoveDown ? '' : 'disabled'}
+                style="background:none;border:none;cursor:${canMoveDown?'pointer':'not-allowed'};padding:4px 6px;color:${canMoveDown?'#475569':'#cbd5e1'};font-size:14px;">↓</button>
+        <button title="Remove this stage" onclick="event.stopPropagation();plRemoveStage(${idx});"
+                style="background:none;border:none;cursor:pointer;padding:4px 6px;color:#dc2626;font-size:13px;">×</button>
+      </div>
+      <div style="color:${isSelected ? accentColor : '#cbd5e1'};font-size:18px;font-weight:300;flex-shrink:0;cursor:pointer;" onclick="_plSelectStage('${escapeHtml(stageId)}')">${isSelected ? '◆' : '›'}</div>
     </div>
-    ${isLast ? '' : `<div style="margin-left:31px;width:2px;height:8px;background:#e2e8f0;margin-bottom:0;"></div>`}
+    ${isLast ? '' : `
+      <div style="margin-left:31px;display:flex;align-items:center;gap:4px;margin-bottom:0;">
+        <div style="width:2px;height:14px;background:#e2e8f0;"></div>
+        <button onclick="plInsertStageAt(${idx + 1});" title="Insert stage after this one"
+                style="font-size:10px;background:#fafbff;border:1px dashed #c7d2fe;color:#4338ca;padding:1px 8px;border-radius:10px;cursor:pointer;">+ insert stage</button>
+      </div>
+    `}
   `;
 }
 
