@@ -6695,34 +6695,143 @@ function coRenderStageOutput(stage, expandedByDefault) {
         `;
       }
       case 'draft': {
+        // M67 · Draft card now surfaces M66 word_count + length_check
+        // so the founder sees Sepehr's own length self-report alongside
+        // the body. Critique then validates this mechanically.
+        const wc = (typeof out.word_count === 'number') ? out.word_count : null;
+        const lengthCheck = out.length_check || null;
         return `
           ${out.title ? `<div class="mt-2 text-base font-semibold">${escapeHtml(out.title)}</div>` : ''}
           ${out.body ? `<div class="mt-2 text-sm" style="white-space:pre-wrap;line-height:1.55;">${escapeHtml(out.body)}</div>` : ''}
+          ${(wc != null || lengthCheck) ? `
+            <div class="mt-2 text-xs flex items-center gap-2 flex-wrap" style="color:#64748b;">
+              ${wc != null ? `<span style="background:#f1f5f9;padding:2px 8px;border-radius:3px;"><span class="mono" style="font-weight:600;color:#334155;">${wc}</span> words</span>` : ''}
+              ${lengthCheck ? `<span class="italic">${escapeHtml(lengthCheck)}</span>` : ''}
+            </div>` : ''}
           ${out.tone_notes ? `<div class="mt-2 text-xs italic" style="color:var(--text-muted);">${escapeHtml(out.tone_notes)}</div>` : ''}
         `;
       }
       case 'critique': {
-        const verdictColor = out.verdict === 'pass' ? '#16a34a' : out.verdict === 'fail' ? '#dc2626' : '#d97706';
+        // M67 · Redesigned critique card. Same visual language as voice-critic
+        // and audit (verdict pill at top, score bars, prominent length gauge
+        // when M66 fields present, color-coded fixes).
+        const verdict = out.verdict || '?';
+        const verdictColor =
+          verdict === 'pass' ? '#16a34a' :
+          verdict === 'fail' ? '#dc2626' :
+          verdict === 'needs_refine' ? '#d97706' : '#94a3b8';
+        const verdictBg =
+          verdict === 'pass' ? '#dcfce7' :
+          verdict === 'fail' ? '#fee2e2' :
+          verdict === 'needs_refine' ? '#fef3c7' : '#f1f5f9';
         const scores = out.scores || {};
         const fixesArr = Array.isArray(out.actionable_fixes) ? out.actionable_fixes : [];
+        const wc = (typeof out.word_count === 'number') ? out.word_count : null;
+        const lengthRule = out.length_rule_applied || null;
+
+        // Parse "38.5-75.5 words" or "p95 = 119" out of the brand rule
+        // text so we can show a visual gauge. Best-effort; falls back
+        // gracefully when unparseable.
+        let lenGauge = null;
+        if (wc != null) {
+          const ruleStr = String(lengthRule || '');
+          const range = ruleStr.match(/(\d+(?:\.\d+)?)\s*[-–to]+\s*(\d+(?:\.\d+)?)/);
+          const p95   = ruleStr.match(/p95\s*=?\s*(\d+(?:\.\d+)?)/i);
+          const tMin = range ? parseFloat(range[1]) : null;
+          const tMax = range ? parseFloat(range[2]) : null;
+          const cap  = p95 ? parseFloat(p95[1]) : (tMax ? Math.round(tMax * 1.6) : null);
+          if (tMin != null && tMax != null && cap != null) {
+            const inTarget  = wc >= tMin && wc <= tMax;
+            const overCap   = wc > cap;
+            const inOver    = wc > tMax && wc <= cap;
+            const status = overCap ? 'over' : inTarget ? 'ok' : inOver ? 'warn' : 'under';
+            const sColor = status === 'ok' ? '#16a34a' : status === 'over' ? '#dc2626' : '#d97706';
+            const sLabel = status === 'ok' ? '✓ in target'
+                         : status === 'over' ? `✗ over p95 (${cap}w)`
+                         : status === 'warn' ? `over target (${tMin}-${tMax}w)`
+                         : `under target (${tMin}-${tMax}w)`;
+            // Position on a bar that runs 0 → cap*1.05
+            const barMax = cap * 1.05;
+            const pct = Math.min(100, Math.max(0, (wc / barMax) * 100));
+            const tMinPct = Math.min(100, (tMin / barMax) * 100);
+            const tMaxPct = Math.min(100, (tMax / barMax) * 100);
+            const capPct  = Math.min(100, (cap  / barMax) * 100);
+            lenGauge = `
+              <div class="mt-3" style="background:#f8fafc;border-radius:6px;padding:8px 10px;">
+                <div class="flex items-center justify-between flex-wrap gap-2">
+                  <div class="text-xs uppercase tracking-wider text-slate-500 font-semibold">Length</div>
+                  <div class="text-xs" style="color:${sColor};font-weight:600;">
+                    <span class="mono">${wc} words</span>
+                    <span style="margin-left:6px;">${sLabel}</span>
+                  </div>
+                </div>
+                <div style="position:relative;height:20px;margin-top:6px;">
+                  <!-- target band -->
+                  <div style="position:absolute;top:7px;left:${tMinPct}%;width:${Math.max(0, tMaxPct - tMinPct)}%;height:6px;background:#bbf7d0;border-radius:3px;"></div>
+                  <!-- cap marker (p95) -->
+                  <div style="position:absolute;top:4px;left:${capPct}%;width:2px;height:12px;background:#fca5a5;"></div>
+                  <!-- track -->
+                  <div style="position:absolute;top:9px;left:0;right:0;height:2px;background:#e2e8f0;border-radius:1px;z-index:-1;"></div>
+                  <!-- pointer -->
+                  <div style="position:absolute;top:2px;left:calc(${pct}% - 6px);width:12px;height:16px;background:${sColor};border-radius:2px;box-shadow:0 1px 3px rgba(0,0,0,.2);"></div>
+                </div>
+                <div class="text-xs mt-1" style="color:#94a3b8;display:flex;justify-content:space-between;">
+                  <span>0</span>
+                  <span style="position:absolute;left:${tMinPct}%;transform:translateX(-50%);">${tMin}</span>
+                  <span style="position:absolute;left:${tMaxPct}%;transform:translateX(-50%);">${tMax}</span>
+                  <span style="position:absolute;left:${capPct}%;transform:translateX(-50%);color:#fca5a5;">p95 ${cap}</span>
+                </div>
+                ${lengthRule ? `<div class="text-xs italic mt-3" style="color:#64748b;">${escapeHtml(lengthRule)}</div>` : ''}
+              </div>`;
+          }
+        }
+
+        // Score bars (visual progress) — single column, easy to scan
+        const scoreLabels = {
+          brand_voice: 'Brand voice',
+          specificity: 'Specificity',
+          cta_present: 'CTA present',
+          banned_phrases_clean: 'No banned phrases',
+          format_fit: 'Format fit',
+          length_fit: 'Length fit',
+        };
+        const scoreEntries = Object.entries(scores);
         return `
-          <div class="mt-2 flex items-center gap-2">
-            <span class="text-xs uppercase tracking-wider" style="color:${verdictColor};font-weight:600;">${escapeHtml(out.verdict || '?')}</span>
-            <span class="text-sm">${escapeHtml(out.verdict_reason || '')}</span>
+          <div class="mt-2 p-2 rounded" style="background:${verdictBg};">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-xs uppercase tracking-wider" style="color:${verdictColor};font-weight:700;letter-spacing:.05em;background:#fff;padding:2px 8px;border-radius:3px;">${escapeHtml(verdict.replace(/_/g, ' '))}</span>
+              <span class="text-sm" style="color:${verdictColor};font-weight:500;">${escapeHtml(out.verdict_reason || '')}</span>
+            </div>
           </div>
-          ${Object.keys(scores).length ? `
-            <div class="mt-2 grid grid-cols-2 gap-1">
-              ${Object.entries(scores).map(([k, v]) => {
-                const num = Number(v) || 0;
-                const pct = Math.round(num * 100);
-                const c = num >= 0.7 ? '#16a34a' : num >= 0.5 ? '#d97706' : '#dc2626';
-                return `<div class="text-xs flex items-center gap-2"><span class="text-slate-500" style="min-width:140px;">${escapeHtml(k)}</span><span class="mono" style="color:${c};font-weight:600;">${pct}%</span></div>`;
-              }).join('')}
+          ${lenGauge || ''}
+          ${scoreEntries.length ? `
+            <div class="mt-3">
+              <div class="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-2">Scores</div>
+              <div class="space-y-2">
+                ${scoreEntries.map(([k, v]) => {
+                  const num = Number(v) || 0;
+                  const pct = Math.round(num * 100);
+                  const c = num >= 0.7 ? '#16a34a' : num >= 0.5 ? '#d97706' : '#dc2626';
+                  const label = scoreLabels[k] || k.replace(/_/g, ' ');
+                  return `
+                    <div class="text-xs flex items-center gap-3">
+                      <span class="text-slate-600" style="min-width:140px;">${escapeHtml(label)}</span>
+                      <div style="flex:1;height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden;max-width:240px;">
+                        <div style="width:${pct}%;height:100%;background:${c};transition:width .3s;"></div>
+                      </div>
+                      <span class="mono" style="color:${c};font-weight:600;min-width:36px;text-align:right;">${pct}%</span>
+                    </div>`;
+                }).join('')}
+              </div>
             </div>` : ''}
           ${fixesArr.length ? `
             <div class="mt-3">
-              <div class="text-xs uppercase tracking-wider text-slate-500">Fixes</div>
-              <ul class="text-sm list-disc pl-5 mt-1">${fixesArr.map(f => `<li>${escapeHtml(f)}</li>`).join('')}</ul>
+              <div class="text-xs uppercase tracking-wider text-rose-700 font-semibold mb-1">Actionable fixes</div>
+              <ul class="text-sm space-y-1 mt-1">
+                ${fixesArr.map(f => `
+                  <li style="padding:6px 8px;background:#fef2f2;border-left:3px solid #fca5a5;border-radius:3px;">${escapeHtml(f)}</li>
+                `).join('')}
+              </ul>
             </div>` : ''}
         `;
       }
@@ -6830,26 +6939,52 @@ function coRenderStageOutput(stage, expandedByDefault) {
         `;
       }
       case 'verify': {
+        // M67 · Verify card matches the unified visual language
         const verifiedFacts = Array.isArray(out.verified_facts) ? out.verified_facts : [];
         const issues = Array.isArray(out.issues) ? out.issues : [];
         const passColor = out.passed ? '#16a34a' : '#dc2626';
+        const passBg    = out.passed ? '#dcfce7' : '#fee2e2';
         const conf = Number(out.overall_confidence) || 0;
         const confColor = conf >= 0.8 ? '#16a34a' : conf >= 0.6 ? '#d97706' : '#dc2626';
+        const confPct = Math.round(conf * 100);
         return `
-          <div class="mt-2 flex items-center gap-2 flex-wrap">
-            <span class="text-xs uppercase tracking-wider" style="color:${passColor};font-weight:600;">${out.passed ? 'KB-verified' : 'KB-issues'}</span>
-            <span class="text-xs">overall confidence: <span class="mono" style="color:${confColor};font-weight:600;">${Math.round(conf * 100)}%</span></span>
+          <div class="mt-2 p-2 rounded" style="background:${passBg};">
+            <div class="flex items-center gap-3 flex-wrap">
+              <span class="text-xs uppercase tracking-wider" style="color:${passColor};font-weight:700;letter-spacing:.05em;background:#fff;padding:2px 8px;border-radius:3px;">${out.passed ? 'KB · VERIFIED' : 'KB · ISSUES'}</span>
+              <div class="flex items-center gap-2">
+                <div style="width:120px;height:8px;background:rgba(0,0,0,.06);border-radius:4px;overflow:hidden;">
+                  <div style="width:${confPct}%;height:100%;background:${confColor};transition:width .3s;"></div>
+                </div>
+                <span class="mono text-xs" style="color:${confColor};font-weight:600;">${confPct}%</span>
+                <span class="text-xs text-slate-500">confidence</span>
+              </div>
+              <span class="text-xs text-slate-500">${verifiedFacts.length} verified · ${issues.length} flagged</span>
+            </div>
           </div>
           ${verifiedFacts.length ? `
-            <div class="mt-2">
-              <div class="text-xs uppercase tracking-wider text-emerald-700">Verified facts</div>
-              <ul class="text-xs list-disc pl-5 mt-1">${verifiedFacts.map(f => `<li>${escapeHtml(f.claim || '')} <span class="text-slate-400">· ${escapeHtml(f.kb_reference || '?')} · ${Math.round((Number(f.confidence) || 0) * 100)}%</span></li>`).join('')}</ul>
+            <div class="mt-3">
+              <div class="text-xs uppercase tracking-wider text-emerald-700 font-semibold mb-1">Verified facts</div>
+              <ul class="text-xs space-y-1">
+                ${verifiedFacts.map(f => `
+                  <li style="padding:6px 8px;background:#f0fdf4;border-left:3px solid #86efac;border-radius:3px;">
+                    <div>${escapeHtml(f.claim || '')}</div>
+                    <div class="text-slate-500 mt-1">
+                      <span class="mono" style="font-size:10px;">${escapeHtml(f.kb_reference || '?')}</span>
+                      · <span style="color:${(Number(f.confidence) || 0) >= 0.7 ? '#16a34a' : '#d97706'};">${Math.round((Number(f.confidence) || 0) * 100)}%</span>
+                    </div>
+                  </li>`).join('')}
+              </ul>
             </div>` : ''}
           ${issues.length ? `
-            <div class="mt-2">
-              <div class="text-xs uppercase tracking-wider text-rose-700">KB-flagged issues</div>
-              <div class="space-y-2 mt-1">
-                ${issues.map(i => `<div class="text-xs"><span class="text-rose-700">${escapeHtml(i.claim || '')}</span><div class="text-slate-500 mt-1">problem: ${escapeHtml(i.problem || '')}</div><div class="text-slate-700 mt-1">→ ${escapeHtml(i.fix || '')}</div></div>`).join('')}
+            <div class="mt-3">
+              <div class="text-xs uppercase tracking-wider text-rose-700 font-semibold mb-1">KB-flagged issues</div>
+              <div class="space-y-2">
+                ${issues.map(i => `
+                  <div class="text-xs" style="padding:8px 10px;background:#fef2f2;border-left:3px solid #fca5a5;border-radius:3px;">
+                    <div style="color:#9f1239;font-weight:500;">${escapeHtml(i.claim || '')}</div>
+                    <div class="mt-1" style="color:#64748b;"><strong>problem:</strong> ${escapeHtml(i.problem || '')}</div>
+                    ${i.fix ? `<div class="mt-1" style="color:#16a34a;"><strong>fix:</strong> ${escapeHtml(i.fix)}</div>` : ''}
+                  </div>`).join('')}
               </div>
             </div>` : ''}
         `;
