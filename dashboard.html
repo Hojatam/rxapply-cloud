@@ -7504,16 +7504,31 @@ function _coRenderImageState(stage) {
             }).join('')}
           </div>` : ''}
       </div>` : '';
+    // M71 · Source pill — distinguishes Generated vs Unsplash, with
+    // photographer attribution per Unsplash terms.
+    const isUnsplash = (o._image_source === 'unsplash') || o._source === 'unsplash';
+    const sourcePill = isUnsplash
+      ? `<span style="background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:3px;font-weight:600;font-size:10px;">📷 UNSPLASH</span>`
+      : `<span style="background:#ede9fe;color:#5b21b6;padding:2px 8px;border-radius:3px;font-weight:600;font-size:10px;">⚙ GENERATED</span>`;
+    const attribLine = (isUnsplash && o._photographer) ? `
+      <div class="text-xs text-slate-500 mt-1 text-center" style="font-style:italic;">
+        ${escapeHtml(o._attribution || `Photo by ${o._photographer.name || ''} on Unsplash`)}
+        ${o._photographer.profile_url ? ` · <a href="${escapeHtml(o._photographer.profile_url)}" target="_blank" class="text-indigo-600 underline">@${escapeHtml(o._photographer.username || '')}</a>` : ''}
+      </div>` : '';
     return `<div class="card-tight mb-3" style="background:#f8fafc;">
       <div style="text-align:center;">
         <img src="${escapeHtml(o.url)}" alt="cover"
               style="max-width:100%;max-height:360px;border-radius:6px;background:#e2e8f0;"
               onerror="this.parentElement.parentElement.innerHTML='<div style=&quot;padding:32px;color:#dc2626;font-size:12px;&quot;>Image generated but URL <span class=mono>'+this.src.replace(/[<>&\"]/g,'')+'</span> failed to load. Check R2_PUBLIC_URL or /storage route.</div>';" />
       </div>
-      <div class="text-xs text-slate-400 mt-2 text-center">
-        cover · <strong style="color:#4c1d95;">${escapeHtml(o.model_label || o.model || '')}</strong> · ${escapeHtml(o.size || '')} · $${Number(o.cost_usd || 0).toFixed(4)}
+      <div class="text-xs text-slate-400 mt-2 text-center" style="display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;">
+        ${sourcePill}
+        <strong style="color:#4c1d95;">${escapeHtml(o.model_label || o.model || '')}</strong>
+        ${o.size ? `· ${escapeHtml(o.size)}` : ''}
+        · $${Number(o.cost_usd || 0).toFixed(4)}
         ${o.media_id ? ` · <a href="#" onclick="navigate('designs');return false;" class="text-indigo-600 underline">Designs ↗</a>` : ''}
       </div>
+      ${attribLine}
       ${dirHtml}
     </div>`;
   }

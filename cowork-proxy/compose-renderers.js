@@ -504,6 +504,57 @@ async function _renderCarousel({ source, carouselSpec, run, recipe, lang }) {
                     `This is slide ${slide.n} of ${slides.length} in a carousel — keep palette, fonts, ` +
                     `and brand identity consistent across slides.]`;
 
+    // M71 · Per-slide Unsplash branch — when Tarrah's slot or Afshin's
+    // design output flagged this slide as photo-led, fetch a real photo
+    // instead of generating from scratch. Photographer attribution is
+    // stored on the resulting media_library row and surfaced in the
+    // slide's _image_source / _attribution fields.
+    const slideImageSource = (slide.image_source) || (mergedSlots && mergedSlots.image_source) || 'generated';
+    if (slideImageSource === 'unsplash') {
+      const unsplash = require('./unsplash');
+      if (!unsplash.hasKey()) {
+        if (!firstError) firstError = `slide ${slide.n}: UNSPLASH_ACCESS_KEY not set`;
+        renderedSlides.push({ n: slide.n, role: slide.role, error: 'UNSPLASH_ACCESS_KEY not set on server' });
+        continue;
+      }
+      const qText = slide.unsplash_query || mergedSlots.unsplash_query || run.topic;
+      try {
+        const u = await unsplash.quickPick({
+          query: qText,
+          orientation: slide.unsplash_orientation || 'squarish',
+          topic: run.topic,
+          language: lang || run.master_lang,
+          topicTags: (run.topic || '').toLowerCase().split(/\s+/).filter(w => w.length >= 4).slice(0, 5),
+        });
+        if (!u.ok) {
+          if (!firstError) firstError = `slide ${slide.n}: unsplash ${u.error}`;
+          renderedSlides.push({ n: slide.n, role: slide.role, error: u.error });
+          continue;
+        }
+        renderedSlides.push({
+          n: slide.n,
+          role: slide.role,
+          slots: mergedSlots,
+          url: u.url,
+          key: u.r2_key,
+          media_id: u.media_id,
+          model: 'unsplash-stock',
+          size: null,
+          cost_usd: 0,
+          model_label: 'Unsplash stock',
+          prompt: `Unsplash search: "${qText}"`,
+          _image_source: 'unsplash',
+          _attribution: u.attribution_text,
+          _photographer: u.photographer,
+        });
+        continue;
+      } catch (e) {
+        if (!firstError) firstError = `slide ${slide.n}: unsplash ${e.message}`;
+        renderedSlides.push({ n: slide.n, role: slide.role, error: e.message });
+        continue;
+      }
+    }
+
     // M70 · Enrich with carousel slot block + brand exemplar metadata +
     // hex colors + RTL/numeral direction + negative prompt list.
     const enrichedPrompt = _buildEnrichedImagePrompt({
@@ -543,6 +594,7 @@ async function _renderCarousel({ source, carouselSpec, run, recipe, lang }) {
         cost_usd: r.cost_usd,
         model_label: r.model_label || null,
         prompt: slidePrompt,
+        _image_source: 'generated',
       });
     } catch (e) {
       if (!firstError) firstError = `slide ${slide.n}: ${e.message}`;
@@ -718,7 +770,10 @@ async function imageCover({ source, run, recipe, lang }) {
     if (!r.ok) throw new Error(`Unsplash failed: ${r.error}`);
     return {
       _renderer: 'image-cover',
-      _source: 'unsplash',
+      _image_source: 'unsplash',         // M71 · canonical telemetry field
+      _source: 'unsplash',                // backwards-compat alias
+      _attribution: r.attribution_text,
+      _photographer: r.photographer,
       lang: lang || run.master_lang,
       url: r.url,
       key: r.r2_key,
@@ -828,6 +883,7 @@ illustration style, clean composition, minimal text overlay, no logo.`;
 
   return {
     _renderer: 'image-cover',
+    _image_source: 'generated',        // M71 · explicit telemetry
     lang: lang || run.master_lang,
     url: r.url,
     key: r.key,
