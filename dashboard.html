@@ -5981,7 +5981,18 @@ function _plInitDrawflow() {
   // Wire selection event
   _plState.editor.on('nodeSelected', (drawflowNodeId) => {
     const stageId = _plState.nodeIdMap.get(String(drawflowNodeId));
-    if (stageId) { _plState.selectedStageId = stageId; _plRenderDrawer(); }
+    if (stageId) {
+      _plState.selectedStageId = stageId;
+      _plRenderDrawer();
+      // M77b · Auto-load the stage prompt — saves the founder a click
+      // every time they pick a different stage. Skip when the stage is
+      // a pure renderer (no LLM, no per-agent file).
+      setTimeout(() => {
+        const stages = (_plState.current && _plState.current.definition && _plState.current.definition.stages) || [];
+        const stage = stages.find(s => (s.id || s.name) === stageId);
+        if (stage && !stage.renderer && stage.capability) plLoadStagePrompt();
+      }, 50);
+    }
   });
   _plState.editor.on('nodeUnselected', () => {
     _plState.selectedStageId = null;
