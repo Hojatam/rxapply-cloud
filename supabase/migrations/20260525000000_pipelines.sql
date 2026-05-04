@@ -11,10 +11,37 @@
 -- fields (edges_out, edges_refine) without needing a schema change.
 --
 -- Migration is idempotent — re-running on an already-seeded DB is safe.
+--
+-- M77 fix · The legacy F6 `pipelines` table (uuid id + graph_data) collides
+-- with the schema we want. Rename it to `pipeline_runner_pipelines` BEFORE
+-- creating the new tables so the FK from pipeline_versions.pipeline_id (text)
+-- to pipelines.id (text) actually works. The legacy table's data is preserved
+-- under the new name; pipeline-runner.js reads from the new name.
 -- ============================================================================
 
 BEGIN;
 
+-- ── Step 1 · Move legacy F6 table out of the way (idempotent) ────────
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+              WHERE table_name = 'pipelines' AND column_name = 'graph_data')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.tables
+                      WHERE table_name = 'pipeline_runner_pipelines')
+  THEN
+    EXECUTE 'ALTER TABLE pipelines RENAME TO pipeline_runner_pipelines';
+    RAISE NOTICE 'Renamed legacy pipelines → pipeline_runner_pipelines';
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_pipelines_updated') THEN
+    EXECUTE 'ALTER INDEX idx_pipelines_updated RENAME TO idx_pipeline_runner_pipelines_updated';
+  END IF;
+END $$;
+
+-- ── Step 2 · New compose-pipeline tables ─────────────────────────────
 CREATE TABLE IF NOT EXISTS pipelines (
   id          text PRIMARY KEY,
   label       text NOT NULL,
