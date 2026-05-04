@@ -7697,6 +7697,18 @@ function coRenderOptionInput(opt) {
       return `<input type="number" id="${id}" data-key="${opt.key}" value="${escapeHtml(String(def))}"${ph}
                 ${opt.min != null ? `min="${opt.min}"` : ''} ${opt.max != null ? `max="${opt.max}"` : ''}
                 class="co-input" style="max-width:140px;">`;
+    case 'select':
+      // M102 · Dropdown for enumerated options. Used by IG recipe to let
+      // the founder force every slide's image_source (mixed / unsplash /
+      // generated) instead of trusting Tarrah's per-slide pick.
+      return `<select id="${id}" data-key="${opt.key}" class="co-select">${
+        (opt.options || []).map(o => {
+          const v = (typeof o === 'string') ? o : o.value;
+          const lbl = (typeof o === 'string') ? o : (o.label || o.value);
+          const sel = String(v) === String(def) ? ' selected' : '';
+          return `<option value="${escapeHtml(String(v))}"${sel}>${escapeHtml(String(lbl))}</option>`;
+        }).join('')
+      }</select>`;
     default:
       return `<input type="text" id="${id}" data-key="${opt.key}" value="${escapeHtml(String(def))}"${ph} class="co-input">`;
   }

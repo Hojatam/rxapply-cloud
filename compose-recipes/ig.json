@@ -34,6 +34,15 @@
     { "key": "max_hashtags",    "label": "Max hashtags",          "type": "number", "default": 12, "min": 3, "max": 30 },
     { "key": "with_image",      "label": "Generate cover image (~$0.19)", "type": "checkbox", "default": true },
     { "key": "as_carousel",     "label": "Plan as multi-slide carousel (Tarrah → Afshin)", "type": "checkbox", "default": false },
-    { "key": "carousel_slides", "label": "Slide count (when carousel)", "type": "number", "default": 6, "min": 4, "max": 8 }
+    { "key": "carousel_slides", "label": "Slide count (when carousel)", "type": "number", "default": 6, "min": 4, "max": 8 },
+    { "key": "force_image_source", "label": "Force every slide's image source (override Tarrah)", "type": "select",
+      "default": "",
+      "options": [
+        { "value": "",          "label": "— Trust Tarrah (per-slide) —" },
+        { "value": "mixed",     "label": "All slides: mixed (Unsplash hero + AI overlay)" },
+        { "value": "unsplash",  "label": "All slides: pure Unsplash photo (no AI)" },
+        { "value": "generated", "label": "All slides: pure gpt-image-2 (no Unsplash)" }
+      ]
+    }
   ]
 }

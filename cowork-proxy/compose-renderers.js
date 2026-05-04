@@ -523,13 +523,18 @@ async function _renderCarousel({ source, carouselSpec, run, recipe, lang }) {
 
     // M71 + M82/M89 · Per-slide image_source resolution
     // Priority order (Afshin's spec wins because he's the strict executor):
-    //   1. Afshin's per-slide directive (afshinByN[slide.n].image_source)
-    //   2. Tarrah's slide.image_source (the planner's choice)
-    //   3. mergedSlots.image_source (legacy fallback)
-    //   4. 'generated' default
+    //   1. run.options.force_image_source (M102 · founder override — wins
+    //      over BOTH planner and executor; lets the founder verify the
+    //      Unsplash flow end-to-end without editing prompts)
+    //   2. Afshin's per-slide directive (afshinByN[slide.n].image_source)
+    //   3. Tarrah's slide.image_source (the planner's choice)
+    //   4. mergedSlots.image_source (legacy fallback)
+    //   5. 'generated' default
     const afshinSlide = afshinByN.get(slide.n) || null;
-    const slideImageSource =
-        (afshinSlide && afshinSlide.image_source)
+    const _forcedSource = run && run.options && run.options.force_image_source;
+    const _validForced = ['mixed', 'unsplash', 'generated'].includes(_forcedSource) ? _forcedSource : null;
+    let slideImageSource = _validForced
+     || (afshinSlide && afshinSlide.image_source)
      || slide.image_source
      || (mergedSlots && mergedSlots.image_source)
      || 'generated';
