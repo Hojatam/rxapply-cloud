@@ -1206,6 +1206,13 @@ async function _executeRenderer({ runId, run, recipe, stage, stageIndex, lang })
       const adaptRow  = masterDone.find(s => s.stage_name === 'adapt');
       const draftRow  = masterDone.find(s => s.stage_name === 'draft');
       sourceForRender = (designRow || adaptRow || draftRow || {}).output;
+      // M65 · Pipe Tarrah's carousel spec to the renderer when present.
+      // The renderer iterates the spec's slides and renders one image per
+      // slide using the brand-template scaffold from afshin-router.
+      const carouselRow = masterDone.find(s => s.stage_name === 'carousel-plan');
+      if (carouselRow && carouselRow.output) {
+        sourceForRender = { ...(sourceForRender || {}), _carousel_spec: carouselRow.output };
+      }
     } else {
       // Non-image renderers (telegram/email/etc) use adapt > draft.
       const adaptRow = masterDone.find(s => s.stage_name === 'adapt');

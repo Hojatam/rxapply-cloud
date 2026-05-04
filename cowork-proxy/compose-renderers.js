@@ -435,8 +435,142 @@ function instagram({ source, run, lang }) {
 //   • adapt.fields.design_brief / image_brief / design_prompt   (preferred)
 //   • render.image_brief (some recipes embed it in the post itself)
 //   • final fallback: synthesise a minimal brief from topic + caption
+// ── M65 · Multi-slide carousel renderer ────────────────────────────
+// Iterates Tarrah's slide spec, calls compose-image.generateCover once
+// per slide with the brand-template scaffold + slot values, and returns
+// one renderer payload listing every slide's URL/key/photographer. Each
+// slide also gets the top-3 brand reference images for consistent style.
+async function _renderCarousel({ source, carouselSpec, run, recipe, lang }) {
+  const afshin = require('./afshin-router');
+  const composeImage = require('./compose-image');
+  const slides = carouselSpec.slides || [];
+  const templateId = carouselSpec.template;
+  const globalSlots = carouselSpec.global || {};
+
+  // Pull top-3 brand reference URLs once — same anchor for every slide.
+  let referenceUrls = [];
+  try {
+    const trainingRetrieval = require('./agent-training-retrieval');
+    const topicKw = (run.topic || '').toLowerCase().split(/\s+/).filter(w => w.length >= 4).slice(0, 5);
+    const packet = await trainingRetrieval.getTrainingPacket({
+      agent: 'afshin', stageName: 'design',
+      platform: recipe && recipe.id, language: lang || run.master_lang,
+      topicTags: [...topicKw, 'visual-reference'],
+    });
+    const designBriefs = (packet.exemplars || []).filter(e => e.kind === 'design_brief').slice(0, 3);
+    for (const d of designBriefs) {
+      const m = String(d.body || '').match(/URL:\s*(\S+)/);
+      if (m) referenceUrls.push(m[1]);
+    }
+  } catch (_) { /* non-fatal */ }
+
+  const runOption = (run.options && run.options.image_model) || null;
+  const designSuggestion = (source && source.recommended_model) || null;
+  const recipeDefault = (recipe && recipe.default_image_model) || null;
+
+  const renderedSlides = [];
+  let totalCost = 0;
+  let firstError = null;
+
+  for (const slide of slides) {
+    // Merge global slots (palette, country pill, icon) with per-slide
+    // overrides, then expand the template scaffold to a render prompt.
+    const mergedSlots = { ...globalSlots, ...(slide.slots || {}) };
+    let slidePrompt = afshin.renderTemplatePrompt(templateId, mergedSlots);
+
+    // If the template doesn't render (unknown id), fall back to a plain
+    // scaffold built from the slot values themselves.
+    if (!slidePrompt) {
+      const parts = [`RxApply brand carousel slide #${slide.n} of ${slides.length}.`];
+      if (mergedSlots.title) parts.push(`Main title (large, render exactly): "${mergedSlots.title}"`);
+      if (mergedSlots.subtitle) parts.push(`Subtitle: "${mergedSlots.subtitle}"`);
+      if (mergedSlots.country_pill) parts.push(`Country pill text: "${mergedSlots.country_pill}"`);
+      if (Array.isArray(mergedSlots.body_bullets)) parts.push(`Bullets: ${mergedSlots.body_bullets.map(b => `"${b}"`).join(', ')}`);
+      if (mergedSlots.key_number) parts.push(`Big key number: "${mergedSlots.key_number}"`);
+      if (mergedSlots.deadline_pill) parts.push(`Orange deadline pill: "${mergedSlots.deadline_pill}"`);
+      if (mergedSlots.date_pill) parts.push(`Date pill: "${mergedSlots.date_pill}"`);
+      if (mergedSlots.block_color) parts.push(`Solid-fill caption block color: ${mergedSlots.block_color}`);
+      if (mergedSlots.icon) parts.push(`Circular brand icon: ${mergedSlots.icon}`);
+      parts.push('Brand: clean, professional, calm. Teal R-arrow logo on white square integrated as a design element.');
+      slidePrompt = parts.join(' ');
+    }
+
+    // Append slot-discipline note so the model renders text exactly
+    slidePrompt += `\n\n[Render the on-image text VERBATIM from the slot values above. ` +
+                    `Persian numerals on Persian slides; do not paraphrase or translate slot text. ` +
+                    `This is slide ${slide.n} of ${slides.length} in a carousel — keep palette, fonts, ` +
+                    `and brand identity consistent across slides.]`;
+
+    try {
+      const r = await composeImage.generateCover({
+        prompt: slidePrompt,
+        runId: run.id,
+        lang: lang || run.master_lang,
+        recipeId: recipe && recipe.id,
+        topic: `${run.topic} · slide ${slide.n}`,
+        runOption,
+        designSuggestion,
+        recipeDefault,
+        referenceUrls,
+      });
+      if (!r.ok) {
+        if (!firstError) firstError = `slide ${slide.n}: ${r.error}`;
+        renderedSlides.push({ n: slide.n, role: slide.role, error: r.error || 'unknown' });
+        continue;
+      }
+      totalCost += Number(r.cost_usd) || 0;
+      renderedSlides.push({
+        n: slide.n,
+        role: slide.role,
+        slots: mergedSlots,
+        url: r.url,
+        key: r.key,
+        media_id: r.mediaId,
+        model: r.model,
+        size: r.size,
+        cost_usd: r.cost_usd,
+        model_label: r.model_label || null,
+        prompt: slidePrompt,
+      });
+    } catch (e) {
+      if (!firstError) firstError = `slide ${slide.n}: ${e.message}`;
+      renderedSlides.push({ n: slide.n, role: slide.role, error: e.message });
+    }
+  }
+
+  const successes = renderedSlides.filter(s => s.url).length;
+  if (successes === 0) {
+    throw new Error(`carousel render failed for all ${slides.length} slides — ${firstError}`);
+  }
+
+  return {
+    _renderer: 'image-cover',
+    _carousel: true,
+    lang: lang || run.master_lang,
+    slide_count: slides.length,
+    slides_rendered: successes,
+    slides: renderedSlides,
+    template: templateId,
+    cost_usd: totalCost,
+    agent: 'afshin',
+    first_url: renderedSlides.find(s => s.url) ? renderedSlides.find(s => s.url).url : null,
+    first_key: renderedSlides.find(s => s.url) ? renderedSlides.find(s => s.url).key : null,
+    partial_failure: firstError && successes < slides.length ? firstError : null,
+  };
+}
+
 async function imageCover({ source, run, recipe, lang }) {
   const f = _fields(source);
+
+  // M65 · Multi-slide carousel branch. When Tarrah produced a slide spec
+  // upstream, render ONE image per slide using the per-template scaffold
+  // + slot values from the spec. Each slide gets its own gpt-image-2 call
+  // so on-image text is exactly what Tarrah specified, and brand-exemplar
+  // reference images condition the style consistently across slides.
+  const carouselSpec = source && source._carousel_spec;
+  if (carouselSpec && Array.isArray(carouselSpec.slides) && carouselSpec.slides.length > 0) {
+    return await _renderCarousel({ source, carouselSpec, run, recipe, lang });
+  }
 
   // M64 · Stock-photo path — when Afshin's design output sets
   // `image_source: "unsplash"`, fetch a real photo from Unsplash instead

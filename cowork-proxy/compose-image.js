@@ -35,13 +35,28 @@ const { query, q, qJson } = require('./db');
 // ── Provider registry ────────────────────────────────────────────────
 // Each entry: { label, provider, env_key, cost_usd, supports_text, supports_url_response }
 const MODEL_REGISTRY = {
+  // M59 · OpenAI's flagship (released 2026-04-21). Best multilingual
+  // typography (Persian/Arabic), accepts reference images, supports
+  // multi-panel Thinking mode for consistent carousels.
+  'openai/gpt-image-2': {
+    label: 'GPT Image 2 (flagship)',
+    provider: 'openai',
+    env_key: 'OPENAI_API_KEY',
+    cost_usd: 0.19,
+    supports_text: true,
+    supports_reference_images: true,
+    api_model_id: 'gpt-image-2',
+    quality_default: 'high',
+    notes: 'Flagship 2026 — best multilingual on-image text, reference-image conditioning, multi-panel mode',
+  },
   'openai/gpt-image-1': {
     label: 'GPT Image 1',
     provider: 'openai',
     env_key: 'OPENAI_API_KEY',
     cost_usd: 0.04,
     supports_text: true,        // good with on-image text
-    notes: 'Strong instruction-following, in-image text near-perfect, cohesive editorial scenes',
+    api_model_id: 'gpt-image-1',
+    notes: 'Prior-gen OpenAI image model. Kept for fallback / cost control.',
   },
   'recraft/recraft-v3': {
     label: 'Recraft V3',
@@ -101,8 +116,10 @@ function _pickModel({ runOption, designSuggestion, recipeDefault }) {
   for (const t of tryList) {
     if (t && MODEL_REGISTRY[t] && process.env[MODEL_REGISTRY[t].env_key]) return t;
   }
-  // Best available: prefer Recraft for brand graphics, fall back to OpenAI.
-  for (const candidate of ['recraft/recraft-v3', 'openai/gpt-image-1', 'ideogram/ideogram-v3', 'bfl/flux-pro-1.1']) {
+  // Best available: prefer the 2026 flagship (best multilingual text +
+  // reference-image conditioning), fall back to Recraft / older OpenAI.
+  // M59 · gpt-image-2 leads — same OPENAI_API_KEY as gpt-image-1.
+  for (const candidate of ['openai/gpt-image-2', 'recraft/recraft-v3', 'openai/gpt-image-1', 'ideogram/ideogram-v3', 'bfl/flux-pro-1.1']) {
     if (process.env[MODEL_REGISTRY[candidate].env_key]) return candidate;
   }
   return null;
@@ -110,16 +127,56 @@ function _pickModel({ runOption, designSuggestion, recipeDefault }) {
 
 // ── Provider implementations ─────────────────────────────────────────
 
-async function _genOpenAI(prompt, size, apiKey) {
-  const r = await fetch('https://api.openai.com/v1/images/generations', {
-    method: 'POST',
-    headers: { 'authorization': `Bearer ${apiKey}`, 'content-type': 'application/json' },
-    body: JSON.stringify({
-      model: 'gpt-image-1',
-      prompt: String(prompt).slice(0, 4000),
+async function _genOpenAI(prompt, size, apiKey, modelEntry, referenceUrls = []) {
+  const apiModelId = (modelEntry && modelEntry.api_model_id) || 'gpt-image-1';
+  const isImage2 = apiModelId === 'gpt-image-2';
+  const promptStr = String(prompt).slice(0, 4000);
+
+  // M62 · gpt-image-2 supports reference images via the /images/edits
+  // multipart endpoint. Fetch each URL → Blob, attach as image[]. Cap 3.
+  const refs = Array.isArray(referenceUrls) ? referenceUrls.filter(Boolean).slice(0, 3) : [];
+  const useEdits = isImage2 && refs.length > 0;
+
+  let r;
+  if (useEdits) {
+    if (typeof FormData === 'undefined') {
+      throw new Error('OpenAI edits endpoint requires Node 18+ (FormData missing)');
+    }
+    const fd = new FormData();
+    fd.append('model', apiModelId);
+    fd.append('prompt', promptStr);
+    fd.append('size', size);
+    fd.append('n', '1');
+    fd.append('quality', (modelEntry && modelEntry.quality_default) || 'high');
+    for (let i = 0; i < refs.length; i++) {
+      try {
+        const ir = await fetch(refs[i]);
+        if (!ir.ok) continue;
+        const ct = ir.headers.get('content-type') || 'image/jpeg';
+        const buf = Buffer.from(await ir.arrayBuffer());
+        if (buf.length < 200 || buf.length > 20 * 1024 * 1024) continue;
+        const ext = ct.includes('png') ? 'png' : ct.includes('webp') ? 'webp' : 'jpg';
+        fd.append('image[]', new Blob([buf], { type: ct }), `ref_${i}.${ext}`);
+      } catch (_) { /* skip this ref */ }
+    }
+    r = await fetch('https://api.openai.com/v1/images/edits', {
+      method: 'POST',
+      headers: { 'authorization': `Bearer ${apiKey}` },
+      body: fd,
+    });
+  } else {
+    const body = {
+      model: apiModelId,
+      prompt: promptStr,
       size, n: 1,
-    }),
-  });
+    };
+    if (isImage2) body.quality = (modelEntry && modelEntry.quality_default) || 'high';
+    r = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST',
+      headers: { 'authorization': `Bearer ${apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
   if (!r.ok) throw new Error(`OpenAI ${r.status}: ${(await r.text()).slice(0, 300)}`);
   const j = await r.json();
   const b64 = j && j.data && j.data[0] && j.data[0].b64_json;
@@ -299,7 +356,7 @@ async function generateCover({
   // providers ignore the URLs (they're already embedded in the prompt as anchors).
   let buf;
   try {
-    if (model.provider === 'openai')   buf = await _genOpenAI(prompt, size, apiKey);
+    if (model.provider === 'openai')   buf = await _genOpenAI(prompt, size, apiKey, model, referenceUrls);
     else if (model.provider === 'recraft')  buf = await _genRecraft(prompt, size, apiKey);
     else if (model.provider === 'ideogram') buf = await _genIdeogram(prompt, size, apiKey, referenceUrls);
     else if (model.provider === 'bfl')      buf = await _genFlux(prompt, size, apiKey, modelId);
