@@ -1248,6 +1248,228 @@ app.get('/inbox/count', async (_, res) => {
   catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ── M91 · Unified inbox · /inbox/all ────────────────────────────────
+// Aggregates EVERY pending decision into one queue, sorted by urgency:
+//   1. Gated compose runs (status=awaiting_approval)
+//   2. Refine cap_reached runs
+//   3. Hot DM intents (M47)
+//   4. Training proposals pending (M84 Moallem)
+//   5. Regulatory drift events pending (M46)
+//   6. Media library awaiting approval (designs)
+//   7. K4 handoffs pending
+//   8. K1 action approvals (legacy)
+//
+// Each card is typed with: { kind, id, title, sub, urgency, action_label,
+// detected_at, link } — frontend renders uniform cards with kind-specific
+// pills. /inbox/count-all returns total across all sources.
+app.get('/inbox/all', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 200);
+    const cards = [];
+
+    // 1. Gated compose runs — highest urgency (founder mid-flow)
+    try {
+      const rows = await queryRows(`
+        SELECT id::text, recipe_id, topic, status, current_stage,
+                refine_status, refine_attempts,
+                created_at::text, started_at::text
+          FROM compose_runs
+         WHERE status IN ('awaiting_approval', 'gated')
+           AND created_at >= NOW() - INTERVAL '30 days'
+         ORDER BY created_at DESC LIMIT 30;`);
+      for (const r of rows) {
+        const refineN = Array.isArray(r.refine_attempts) ? r.refine_attempts.length : 0;
+        const isCap = r.refine_status === 'cap_reached';
+        cards.push({
+          kind: isCap ? 'refine_cap' : 'gated_run',
+          id: r.id,
+          title: r.topic || '(no topic)',
+          sub: `${r.recipe_id} · ${r.current_stage || 'unknown stage'}${refineN ? ` · ${refineN} refine attempt${refineN===1?'':'s'}` : ''}`,
+          urgency: isCap ? 'high' : 'high',
+          action_label: isCap ? 'Review (cap reached)' : 'Approve',
+          detected_at: r.created_at,
+          link: { tab: 'compose', run_id: r.id },
+        });
+      }
+    } catch (_) {}
+
+    // 2. Training proposals pending (Moallem)
+    try {
+      const rows = await queryRows(`
+        SELECT id::text, target_agent, pattern_summary, confidence, detected_at::text
+          FROM training_proposals
+         WHERE founder_decision = 'pending'
+         ORDER BY detected_at DESC LIMIT 30;`);
+      for (const r of rows) {
+        cards.push({
+          kind: 'trainer_proposal',
+          id: r.id,
+          title: `📚 Moallem proposal · target=${r.target_agent}`,
+          sub: r.pattern_summary,
+          urgency: r.confidence >= 0.85 ? 'high' : 'medium',
+          action_label: 'Approve & apply',
+          detected_at: r.detected_at,
+          link: { tab: 'agents', overlay: 'trainer' },
+        });
+      }
+    } catch (_) {}
+
+    // 3. Hot DM intents (M47)
+    try {
+      const rows = await queryRows(`
+        SELECT id::text, sender_handle, message_text, intent, urgency, language,
+                triaged_at::text, status
+          FROM dm_inbox
+         WHERE status IN ('triaged', 'drafted')
+           AND urgency IN ('hot', 'qualifying')
+         ORDER BY triaged_at DESC LIMIT 20;`);
+      for (const r of rows) {
+        cards.push({
+          kind: 'dm_hot',
+          id: r.id,
+          title: `💬 ${r.sender_handle || 'inbound DM'} · ${r.intent || 'unclassified'}`,
+          sub: (r.message_text || '').slice(0, 140),
+          urgency: r.urgency === 'hot' ? 'high' : 'medium',
+          action_label: r.status === 'drafted' ? 'Send / Edit reply' : 'Draft reply',
+          detected_at: r.triaged_at,
+          link: { tab: 'dms', dm_id: r.id },
+        });
+      }
+    } catch (_) {}
+
+    // 4. Regulatory drift events
+    try {
+      const rows = await queryRows(`
+        SELECT id::text, watchpoint_id::text, label, summary, detected_at::text, status
+          FROM regulatory_drift_events
+         WHERE status = 'pending'
+         ORDER BY detected_at DESC LIMIT 15;`);
+      for (const r of rows) {
+        cards.push({
+          kind: 'reg_drift',
+          id: r.id,
+          title: `⚖ Regulatory change: ${r.label}`,
+          sub: r.summary || 'Hash diff detected',
+          urgency: 'medium',
+          action_label: 'Review',
+          detected_at: r.detected_at,
+          link: { tab: 'watchdog' },
+        });
+      }
+    } catch (_) {}
+
+    // 5. Media library awaiting approval (designs)
+    try {
+      const rows = await queryRows(`
+        SELECT id::text, kind, topic, language, render_path, draft_path,
+                created_at::text
+          FROM media_library
+         WHERE COALESCE(approved, false) = false
+           AND COALESCE(archived, false) = false
+           AND created_at >= NOW() - INTERVAL '30 days'
+         ORDER BY created_at DESC LIMIT 15;`);
+      for (const r of rows) {
+        cards.push({
+          kind: 'design_pending',
+          id: r.id,
+          title: `🎨 Design awaiting approval · ${r.kind}`,
+          sub: (r.topic || 'no topic').slice(0, 140),
+          urgency: 'medium',
+          action_label: 'Open in Designs',
+          detected_at: r.created_at,
+          link: { tab: 'designs', media_id: r.id },
+        });
+      }
+    } catch (_) {}
+
+    // 6. K4 handoffs pending
+    try {
+      const rows = await queryRows(`
+        SELECT id::text, from_agent, to_agent, reason, suggested_action,
+                created_at::text, status
+          FROM agent_handoffs
+         WHERE status = 'pending'
+         ORDER BY created_at DESC LIMIT 20;`);
+      for (const r of rows) {
+        cards.push({
+          kind: 'handoff',
+          id: r.id,
+          title: `🤝 Handoff · ${r.from_agent} → ${r.to_agent}`,
+          sub: r.reason || r.suggested_action || 'pending action',
+          urgency: 'low',
+          action_label: 'Approve / Redirect',
+          detected_at: r.created_at,
+          link: { tab: 'inbox', handoff_id: r.id },
+        });
+      }
+    } catch (_) {}
+
+    // 7. K1 legacy action approvals
+    try {
+      const pending = await permissions.listPending({ limit: 30 });
+      for (const r of (pending || [])) {
+        cards.push({
+          kind: 'action_approval',
+          id: r.id,
+          title: `🔔 Action approval · ${r.action || 'pending'}`,
+          sub: r.summary || (r.payload ? JSON.stringify(r.payload).slice(0, 120) : ''),
+          urgency: 'low',
+          action_label: 'Approve',
+          detected_at: r.created_at,
+          link: { tab: 'inbox' },
+        });
+      }
+    } catch (_) {}
+
+    // Sort: urgency rank then detected_at desc
+    const URG = { high: 3, medium: 2, low: 1 };
+    cards.sort((a, b) => {
+      const ua = URG[a.urgency] || 0;
+      const ub = URG[b.urgency] || 0;
+      if (ua !== ub) return ub - ua;
+      return new Date(b.detected_at) - new Date(a.detected_at);
+    });
+
+    // Aggregate counts per kind for the badge / breadcrumb
+    const counts = {};
+    for (const c of cards) counts[c.kind] = (counts[c.kind] || 0) + 1;
+
+    res.json({
+      ok: true,
+      total: cards.length,
+      counts,
+      cards: cards.slice(0, limit),
+    });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Lightweight count-only for the sidebar breadcrumb badge (M96 will use this)
+app.get('/inbox/count-all', async (_, res) => {
+  try {
+    const sources = await Promise.all([
+      queryValue(`SELECT COUNT(*) FROM compose_runs WHERE status IN ('awaiting_approval','gated') AND created_at >= NOW() - INTERVAL '30 days';`),
+      queryValue(`SELECT COUNT(*) FROM training_proposals WHERE founder_decision = 'pending';`),
+      queryValue(`SELECT COUNT(*) FROM dm_inbox WHERE status IN ('triaged','drafted') AND urgency IN ('hot','qualifying');`),
+      queryValue(`SELECT COUNT(*) FROM regulatory_drift_events WHERE status = 'pending';`),
+      queryValue(`SELECT COUNT(*) FROM media_library WHERE COALESCE(approved, false) = false AND COALESCE(archived, false) = false;`),
+      queryValue(`SELECT COUNT(*) FROM agent_handoffs WHERE status = 'pending';`),
+    ]);
+    const breakdown = {
+      gated_runs:           parseInt(sources[0], 10) || 0,
+      trainer_proposals:    parseInt(sources[1], 10) || 0,
+      hot_dms:              parseInt(sources[2], 10) || 0,
+      reg_drift:            parseInt(sources[3], 10) || 0,
+      designs_pending:      parseInt(sources[4], 10) || 0,
+      handoffs:             parseInt(sources[5], 10) || 0,
+    };
+    let actionApprovals = 0;
+    try { actionApprovals = await permissions.countPending(); } catch (_) {}
+    breakdown.action_approvals = actionApprovals;
+    const total = Object.values(breakdown).reduce((s, n) => s + n, 0);
+    res.json({ ok: true, total, breakdown });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 app.post('/inbox/:id/approve', auth.middleware, async (req, res) => {
   const id = req.params.id;
   const note = (req.body && req.body.note) || null;

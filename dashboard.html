@@ -10798,35 +10798,124 @@ setTimeout(_pollNewBadges, 1500);
 // ── K1 · Inbox ────────────────────────────────────────────────────────
 // Single feed of pending approval requests + recent decisions.
 // Mobile-friendly: one column, big buttons, big preview text.
+// M91 · Inbox aggregates 8 pending-decision sources into one queue
 async function renderInbox() {
   $('main').innerHTML = `
     <div class="section-h">
       <div>
         <h1>Inbox</h1>
-        <div class="breadcrumb">Pending agent actions awaiting your approval · auto-refresh every 10s</div>
+        <div class="breadcrumb">Every pending decision · 8 sources unified · sorted by urgency</div>
       </div>
       <div class="flex gap-2">
         <button class="btn btn-ghost btn-xs" onclick="loadInbox()">↻ Refresh</button>
       </div>
     </div>
 
-    <div id="inbox-pending">${skeletonCards(3)}</div>
+    <div id="inbox-counts" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;font-size:11px;"></div>
 
-    <div class="card mt-6">
-      <h3 class="font-semibold mb-3">Recent decisions</h3>
-      <div id="inbox-recent" class="text-sm">…</div>
-    </div>
+    <div id="inbox-pending">${skeletonCards(3)}</div>
   `;
   loadInbox();
 }
 
+// M91 · Render the unified inbox card list
+function _renderInboxAll(cards, counts, total) {
+  // Counts strip
+  const KIND_LABEL = {
+    gated_run:         { label: 'Gated runs',          color: '#dc2626', bg: '#fee2e2' },
+    refine_cap:        { label: 'Refine cap reached',  color: '#dc2626', bg: '#fee2e2' },
+    trainer_proposal:  { label: 'Moallem proposals',   color: '#7c3aed', bg: '#ede9fe' },
+    dm_hot:            { label: 'Hot DMs',             color: '#d97706', bg: '#fef3c7' },
+    reg_drift:         { label: 'Regulatory drift',    color: '#0891b2', bg: '#cffafe' },
+    design_pending:    { label: 'Designs',             color: '#65a30d', bg: '#ecfccb' },
+    handoff:           { label: 'Handoffs',            color: '#475569', bg: '#f1f5f9' },
+    action_approval:   { label: 'Action approvals',    color: '#475569', bg: '#f1f5f9' },
+  };
+  const countsEl = $('inbox-counts');
+  if (countsEl) {
+    if (total === 0) {
+      countsEl.innerHTML = '';
+    } else {
+      const parts = Object.entries(counts).filter(([_, n]) => n > 0).map(([k, n]) => {
+        const meta = KIND_LABEL[k] || { label: k, color: '#475569', bg: '#f1f5f9' };
+        return `<span style="background:${meta.bg};color:${meta.color};padding:3px 10px;border-radius:3px;font-weight:600;">${escapeHtml(meta.label)}: ${n}</span>`;
+      });
+      countsEl.innerHTML = parts.join('');
+    }
+  }
+
+  const pendingEl = $('inbox-pending');
+  if (!pendingEl) return;
+  if (cards.length === 0) {
+    pendingEl.innerHTML = `
+      <div class="card"><div class="empty">
+        <div class="empty-icon">📭</div>
+        <div class="empty-text">Inbox zero. Nothing waiting on you across all 8 sources.</div>
+      </div></div>`;
+    return;
+  }
+
+  pendingEl.innerHTML = '<div class="space-y-2">' + cards.map(c => {
+    const meta = KIND_LABEL[c.kind] || { label: c.kind, color: '#475569', bg: '#f1f5f9' };
+    const urgencyColor = c.urgency === 'high' ? '#dc2626' : c.urgency === 'medium' ? '#d97706' : '#94a3b8';
+    return `
+      <div class="card-tight" style="border-left:4px solid ${urgencyColor};padding:12px 16px;cursor:pointer;" onclick="_inboxOpenCard(${JSON.stringify(c).replace(/"/g, '&quot;')})">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap;">
+          <span style="background:${meta.bg};color:${meta.color};padding:2px 8px;border-radius:3px;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;">${escapeHtml(meta.label)}</span>
+          <span style="font-size:10px;color:#94a3b8;">${fmtTime(c.detected_at)}</span>
+          <span class="ml-auto" style="background:${meta.bg};color:${meta.color};padding:2px 10px;border-radius:3px;font-size:11px;font-weight:600;">${escapeHtml(c.action_label || 'Open')}</span>
+        </div>
+        <div style="font-weight:600;color:#1e293b;font-size:13px;margin-bottom:2px;">${escapeHtml(c.title)}</div>
+        <div style="font-size:12px;color:#64748b;">${escapeHtml(c.sub || '')}</div>
+      </div>
+    `;
+  }).join('') + '</div>';
+}
+
+function _inboxOpenCard(card) {
+  if (!card || !card.link) return;
+  if (card.link.tab === 'compose' && card.link.run_id) {
+    navigate('compose');
+    setTimeout(() => coOpenRun(card.link.run_id), 200);
+    return;
+  }
+  if (card.link.tab === 'agents' && card.link.overlay === 'trainer') {
+    navigate('agents');
+    setTimeout(() => openTrainerPanel(), 200);
+    return;
+  }
+  if (card.link.tab === 'designs') {
+    navigate('designs');
+    return;
+  }
+  if (card.link.tab === 'dms') {
+    navigate('dms');
+    return;
+  }
+  if (card.link.tab === 'watchdog') {
+    navigate('watchdog');
+    return;
+  }
+  // Legacy handoffs / action approvals stay in this tab; scroll into view if needed.
+}
+
 async function loadInbox() {
+  // M91 · Use unified /inbox/all that aggregates 8 sources
   try {
-    // S3 · Three sources fetched in parallel:
-    //   r1: K1 action approvals (cron-style queued actions)
-    //   r2: K4 handoffs (agent-to-agent help requests)
-    //   r3: legacy approval_queue (V1 era — drafts/posts via Supabase REST)
-    // The Approvals sidebar tab is gone; this is the single home for all three.
+    const r = await fetch(`${PROXY}/inbox/all?limit=100`);
+    const j = await r.json();
+    if (!j.ok) {
+      $('inbox-pending').innerHTML = `<div class="empty"><div class="empty-text">Failed: ${escapeHtml(j.error || '?')}</div></div>`;
+      return;
+    }
+    _renderInboxAll(j.cards || [], j.counts || {}, j.total || 0);
+  } catch (e) {
+    $('inbox-pending').innerHTML = `<div class="empty"><div class="empty-text">Error: ${escapeHtml(e.message)}</div></div>`;
+  }
+  return;
+  // Legacy 3-source path retained below for fallback (unreachable):
+  // eslint-disable-next-line no-unreachable
+  try {
     const [r1, r2, r3] = await Promise.all([
       fetch(`${PROXY}/inbox`).then(r => r.json()),
       fetch(`${PROXY}/handoffs`).then(r => r.json()),
