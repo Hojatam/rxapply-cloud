@@ -5165,8 +5165,11 @@ async function loadAgentDetail(name) {
                 Run + Forward tabs dropped: Run was a CLI form (founder doesn't
                 want raw mechanics) and Forward was a single-target chain made
                 redundant by K4 handoffs. */''}
-          ${['brain','chat','memory','train','history','skill'].map(t => {
-            const labels = { brain: '🧠 Brain', chat: 'Chat', memory: 'Memory', train: 'Train', history: 'History', skill: 'Skill' };
+          ${/* M90 · Skill / Memory / Train tabs absorbed into Brain as
+                collapsible sub-sections. Brain is now the master surface
+                for everything that drives this agent's behavior. */''}
+          ${['brain','chat','history'].map(t => {
+            const labels = { brain: '🧠 Brain', chat: '💬 Chat', history: '📚 History' };
             return `<button class="px-3 py-2 text-sm font-medium ${t===tab?'border-b-2 border-indigo-600 text-indigo-600':'text-slate-500 hover:text-slate-900'}" onclick="setAgentTab('${t}')">${labels[t] || (t[0].toUpperCase()+t.slice(1))}</button>`;
           }).join('')}
         </div>
@@ -5174,25 +5177,24 @@ async function loadAgentDetail(name) {
       <div id="ad-tab-content">${loadingPanel('Loading')}</div>
     </div>
   `;
-  if (tab === 'brain')   loadAdBrain(name);
-  if (tab === 'skill')   loadAdSkill(name);
-  if (tab === 'chat')    loadAdChat(name);
-  if (tab === 'memory')  loadAdMemory(name);
-  if (tab === 'train')   loadAdTrain(name);
-  if (tab === 'history') loadAdHistory(name);
-  if (tab === 'forward') loadAdForward(name);
+  // M90 · default to brain when an old tab name lands here (skill/memory/train)
+  const effectiveTab = ['brain','chat','history'].includes(tab) ? tab : 'brain';
+  if (effectiveTab === 'brain')   loadAdBrain(name);
+  if (effectiveTab === 'chat')    loadAdChat(name);
+  if (effectiveTab === 'history') loadAdHistory(name);
   loadAdModelPicker(name);
 }
 
-// ── M79 · Brain tab — single source of truth ─────────────────────
-// Shows EVERY input that goes into the agent's prompt:
-//   1. Live preview — assembled prompt for a chosen (stage, platform,
-//      lang, topic), color-coded by source
-//   2. Constitution — brand_intelligence rules at importance 5 that
-//      apply to this agent
-//   3. Stage files — per-agent stage instructions (M68)
-//   4. Pipelines I appear in — capability resolution map
-//   5. Capabilities + summary stats
+// ── M90 · Brain tab — single source of truth + EDITABLE ──────────
+// Absorbs Skill / Memory / Train tabs. Six collapsible sub-sections,
+// each editable inline:
+//   📜 Identity (SKILL.md)        — inline markdown editor + version history
+//   🏛 Constitution               — brand rules (importance ≥ 5) with CRUD
+//   🎯 Stage instructions         — per-agent stage files (M68) inline
+//   🧠 Memory                     — agent_memory CRUD (replaces Memory tab)
+//   🌟 Training                   — corrections + examples (replaces Train tab)
+//   📊 Performance                — read-only ratings + Moallem proposals
+//   🔍 Live preview               — assembled prompt with source colors (M79)
 async function loadAdBrain(name) {
   const el = $('ad-tab-content');
   if (!el) return;
@@ -5203,130 +5205,273 @@ async function loadAdBrain(name) {
     if (!j.ok) { el.innerHTML = `<div class="text-rose-600 text-sm">${escapeHtml(j.error || 'failed')}</div>`; return; }
     const ctx = j;
 
-    // Build the tab content
-    const sectionH = (label, count) => `
-      <div style="font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-top:18px;margin-bottom:6px;">
-        ${escapeHtml(label)}${count != null ? ` <span style="color:#cbd5e1;font-weight:500;">(${count})</span>` : ''}
-      </div>
-    `;
-
     const constitutionRules = (ctx.rules || []).filter(r => r.importance >= 5);
     const otherRules        = (ctx.rules || []).filter(r => r.importance < 5);
 
-    el.innerHTML = `
-      <!-- Live preview controls -->
-      <div class="card-tight" style="background:#fafbff;border:1px solid #e0e7ff;border-radius:8px;padding:12px;margin-bottom:14px;">
-        <div style="font-weight:600;color:#3730a3;font-size:13px;margin-bottom:8px;">🧠 Live prompt preview</div>
-        <div style="font-size:12px;color:#64748b;margin-bottom:10px;">See the EXACT prompt this agent will receive on its next call. Every block is editable somewhere — click "Source" to find where.</div>
-        <div class="flex gap-2 flex-wrap" style="font-size:12px;">
-          <label>Stage
-            <select id="brain-stage" class="border border-slate-200 rounded px-2 py-1 text-xs ml-1" onchange="_loadBrainPreview('${escapeHtml(name)}')">
-              ${(ctx.stages || []).map(s => `<option value="${escapeHtml(s.stage)}">${escapeHtml(s.stage)}</option>`).join('')}
-              ${(ctx.stages || []).length === 0 ? '<option value="">(no stage files)</option>' : ''}
-            </select>
-          </label>
-          <label>Platform
-            <select id="brain-platform" class="border border-slate-200 rounded px-2 py-1 text-xs ml-1" onchange="_loadBrainPreview('${escapeHtml(name)}')">
-              <option value="">any</option>
-              <option value="instagram">instagram</option>
-              <option value="telegram">telegram</option>
-              <option value="email">email</option>
-              <option value="x-thread">x-thread</option>
-              <option value="facebook">facebook</option>
-              <option value="seo-article">seo-article</option>
-            </select>
-          </label>
-          <label>Language
-            <select id="brain-lang" class="border border-slate-200 rounded px-2 py-1 text-xs ml-1" onchange="_loadBrainPreview('${escapeHtml(name)}')">
-              <option value="fa" selected>fa</option>
-              <option value="en">en</option>
-              <option value="ar">ar</option>
-            </select>
-          </label>
-          <label class="flex-1">Topic
-            <input id="brain-topic" type="text" class="border border-slate-200 rounded px-2 py-1 text-xs ml-1 w-full" placeholder="e.g. Canada NDEB exam deadline" oninput="_brainTopicTimer && clearTimeout(_brainTopicTimer); _brainTopicTimer = setTimeout(() => _loadBrainPreview('${escapeHtml(name)}'), 600);">
-          </label>
+    // M90 helper · render a collapsible section with header + count
+    const collapsible = (id, icon, title, count, summary, body, openByDefault = false) => `
+      <details ${openByDefault ? 'open' : ''} class="brain-section" style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:8px;overflow:hidden;">
+        <summary style="padding:11px 14px;cursor:pointer;background:#fafbff;display:flex;align-items:center;justify-content:space-between;list-style:none;">
+          <div>
+            <span style="font-size:14px;font-weight:600;color:#1e293b;">${icon} ${escapeHtml(title)}</span>
+            ${count != null ? `<span style="background:#eef2ff;color:#4338ca;padding:1px 8px;border-radius:10px;font-size:11px;margin-left:8px;font-weight:600;">${count}</span>` : ''}
+            ${summary ? `<span style="color:#64748b;font-size:12px;margin-left:8px;font-weight:400;">${escapeHtml(summary)}</span>` : ''}
+          </div>
+          <span class="mono" style="color:#94a3b8;font-size:14px;">▾</span>
+        </summary>
+        <div style="padding:14px;">${body}</div>
+      </details>
+    `;
+
+    // ── Section bodies ───────────────────────────────────────────
+
+    // 📜 Identity (SKILL.md) — inline editor
+    const skillBody = `
+      <div style="font-size:12px;color:#64748b;margin-bottom:6px;">Edits land at <code class="mono" style="background:#f1f5f9;padding:1px 4px;border-radius:2px;">agents/${escapeHtml(name)}/SKILL.md</code> · versioned in <code class="mono">prompt_versions</code> table.</div>
+      <textarea id="brain-skill-textarea" class="border border-slate-200 rounded p-2 text-xs mono" style="width:100%;height:280px;font-family:ui-monospace,Menlo,monospace;line-height:1.45;resize:vertical;">${escapeHtml(ctx.skill_md || '')}</textarea>
+      <div class="flex gap-2 mt-2 items-center">
+        <button class="btn btn-primary btn-xs" onclick="brainSaveSkill('${escapeHtml(name)}')">💾 Save SKILL.md</button>
+        <a href="#" onclick="brainShowSkillVersions('${escapeHtml(name)}');return false;" class="text-indigo-600 underline text-xs">version history</a>
+        <span id="brain-skill-status" class="text-xs text-slate-500"></span>
+      </div>
+      <div id="brain-skill-versions" style="margin-top:8px;"></div>
+    `;
+
+    // 🏛 Constitution
+    const constBody = `
+      <div style="font-size:12px;color:#64748b;margin-bottom:8px;">These ${constitutionRules.length} rules ALWAYS appear in this agent's prompt (importance ≥ 5).</div>
+      ${constitutionRules.length === 0 ? '<div class="text-slate-400 italic text-xs mb-2">No constitution rules yet.</div>' : '<div class="space-y-2">' + constitutionRules.map(r => `
+        <div style="background:#fef3c7;border-left:3px solid #d97706;padding:8px 10px;border-radius:4px;font-size:12px;">
+          <div style="color:#92400e;">${escapeHtml(r.rule_text)}</div>
+          <div class="mono" style="font-size:10px;color:#a16207;margin-top:2px;display:flex;gap:8px;align-items:center;">
+            <span>imp ${r.importance}</span>
+            <span>· ${escapeHtml(r.kind)}</span>
+            ${r.scope_platform ? `<span>· ${escapeHtml(r.scope_platform)}</span>` : ''}
+            ${r.scope_language ? `<span>· ${escapeHtml(r.scope_language)}</span>` : ''}
+            <button class="ml-auto text-rose-600 underline" onclick="brainDeleteRule('${escapeHtml(r.id)}', '${escapeHtml(name)}')" style="font-size:10px;">delete</button>
+          </div>
         </div>
-        <div id="brain-preview-out" style="margin-top:14px;">
-          <div class="empty" style="padding:20px;color:#94a3b8;font-size:12px;font-style:italic;text-align:center;">Pick a stage above to assemble the live prompt.</div>
+      `).join('') + '</div>'}
+      <div class="mt-3" style="background:#f8fafc;border-radius:6px;padding:10px;">
+        <div class="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-2">Add new constitution rule</div>
+        <textarea id="brain-rule-text" placeholder="The rule text the agent will see verbatim. e.g. 'Always count words BEFORE writing the body. Stop if exceeding p95.'"
+          class="w-full border border-slate-200 rounded p-2 text-xs" style="height:60px;"></textarea>
+        <div class="flex gap-2 mt-2 items-center" style="font-size:11px;">
+          <select id="brain-rule-kind" class="border border-slate-200 rounded px-2 py-1">
+            <option value="voice_rule">voice_rule</option>
+            <option value="visual_rule">visual_rule</option>
+            <option value="cta_template">cta_template</option>
+            <option value="opener_template">opener_template</option>
+            <option value="engagement_insight">engagement_insight</option>
+          </select>
+          <select id="brain-rule-platform" class="border border-slate-200 rounded px-2 py-1">
+            <option value="">any platform</option>
+            <option value="instagram">instagram</option>
+            <option value="telegram">telegram</option>
+            <option value="email">email</option>
+            <option value="facebook">facebook</option>
+            <option value="x-thread">x-thread</option>
+          </select>
+          <select id="brain-rule-language" class="border border-slate-200 rounded px-2 py-1">
+            <option value="">any lang</option>
+            <option value="fa">fa</option>
+            <option value="en">en</option>
+            <option value="ar">ar</option>
+          </select>
+          <select id="brain-rule-importance" class="border border-slate-200 rounded px-2 py-1">
+            <option value="5" selected>5 (constitution)</option>
+            <option value="4">4 (high)</option>
+            <option value="3">3 (normal)</option>
+            <option value="2">2 (low)</option>
+          </select>
+          <button class="btn btn-primary btn-xs ml-auto" onclick="brainAddRule('${escapeHtml(name)}')">+ Add rule</button>
         </div>
       </div>
+      ${otherRules.length > 0 ? `
+        <details class="mt-3"><summary class="text-xs text-indigo-600 cursor-pointer">Show ${otherRules.length} additional rules at imp &lt; 5</summary>
+          <div class="space-y-1 mt-2">${otherRules.slice(0, 30).map(r => `
+            <div style="background:#f8fafc;border-left:2px solid #cbd5e1;padding:6px 10px;border-radius:3px;font-size:12px;">
+              <div>${escapeHtml(r.rule_text)}</div>
+              <div class="mono" style="font-size:10px;color:#94a3b8;margin-top:1px;">imp ${r.importance} · ${escapeHtml(r.kind)}</div>
+            </div>
+          `).join('')}</div>
+        </details>
+      ` : ''}
+    `;
 
-      <!-- Capability summary -->
-      ${sectionH('Capabilities')}
-      <div style="font-size:13px;color:#1e293b;">
+    // 🎯 Stage instructions — inline editors
+    const stagesBody = (ctx.stages || []).length === 0
+      ? '<div class="text-slate-400 italic text-xs">No per-stage files. This agent uses default stage prompts only.</div>'
+      : '<div class="space-y-2">' + (ctx.stages || []).map(s => `
+          <div style="border:1px solid #d1fae5;border-radius:6px;overflow:hidden;">
+            <div style="padding:8px 12px;background:#ecfdf5;display:flex;align-items:center;justify-content:space-between;">
+              <div>
+                <span style="font-weight:600;color:#065f46;font-size:13px;">${escapeHtml(s.stage)}</span>
+                <span style="color:#16a34a;font-size:10px;margin-left:8px;">${s.bytes} bytes</span>
+              </div>
+              <div class="flex gap-2">
+                <button class="btn btn-ghost btn-xs" onclick="brainToggleStageEditor('${escapeHtml(name)}','${escapeHtml(s.stage)}')">✎ Edit</button>
+              </div>
+            </div>
+            <div id="brain-stage-edit-${escapeHtml(s.stage)}" style="display:none;padding:10px 12px;background:#fff;">
+              <textarea id="brain-stage-textarea-${escapeHtml(s.stage)}" class="border border-slate-200 rounded p-2 text-xs mono w-full" style="height:200px;font-family:ui-monospace,Menlo,monospace;line-height:1.45;">${escapeHtml(s.markdown || '')}</textarea>
+              <div class="flex gap-2 mt-2 items-center">
+                <button class="btn btn-primary btn-xs" onclick="brainSaveStage('${escapeHtml(name)}','${escapeHtml(s.stage)}')">💾 Save</button>
+                <span id="brain-stage-status-${escapeHtml(s.stage)}" class="text-xs text-slate-500"></span>
+              </div>
+            </div>
+          </div>
+        `).join('') + '</div>';
+
+    // 🧠 Memory — full CRUD inline
+    const memList = (ctx.memory || []);
+    const memoryBody = `
+      <div style="font-size:12px;color:#64748b;margin-bottom:8px;">${memList.length} memories · injected per stage by topic + importance match.</div>
+      <div class="card-tight" style="background:#fafbff;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin-bottom:10px;">
+        <div class="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-2">Add memory</div>
+        <textarea id="brain-mem-content" placeholder="What should this agent remember? e.g. 'Founder prefers em-dashes over hyphens.'"
+          class="w-full border border-slate-200 rounded p-2 text-xs" style="height:60px;"></textarea>
+        <div class="flex gap-2 mt-2 items-center" style="font-size:11px;">
+          <select id="brain-mem-type" class="border border-slate-200 rounded px-2 py-1">
+            <option value="semantic">semantic (fact)</option>
+            <option value="procedural">procedural (rule)</option>
+            <option value="episodic">episodic (event)</option>
+          </select>
+          <input id="brain-mem-tags" placeholder="tags, comma" class="border border-slate-200 rounded px-2 py-1" style="width:130px;">
+          <select id="brain-mem-imp" class="border border-slate-200 rounded px-2 py-1">
+            <option value="3" selected>3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="2">2</option>
+            <option value="1">1</option>
+          </select>
+          <button class="btn btn-primary btn-xs ml-auto" onclick="brainAddMemory('${escapeHtml(name)}')">+ Add</button>
+        </div>
+      </div>
+      ${memList.length === 0 ? '<div class="text-slate-400 italic text-xs">No memories yet — add above, or memory will auto-fill from corrections (M88) and Moallem proposals.</div>' : '<div class="space-y-1">' + memList.slice(0, 40).map(m => `
+        <div style="background:#faf5ff;border-left:3px solid #c4b5fd;padding:6px 10px;border-radius:3px;font-size:12px;">
+          <div style="display:flex;gap:6px;align-items:center;font-size:10px;color:#6b21a8;margin-bottom:2px;">
+            <span class="mono" style="background:#ede9fe;padding:1px 6px;border-radius:2px;">${escapeHtml(m.type || '?')}</span>
+            <span>★${'★'.repeat(Math.max(0, (m.importance || 1) - 1))}</span>
+            ${(m.tags || []).slice(0, 3).map(t => `<span style="background:#f3f4f6;color:#475569;padding:1px 4px;border-radius:2px;">${escapeHtml(t)}</span>`).join('')}
+            <button class="ml-auto text-rose-600 underline" onclick="brainDeleteMemory('${escapeHtml(m.id)}', '${escapeHtml(name)}')" style="font-size:10px;">delete</button>
+          </div>
+          <div>${escapeHtml(m.content || '')}</div>
+        </div>
+      `).join('') + '</div>' + (memList.length > 40 ? `<div class="text-xs text-slate-400 mt-1">… ${memList.length - 40} more (use Memory API to view all)</div>` : '')}
+    `;
+
+    // 🌟 Training — corrections + examples
+    const trainingBody = `
+      <div style="font-size:12px;color:#64748b;margin-bottom:8px;">Add a correction or canonical example to teach this agent. Auto-promotes to memory.</div>
+      <div class="card-tight" style="background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:10px;margin-bottom:10px;">
+        <div class="text-xs uppercase tracking-wider font-semibold mb-2" style="color:#9a3412;">+ Add canonical example</div>
+        <textarea id="brain-example-content" placeholder="Paste an example output the agent should match in style/voice/format."
+          class="w-full border border-slate-200 rounded p-2 text-xs" style="height:80px;"></textarea>
+        <div class="flex gap-2 mt-2 items-center" style="font-size:11px;">
+          <input id="brain-example-tags" placeholder="tags, comma" class="border border-slate-200 rounded px-2 py-1" style="width:130px;">
+          <input id="brain-example-note" placeholder="why is this canonical?" class="border border-slate-200 rounded px-2 py-1 flex-1">
+          <select id="brain-example-imp" class="border border-slate-200 rounded px-2 py-1">
+            <option value="4" selected>4</option><option value="5">5</option><option value="3">3</option>
+          </select>
+          <button class="btn btn-primary btn-xs" onclick="brainAddExample('${escapeHtml(name)}')">+ Add example</button>
+        </div>
+      </div>
+      <div style="font-size:12px;color:#64748b;">Recent corrections (auto-promoted to procedural memory):</div>
+      <div style="font-size:12px;color:#94a3b8;font-style:italic;margin-top:4px;">Submit corrections via the Compose run view (★ rate + ✎ correct on any stage card). They become procedural memories tagged 'correction' immediately.</div>
+    `;
+
+    // 📊 Performance
+    const perfBody = ctx.kpis ? `
+      <div class="flex gap-3 flex-wrap text-xs">
+        <span style="background:#f1f5f9;padding:4px 10px;border-radius:3px;">${ctx.kpis.rating_count || 0} ratings</span>
+        <span style="background:${ctx.kpis.rating_avg >= 3.5 ? '#dcfce7' : ctx.kpis.rating_avg != null ? '#fef3c7' : '#f1f5f9'};padding:4px 10px;border-radius:3px;color:${ctx.kpis.rating_avg >= 3.5 ? '#15803d' : '#92400e'};font-weight:600;">avg ${ctx.kpis.rating_avg != null ? ctx.kpis.rating_avg.toFixed(2) : '—'}/5</span>
+        <span style="background:#f1f5f9;padding:4px 10px;border-radius:3px;">${ctx.kpis.corrections || 0} corrections</span>
+        <span style="background:#f1f5f9;padding:4px 10px;border-radius:3px;">${ctx.kpis.examples || 0} examples</span>
+      </div>
+      ${ctx.kpis.low_scoring && ctx.kpis.low_scoring.length ? `
+        <div class="mt-3 space-y-1">
+          <div class="text-xs text-rose-700 font-semibold">Recent low-rated runs:</div>
+          ${ctx.kpis.low_scoring.map(l => `
+            <div style="background:#fef2f2;border-left:2px solid #fca5a5;padding:6px 10px;border-radius:3px;font-size:11px;">
+              <span class="mono" style="color:#991b1b;font-weight:600;">${l.score}/5</span>
+              ${l.note ? ` · ${escapeHtml(l.note)}` : ''}
+              <span style="color:#94a3b8;font-size:10px;"> · ${fmtTime(l.created_at)}</span>
+            </div>
+          `).join('')}
+        </div>
+      ` : ''}
+    ` : '<div class="text-slate-400 italic text-xs">No rating data yet.</div>';
+
+    // 🔍 Live preview controls
+    const previewBody = `
+      <div style="font-size:12px;color:#64748b;margin-bottom:10px;">See the EXACT prompt this agent will receive on its next call. Each block tagged with its source.</div>
+      <div class="flex gap-2 flex-wrap" style="font-size:12px;">
+        <label>Stage
+          <select id="brain-stage" class="border border-slate-200 rounded px-2 py-1 text-xs ml-1" onchange="_loadBrainPreview('${escapeHtml(name)}')">
+            ${(ctx.stages || []).map(s => `<option value="${escapeHtml(s.stage)}">${escapeHtml(s.stage)}</option>`).join('')}
+            ${(ctx.stages || []).length === 0 ? '<option value="">(no stage files)</option>' : ''}
+          </select>
+        </label>
+        <label>Platform
+          <select id="brain-platform" class="border border-slate-200 rounded px-2 py-1 text-xs ml-1" onchange="_loadBrainPreview('${escapeHtml(name)}')">
+            <option value="">any</option>
+            <option value="instagram">instagram</option>
+            <option value="telegram">telegram</option>
+            <option value="email">email</option>
+            <option value="x-thread">x-thread</option>
+            <option value="facebook">facebook</option>
+            <option value="seo-article">seo-article</option>
+          </select>
+        </label>
+        <label>Language
+          <select id="brain-lang" class="border border-slate-200 rounded px-2 py-1 text-xs ml-1" onchange="_loadBrainPreview('${escapeHtml(name)}')">
+            <option value="fa" selected>fa</option>
+            <option value="en">en</option>
+            <option value="ar">ar</option>
+          </select>
+        </label>
+        <label class="flex-1">Topic
+          <input id="brain-topic" type="text" class="border border-slate-200 rounded px-2 py-1 text-xs ml-1 w-full" placeholder="e.g. Canada NDEB exam deadline" oninput="_brainTopicTimer && clearTimeout(_brainTopicTimer); _brainTopicTimer = setTimeout(() => _loadBrainPreview('${escapeHtml(name)}'), 600);">
+        </label>
+      </div>
+      <div id="brain-preview-out" style="margin-top:14px;">
+        <div class="empty" style="padding:20px;color:#94a3b8;font-size:12px;font-style:italic;text-align:center;">Pick a stage above to assemble the live prompt.</div>
+      </div>
+    `;
+
+    // Pipelines I appear in (read-only quick map)
+    const pipelinesBody = (ctx.pipelines_appearing_in || []).length === 0
+      ? '<div class="text-slate-400 italic text-xs">Not assigned to any pipeline.</div>'
+      : '<div class="space-y-1">' + (ctx.pipelines_appearing_in || []).map(p => `
+          <div style="background:#fafbff;border-left:2px solid #c7d2fe;padding:6px 10px;border-radius:3px;font-size:12px;">
+            <span style="font-weight:600;color:#3730a3;">${escapeHtml(p.label)}</span>
+            <span class="mono" style="color:#94a3b8;font-size:10px;"> · ${escapeHtml(p.pipeline_id)}</span>
+            · ${p.stages.map(s => `<span class="mono" style="background:#fff;color:#475569;padding:1px 4px;border-radius:2px;font-size:10px;">${escapeHtml(s.stage)} (${escapeHtml(s.why)})</span>`).join(' ')}
+          </div>
+        `).join('') + '</div>';
+
+    // Capabilities row (always visible top — no collapse)
+    const capRow = `
+      <div style="background:#fafbff;border:1px solid #e0e7ff;border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:13px;">
+        <span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-right:8px;">Capabilities:</span>
         ${(ctx.capabilities || []).length
           ? (ctx.capabilities || []).map(c => `<span class="mono" style="background:#eef2ff;color:#4338ca;padding:2px 8px;border-radius:3px;margin-right:4px;">${escapeHtml(c)}</span>`).join('')
-          : '<span class="text-slate-400 italic">No capabilities registered. Edit cowork-proxy/agent-capabilities.js to assign.</span>'}
+          : '<span class="text-slate-400 italic">None registered.</span>'}
       </div>
+    `;
 
-      <!-- Constitution -->
-      ${sectionH('🏛 Constitution (importance ≥ 5)', constitutionRules.length)}
-      <div style="font-size:12px;color:#64748b;margin-bottom:6px;">These rules ALWAYS appear in this agent's prompt and override everything else.</div>
-      ${constitutionRules.length
-        ? '<div class="space-y-1">' + constitutionRules.map(r => `
-            <div style="background:#fef3c7;border-left:3px solid #d97706;padding:8px 10px;border-radius:4px;font-size:12px;">
-              <div style="color:#92400e;">${escapeHtml(r.rule_text)}</div>
-              <div class="mono" style="font-size:10px;color:#a16207;margin-top:2px;">imp ${r.importance} · ${escapeHtml(r.kind)}${r.scope_platform ? ' · '+escapeHtml(r.scope_platform) : ''}${r.scope_language ? ' · '+escapeHtml(r.scope_language) : ''} · <a href="#" onclick="navigate('brand');return false;" style="text-decoration:underline;">edit in Brand tab</a></div>
-            </div>
-          `).join('') + '</div>'
-        : '<div class="text-slate-400 italic text-xs">No constitutional rules apply yet.</div>'}
-
-      <!-- Other rules (lower importance) -->
-      ${sectionH('Other brand rules applying to me', otherRules.length)}
-      <div style="font-size:12px;color:#64748b;">${otherRules.length} additional rules at importance &lt;5. Top-3 win the prompt budget per stage.</div>
-      ${otherRules.length > 0 ? `<details><summary class="text-xs text-indigo-600 cursor-pointer mt-1">Show all ${otherRules.length}</summary><div class="space-y-1 mt-2">${otherRules.slice(0, 30).map(r => `
-        <div style="background:#f8fafc;border-left:2px solid #cbd5e1;padding:6px 10px;border-radius:3px;font-size:12px;">
-          <div>${escapeHtml(r.rule_text)}</div>
-          <div class="mono" style="font-size:10px;color:#94a3b8;margin-top:1px;">imp ${r.importance} · ${escapeHtml(r.kind)}</div>
-        </div>
-      `).join('')}</div></details>` : ''}
-
-      <!-- Stage files -->
-      ${sectionH('Per-stage instructions (agents/' + name + '/stages/)', (ctx.stages || []).length)}
-      ${(ctx.stages || []).length
-        ? '<div class="space-y-1">' + (ctx.stages || []).map(s => `
-            <div style="background:#f0fdf4;border-left:2px solid #86efac;padding:8px 10px;border-radius:3px;font-size:12px;">
-              <div style="font-weight:600;color:#065f46;">${escapeHtml(s.stage)}</div>
-              <div style="font-size:10px;color:#16a34a;margin-top:1px;">${s.bytes} bytes · <a href="#" onclick="navigate('pipelines');return false;" style="text-decoration:underline;">edit via Pipeline tab</a> or directly: PUT /agents/${escapeHtml(name)}/stages/${escapeHtml(s.stage)}</div>
-            </div>
-          `).join('') + '</div>'
-        : '<div class="text-slate-400 italic text-xs">No per-stage files. This agent uses default stage prompts only.</div>'}
-
-      <!-- Pipelines I appear in -->
-      ${sectionH('Pipelines I appear in', (ctx.pipelines_appearing_in || []).length)}
-      ${(ctx.pipelines_appearing_in || []).length
-        ? '<div class="space-y-1">' + (ctx.pipelines_appearing_in || []).map(p => `
-            <div style="background:#fafbff;border-left:2px solid #c7d2fe;padding:6px 10px;border-radius:3px;font-size:12px;">
-              <span style="font-weight:600;color:#3730a3;">${escapeHtml(p.label)}</span>
-              <span class="mono" style="color:#94a3b8;font-size:10px;"> · ${escapeHtml(p.pipeline_id)}</span>
-              · ${p.stages.map(s => `<span class="mono" style="background:#fff;color:#475569;padding:1px 4px;border-radius:2px;font-size:10px;">${escapeHtml(s.stage)} (${escapeHtml(s.why)})</span>`).join(' ')}
-            </div>
-          `).join('') + '</div>'
-        : '<div class="text-slate-400 italic text-xs">Not assigned to any pipeline.</div>'}
-
-      <!-- Recent ratings -->
-      ${ctx.kpis ? `
-        ${sectionH('Recent ratings (last 30d)')}
-        <div class="flex gap-3 flex-wrap text-xs">
-          <span style="background:#f1f5f9;padding:4px 10px;border-radius:3px;">${ctx.kpis.rating_count || 0} ratings</span>
-          <span style="background:${ctx.kpis.rating_avg >= 3.5 ? '#dcfce7' : ctx.kpis.rating_avg != null ? '#fef3c7' : '#f1f5f9'};padding:4px 10px;border-radius:3px;color:${ctx.kpis.rating_avg >= 3.5 ? '#15803d' : '#92400e'};font-weight:600;">avg ${ctx.kpis.rating_avg != null ? ctx.kpis.rating_avg.toFixed(2) : '—'}/5</span>
-          <span style="background:#f1f5f9;padding:4px 10px;border-radius:3px;">${ctx.kpis.corrections || 0} corrections</span>
-          <span style="background:#f1f5f9;padding:4px 10px;border-radius:3px;">${ctx.kpis.examples || 0} examples</span>
-        </div>
-        ${ctx.kpis.low_scoring && ctx.kpis.low_scoring.length ? `
-          <div class="mt-2 space-y-1">
-            <div class="text-xs text-rose-700 font-semibold">Recent low-rated runs:</div>
-            ${ctx.kpis.low_scoring.map(l => `
-              <div style="background:#fef2f2;border-left:2px solid #fca5a5;padding:6px 10px;border-radius:3px;font-size:11px;">
-                <span class="mono" style="color:#991b1b;font-weight:600;">${l.score}/5</span>
-                ${l.note ? ` · ${escapeHtml(l.note)}` : ''}
-                <span style="color:#94a3b8;font-size:10px;"> · ${fmtTime(l.created_at)}</span>
-              </div>
-            `).join('')}
-          </div>
-        ` : ''}
-      ` : ''}
+    // Compose the full Brain UI
+    el.innerHTML = `
+      ${capRow}
+      ${collapsible('skill', '📜', 'Identity (SKILL.md)', null, ctx.skill_md ? `${ctx.skill_md.length} chars` : 'no SKILL.md', skillBody, true)}
+      ${collapsible('constitution', '🏛', 'Constitution + brand rules', constitutionRules.length, otherRules.length ? `+ ${otherRules.length} at lower importance` : '', constBody, true)}
+      ${collapsible('stages', '🎯', 'Stage instructions', (ctx.stages || []).length, 'per-agent files in agents/' + name + '/stages/', stagesBody, false)}
+      ${collapsible('memory', '🧠', 'Memory', memList.length, 'procedural + semantic + episodic', memoryBody, false)}
+      ${collapsible('training', '🌟', 'Training (examples + corrections)', null, '', trainingBody, false)}
+      ${collapsible('performance', '📊', 'Performance', null, ctx.kpis ? `${ctx.kpis.rating_count || 0} ratings · avg ${ctx.kpis.rating_avg ? ctx.kpis.rating_avg.toFixed(1) : '—'}/5` : '', perfBody, false)}
+      ${collapsible('pipelines', '🔗', 'Pipelines I appear in', (ctx.pipelines_appearing_in || []).length, '', pipelinesBody, false)}
+      ${collapsible('preview', '🔍', 'Live prompt preview', null, 'see exactly what this agent receives', previewBody, true)}
     `;
 
     // Auto-load preview if there's a stage to show
@@ -5336,6 +5481,168 @@ async function loadAdBrain(name) {
   } catch (e) {
     el.innerHTML = `<div class="text-rose-600 text-sm">${escapeHtml(e.message)}</div>`;
   }
+}
+
+// ── M90 · Inline editing handlers ───────────────────────────────
+
+async function brainSaveSkill(name) {
+  const ta = $('brain-skill-textarea');
+  if (!ta) return;
+  const status = $('brain-skill-status');
+  const md = ta.value;
+  if (!md.trim().startsWith('---')) { alert('SKILL.md must start with YAML frontmatter (---).'); return; }
+  if (status) status.textContent = 'saving…';
+  try {
+    const r = await authFetch(`${PROXY}/prompts/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ markdown: md, reason: 'edited via Brain tab' }),
+    });
+    const j = await r.json();
+    if (!j.ok) { if (status) { status.textContent = '✕ ' + (j.error || 'failed'); status.style.color = '#dc2626'; } return; }
+    if (status) { status.textContent = `✓ saved · v${j.version} · ${j.chars} chars`; status.style.color = '#16a34a'; }
+  } catch (e) { if (status) { status.textContent = '✕ ' + e.message; status.style.color = '#dc2626'; } }
+}
+
+async function brainShowSkillVersions(name) {
+  const out = $('brain-skill-versions');
+  if (!out) return;
+  out.innerHTML = '<div class="text-xs text-slate-400">Loading versions…</div>';
+  try {
+    const r = await fetch(`${PROXY}/prompts/${encodeURIComponent(name)}/versions`);
+    const j = await r.json();
+    if (!j.ok) { out.innerHTML = `<div class="text-rose-600 text-xs">${escapeHtml(j.error)}</div>`; return; }
+    out.innerHTML = `
+      <div class="text-xs uppercase tracking-wider text-slate-500 font-semibold mt-2 mb-1">Version history</div>
+      <div class="space-y-1" style="max-height:160px;overflow-y:auto;">
+        ${(j.versions || []).slice(0, 20).map(v => `
+          <div style="font-size:11px;padding:4px 8px;background:#f8fafc;border-radius:3px;display:flex;gap:8px;align-items:center;">
+            <span class="mono" style="background:#eef2ff;color:#4338ca;padding:1px 5px;border-radius:2px;">v${v.version}</span>
+            <span class="text-slate-500">${escapeHtml(v.edited_by || 'founder')}</span>
+            <span class="text-slate-400">${fmtTime(v.edited_at)}</span>
+            <span class="text-slate-500 italic flex-1" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(v.reason || '')}</span>
+            <button class="text-indigo-600 underline" onclick="brainRollbackSkill('${escapeHtml(name)}', ${v.version})" style="font-size:10px;">rollback</button>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  } catch (e) { out.innerHTML = `<div class="text-rose-600 text-xs">${escapeHtml(e.message)}</div>`; }
+}
+
+async function brainRollbackSkill(name, version) {
+  if (!confirm(`Restore SKILL.md to version ${version}? Current text will be replaced; a new version is created.`)) return;
+  try {
+    const r = await authFetch(`${PROXY}/prompts/${encodeURIComponent(name)}/rollback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: version }),
+    });
+    const j = await r.json();
+    if (!j.ok) { alert(j.error || 'failed'); return; }
+    loadAdBrain(name);
+  } catch (e) { alert(e.message); }
+}
+
+async function brainAddRule(name) {
+  const text = $('brain-rule-text').value.trim();
+  if (!text) { alert('Rule text required.'); return; }
+  const kind = $('brain-rule-kind').value;
+  const platform = $('brain-rule-platform').value || null;
+  const language = $('brain-rule-language').value || null;
+  const importance = parseInt($('brain-rule-importance').value, 10) || 5;
+  try {
+    const r = await authFetch(`${PROXY}/brand/intelligence`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        kind, target_agent: name, scope_platform: platform, scope_language: language,
+        rule_text: text, importance, source: 'manual:brain', founder_edited: true,
+      }),
+    });
+    const j = await r.json();
+    if (!j.ok) { alert(j.error || 'failed'); return; }
+    loadAdBrain(name);
+  } catch (e) { alert(e.message); }
+}
+
+async function brainDeleteRule(ruleId, name) {
+  if (!confirm('Delete this brand rule? This removes it from every agent\'s prompt.')) return;
+  try {
+    const r = await authFetch(`${PROXY}/brand/intelligence/${encodeURIComponent(ruleId)}`, { method: 'DELETE' });
+    const j = await r.json();
+    if (!j.ok) { alert(j.error || 'failed'); return; }
+    loadAdBrain(name);
+  } catch (e) { alert(e.message); }
+}
+
+function brainToggleStageEditor(name, stage) {
+  const wrap = $(`brain-stage-edit-${stage}`);
+  if (wrap) wrap.style.display = wrap.style.display === 'none' ? 'block' : 'none';
+}
+
+async function brainSaveStage(name, stage) {
+  const ta = $(`brain-stage-textarea-${stage}`);
+  const status = $(`brain-stage-status-${stage}`);
+  if (!ta) return;
+  const md = ta.value;
+  if (!md.trim().startsWith('---')) { alert('Stage file must start with --- frontmatter.'); return; }
+  if (status) status.textContent = 'saving…';
+  try {
+    const r = await authFetch(`${PROXY}/agents/${encodeURIComponent(name)}/stages/${encodeURIComponent(stage)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ markdown: md, reason: 'edited via Brain tab' }),
+    });
+    const j = await r.json();
+    if (!j.ok) { if (status) { status.textContent = '✕ ' + (j.error || 'failed'); status.style.color = '#dc2626'; } return; }
+    if (status) { status.textContent = `✓ saved · ${j.chars} chars`; status.style.color = '#16a34a'; }
+  } catch (e) { if (status) { status.textContent = '✕ ' + e.message; status.style.color = '#dc2626'; } }
+}
+
+async function brainAddMemory(name) {
+  const content = $('brain-mem-content').value.trim();
+  if (!content) { alert('Memory content required.'); return; }
+  const type = $('brain-mem-type').value;
+  const tags = ($('brain-mem-tags').value || '').split(',').map(t => t.trim()).filter(Boolean);
+  const importance = parseInt($('brain-mem-imp').value, 10) || 3;
+  try {
+    const r = await authFetch(`${PROXY}/agents/${encodeURIComponent(name)}/memory`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type, content, tags, importance, source: 'founder:brain' }),
+    });
+    const j = await r.json();
+    if (!j.ok) { alert(j.error || 'failed'); return; }
+    loadAdBrain(name);
+  } catch (e) { alert(e.message); }
+}
+
+async function brainDeleteMemory(memId, name) {
+  if (!confirm('Delete this memory entry?')) return;
+  try {
+    const r = await authFetch(`${PROXY}/memory/${encodeURIComponent(memId)}`, { method: 'DELETE' });
+    const j = await r.json();
+    if (!j.ok) { alert(j.error || 'failed'); return; }
+    loadAdBrain(name);
+  } catch (e) { alert(e.message); }
+}
+
+async function brainAddExample(name) {
+  const content = $('brain-example-content').value.trim();
+  if (!content) { alert('Example content required.'); return; }
+  const tags = ($('brain-example-tags').value || '').split(',').map(t => t.trim()).filter(Boolean);
+  const note = $('brain-example-note').value || null;
+  const importance = parseInt($('brain-example-imp').value, 10) || 4;
+  try {
+    const r = await authFetch(`${PROXY}/agents/${encodeURIComponent(name)}/example`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content, tags, note, importance }),
+    });
+    const j = await r.json();
+    if (!j.ok) { alert(j.error || 'failed'); return; }
+    loadAdBrain(name);
+  } catch (e) { alert(e.message); }
 }
 
 let _brainTopicTimer = null;
