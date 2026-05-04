@@ -538,13 +538,37 @@ async function _renderCarousel({ source, carouselSpec, run, recipe, lang }) {
     let _mixedSlideRefUrl = null;
     let _mixedAttribution = null;
     let _mixedPhotographer = null;
+    // M101 · When the slide wants a real photo but no Unsplash key is
+    // configured, gracefully degrade INSTEAD of skipping the slide:
+    //   · `unsplash` (photo-only)  → still fails (no fallback path makes sense)
+    //   · `mixed`    (photo + AI)  → fall through to pure 'generated' so the
+    //                                 slide still builds. We record the
+    //                                 degradation on the slide output so the
+    //                                 founder sees what happened in the log.
+    let _unsplashUnavailableNote = null;
     if (slideImageSource === 'unsplash' || slideImageSource === 'mixed') {
       const unsplash = require('./unsplash');
       if (!unsplash.hasKey()) {
-        if (!firstError) firstError = `slide ${slide.n}: UNSPLASH_ACCESS_KEY not set`;
-        renderedSlides.push({ n: slide.n, role: slide.role, error: 'UNSPLASH_ACCESS_KEY not set on server' });
-        continue;
+        if (slideImageSource === 'unsplash') {
+          if (!firstError) firstError = `slide ${slide.n}: UNSPLASH_ACCESS_KEY not set`;
+          renderedSlides.push({
+            n: slide.n, role: slide.role,
+            error: 'UNSPLASH_ACCESS_KEY not set on server',
+            _image_source: 'unsplash',
+            _hint: 'Set UNSPLASH_ACCESS_KEY on the server to enable photo-only slides.',
+          });
+          continue;
+        }
+        // mixed → degrade silently to generated
+        slideImageSource = 'generated';
+        _unsplashUnavailableNote =
+          `Unsplash key not configured — slide ${slide.n} requested 'mixed' (photo + AI overlay) ` +
+          `but degraded to pure 'generated'. Set UNSPLASH_ACCESS_KEY to restore photo-backed composites.`;
+        if (!firstError) firstError = _unsplashUnavailableNote;
       }
+    }
+    if (slideImageSource === 'unsplash' || slideImageSource === 'mixed') {
+      const unsplash = require('./unsplash');
       const qText =
           (afshinSlide && afshinSlide.unsplash_query)
        || slide.unsplash_query
@@ -661,6 +685,13 @@ async function _renderCarousel({ source, carouselSpec, run, recipe, lang }) {
           _photographer: _mixedPhotographer,
           _unsplash_hero_url: _mixedSlideRefUrl,
         } : {}),
+        // M101 · Surface what Unsplash was queried with (even when the photo
+        // was used) and any degradation note so the Compose preview can show
+        // it to the founder before/after the OpenAI step.
+        ...((slide.unsplash_query || (afshinSlide && afshinSlide.unsplash_query)) ? {
+          _unsplash_query: (afshinSlide && afshinSlide.unsplash_query) || slide.unsplash_query,
+        } : {}),
+        ...(_unsplashUnavailableNote ? { _degraded_note: _unsplashUnavailableNote } : {}),
       });
     } catch (e) {
       if (!firstError) firstError = `slide ${slide.n}: ${e.message}`;

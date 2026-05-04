@@ -8699,6 +8699,75 @@ function _coRenderImageState(stage) {
       <strong>Cover image failed:</strong> ${escapeHtml((stage.error || 'unknown').slice(0, 300))}
     </div>`;
   }
+  // M101 · Carousel render — show every slide with the gpt-image-2 composite
+  // PLUS the Unsplash hero photo it was built from (when image_source='mixed'
+  // or 'unsplash'). Founder can verify the source photo before trusting the
+  // composite, and spot bad Unsplash matches that gpt-image-2 then perpetuates.
+  if (stage.status === 'done' && stage.output && stage.output._carousel && Array.isArray(stage.output.slides)) {
+    const o = stage.output;
+    const sourcePill = (src) => ({
+      'unsplash': '<span style="background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:3px;font-weight:600;font-size:10px;">📷 UNSPLASH</span>',
+      'mixed':    '<span style="background:#fef3c7;color:#854d0e;padding:2px 8px;border-radius:3px;font-weight:600;font-size:10px;">🎨 MIXED (photo + AI)</span>',
+      'generated':'<span style="background:#ede9fe;color:#5b21b6;padding:2px 8px;border-radius:3px;font-weight:600;font-size:10px;">⚙ GENERATED</span>',
+    })[src] || '<span style="background:#f1f5f9;color:#64748b;padding:2px 8px;border-radius:3px;font-weight:600;font-size:10px;">?</span>';
+    const slidesHtml = o.slides.map(s => {
+      if (s.error) {
+        return `<div style="background:#fee2e2;color:#991b1b;padding:10px;border-radius:6px;font-size:12px;">
+          <strong>Slide ${s.n} (${escapeHtml(s.role || '')}) failed:</strong> ${escapeHtml(s.error)}
+          ${s._hint ? `<div class="text-xs mt-1" style="color:#7f1d1d;">${escapeHtml(s._hint)}</div>` : ''}
+        </div>`;
+      }
+      const finalImg = s.url ? `
+        <div style="text-align:center;flex:1;">
+          <div class="text-xs uppercase tracking-wider mb-1" style="color:#64748b;font-weight:600;">Final image</div>
+          <img src="${escapeHtml(s.url)}" alt="slide ${s.n}"
+               style="max-width:100%;max-height:240px;border-radius:6px;background:#e2e8f0;border:1px solid #cbd5e1;" />
+          <div class="text-xs mt-1" style="color:#64748b;">$${Number(s.cost_usd || 0).toFixed(4)} · ${escapeHtml(s.model_label || s.model || '')}</div>
+        </div>` : '';
+      const heroImg = s._unsplash_hero_url ? `
+        <div style="text-align:center;flex:1;">
+          <div class="text-xs uppercase tracking-wider mb-1" style="color:#1e40af;font-weight:600;">Unsplash hero (input)</div>
+          <img src="${escapeHtml(s._unsplash_hero_url)}" alt="unsplash for slide ${s.n}"
+               style="max-width:100%;max-height:240px;border-radius:6px;background:#dbeafe;border:1px solid #93c5fd;" />
+          <div class="text-xs mt-1" style="color:#1e40af;">${s._unsplash_query ? `query: <em>${escapeHtml(s._unsplash_query)}</em>` : ''}</div>
+        </div>` : '';
+      const attrib = (s._photographer && s._photographer.name) ? `
+        <div class="text-xs mt-2" style="color:#64748b;font-style:italic;">
+          ${escapeHtml(s._attribution || `Photo by ${s._photographer.name} on Unsplash`)}
+          ${s._photographer.profile_url ? ` · <a href="${escapeHtml(s._photographer.profile_url)}" target="_blank" class="text-indigo-600 underline">@${escapeHtml(s._photographer.username || '')}</a>` : ''}
+        </div>` : '';
+      const degraded = s._degraded_note ? `
+        <div class="text-xs mt-2" style="background:#fef3c7;color:#78350f;padding:6px;border-radius:4px;">
+          ⚠ ${escapeHtml(s._degraded_note)}
+        </div>` : '';
+      return `
+        <div style="background:#f8fafc;padding:12px;border-radius:8px;border:1px solid #e2e8f0;">
+          <div class="flex items-center gap-2 mb-2 flex-wrap">
+            <strong style="font-size:13px;">Slide ${s.n}</strong>
+            <span class="text-xs" style="color:#64748b;">${escapeHtml(s.role || '')}</span>
+            ${sourcePill(s._image_source || 'generated')}
+          </div>
+          <div class="flex items-start gap-3" style="flex-wrap:wrap;">
+            ${heroImg}
+            ${finalImg}
+          </div>
+          ${attrib}
+          ${degraded}
+        </div>`;
+    }).join('');
+    const partial = o.partial_failure ? `
+      <div style="background:#fef3c7;color:#78350f;padding:8px;border-radius:6px;font-size:12px;margin-bottom:10px;">
+        ⚠ ${escapeHtml(o.partial_failure)} — ${o.slides_rendered}/${o.slide_count} slides rendered.
+      </div>` : '';
+    return `<div class="card-tight mb-3" style="background:#ffffff;">
+      <div class="flex items-center gap-2 mb-3">
+        <strong style="font-size:13px;color:#7c3aed;">Carousel · ${o.slide_count} slides</strong>
+        <span class="text-xs ml-auto" style="color:#64748b;">total $${Number(o.cost_usd || 0).toFixed(4)}</span>
+      </div>
+      ${partial}
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">${slidesHtml}</div>
+    </div>`;
+  }
   if (stage.status === 'done' && stage.output && stage.output.url) {
     const o = stage.output;
     const dir = o.afshin_direction || null;
