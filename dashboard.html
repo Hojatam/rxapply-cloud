@@ -5890,7 +5890,22 @@ async function plRefresh() {
   try {
     const r = await fetch(`${PROXY}/pipelines?include_disabled=true`);
     const j = await r.json();
-    if (!j.ok) { el.innerHTML = `<div class="empty" style="padding:14px;color:#dc2626;">Error: ${escapeHtml(j.error || 'failed')}</div>`; return; }
+    if (!j.ok) {
+      // M77 · Recognize transient migration errors and show a helpful state
+      const err = String(j.error || 'failed');
+      const isMigrating = /column.*does not exist|relation.*does not exist|table.*not found/i.test(err);
+      if (isMigrating) {
+        el.innerHTML = `
+          <div class="empty" style="padding:14px;font-size:12px;line-height:1.5;">
+            <div style="color:#d97706;font-weight:600;margin-bottom:4px;">⏳ DB schema upgrading</div>
+            <div style="color:#64748b;">The new pipelines table is migrating. This usually finishes in 30–60s. Click ↻ Refresh in a moment.</div>
+            <div class="mono" style="margin-top:8px;font-size:10px;color:#94a3b8;">${escapeHtml(err.slice(0, 200))}</div>
+          </div>`;
+      } else {
+        el.innerHTML = `<div class="empty" style="padding:14px;color:#dc2626;font-size:12px;">Error: ${escapeHtml(err)}</div>`;
+      }
+      return;
+    }
     _plState.pipelines = j.items || [];
     if (!_plState.pipelines.length) {
       el.innerHTML = '<div class="empty" style="padding:14px;font-size:12px;font-style:italic;">No pipelines yet.</div>';
