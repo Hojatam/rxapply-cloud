@@ -1335,16 +1335,64 @@ async function _executeLlmStage({ runId, run, recipe, stage, stageIndex, lang, p
 
   let parsed, usage = {}, modelUsed = model, errMsg = null;
   let retried = false;
+  // M100 · Stage-aware default token caps. The legacy default (2500) was
+  // truncating long structured outputs — Afshin's carousel `design` stage in
+  // particular emits per-slide visual_concept + design_directive + final_prompt
+  // for 4–8 slides, easily 3500–5000 tokens of Persian/Latin JSON. When a
+  // recipe stage doesn't pin its own cap, choose a generous per-capability
+  // default. This is the floor; recipes can still override via stage.max_tokens.
+  const _defaultMaxTokens = ({
+    design:           6000,   // carousel art direction · per-slide directives
+    'carousel-plan':  5000,   // Tarrah · slot-spec for 4–8 slides
+    adapt:            4000,   // channel-specific fields incl. design_plan
+    audit:            3500,   // claim-by-claim red-team table
+    verify:           3500,   // KB cross-check table
+    research:         3000,
+    draft:            3000,
+    critique:         2000,
+    plan:             2000,
+    translate:        3000,
+    'verify-translation': 3000,
+    'voice-critic':   2000,
+  })[stageName] || 2500;
+  const _maxTokens = stage.max_tokens || _defaultMaxTokens;
   try {
     const r = await llm.chat({
       model,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
-      maxTokens: stage.max_tokens || 2500,
+      maxTokens: _maxTokens,
     });
-    parsed = _parseJsonOrThrow(r.output, `${agent}/${stageName}`);
+    // M100 · Capture usage BEFORE parse — so even if the JSON is truncated
+    // mid-string we can still record what we paid for in the log.
     usage = r.usage || {};
     modelUsed = r.model || model;
+    try {
+      parsed = _parseJsonOrThrow(r.output, `${agent}/${stageName}`);
+    } catch (parseErr) {
+      // M100 · Truncated-JSON detection. If the parse failure looks like a
+      // hit-the-cap truncation, retry ONCE with a doubled token budget. We
+      // keep the heuristic narrow (mentions "Unterminated" / "Unexpected end")
+      // so we don't loop on genuinely malformed model output.
+      const looksTruncated = /Unterminated|Unexpected end|in JSON at position/i.test(parseErr.message || '');
+      if (looksTruncated) {
+        const r2 = await llm.chat({
+          model,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userPrompt }],
+          maxTokens: Math.min(_maxTokens * 2, 16000),
+        });
+        usage = {
+          input_tokens:  (usage.input_tokens  || 0) + ((r2.usage && r2.usage.input_tokens)  || 0),
+          output_tokens: (usage.output_tokens || 0) + ((r2.usage && r2.usage.output_tokens) || 0),
+        };
+        modelUsed = r2.model || modelUsed;
+        parsed = _parseJsonOrThrow(r2.output, `${agent}/${stageName}/retry-truncated`);
+        retried = true;
+      } else {
+        throw parseErr;
+      }
+    }
 
     // M49 · contract validation + retry-once on failure
     const validation = contracts.validate(stageName, parsed);
@@ -1356,7 +1404,7 @@ async function _executeLlmStage({ runId, run, recipe, stage, stageIndex, lang, p
           model,
           system: systemPrompt,
           messages: [{ role: 'user', content: retryUserPrompt }],
-          maxTokens: stage.max_tokens || 2500,
+          maxTokens: _maxTokens,
         });
         const parsed2 = _parseJsonOrThrow(r2.output, `${agent}/${stageName}/retry`);
         const v2 = contracts.validate(stageName, parsed2);
