@@ -76,7 +76,11 @@ const CAPABILITY_REGISTRY = {
   // split, Gmail payload, etc.). Render stages don't call an LLM but we
   // attribute them to Payvand so they show up in his Train tab and the
   // founder can rate format quality over time.
-  payvand:   ['render'],
+  // M103 · 'canva-render' is compose Mode B — instead of producing a
+  // gpt-image-2 PNG, autofill a Canva brand template per slide and
+  // return editable design URLs. Owned by Payvand because it's still
+  // a render-stage in spirit (no new LLM call beyond Tarrah's plan).
+  payvand:   ['render', 'canva-render'],
 };
 
 // Inverse index: capability → ordered agent list.

@@ -4156,6 +4156,7 @@ const SERVICE_META = {
   openai:    { label: 'OpenAI API',        accent: 'emerald', icon: 'pipelines', sub: 'GPT-5.x / o3 · LLM provider' },
   n8n:       { label: 'n8n',               accent: 'rose',    icon: 'workflows', sub: 'Workflow engine · self-hosted' },
   unsplash:  { label: 'Unsplash',          accent: 'teal',    icon: 'pipelines', sub: 'Stock photos · mixed/unsplash slide hero' },
+  canva:     { label: 'Canva Connect',     accent: 'emerald', icon: 'pipelines', sub: 'Mode B compose render · brand templates + Magic Resize' },
   process:   { label: 'Proxy process',     accent: 'copper',  icon: 'services',  sub: 'Node + Express runtime' },
 };
 
@@ -4190,7 +4191,7 @@ async function loadServices() {
     const j = await r.json();
     if (!j.ok) throw new Error(j.error || 'failed');
     const grid = $('services-grid');
-    const order = ['database', 'storage', 'anthropic', 'openai', 'n8n', 'unsplash', 'process'];
+    const order = ['database', 'storage', 'anthropic', 'openai', 'n8n', 'unsplash', 'canva', 'process'];
     grid.innerHTML = order
       .filter(name => j.services && (name in j.services))
       .map(name => {
@@ -7709,6 +7710,16 @@ function coRenderOptionInput(opt) {
           return `<option value="${escapeHtml(String(v))}"${sel}>${escapeHtml(String(lbl))}</option>`;
         }).join('')
       }</select>`;
+    case 'dynamic':
+      // M103 · Dynamic options resolved at form-render time from the
+      // server (e.g. /canva/dynamic-options/<recipe>). The renderer
+      // injects a placeholder div; coWireDynamicOptions(recipeId) fills
+      // it after the form is in the DOM. `render_as` selects the layout:
+      //   'slot-template-grid'  — IG carousel slot → template dropdowns
+      //   'select'              — single dropdown (fallback)
+      return `<div id="${id}-host" data-key="${opt.key}" data-dynamic-source="${escapeHtml(opt.dynamic_source || '')}" data-render-as="${escapeHtml(opt.render_as || 'select')}" class="text-xs" style="background:#f8fafc;padding:8px;border-radius:6px;border:1px dashed #cbd5e1;">
+                <span style="color:#64748b;">Loading dynamic options…</span>
+              </div>${opt.help ? `<div class="text-xs mt-1" style="color:#64748b;">${escapeHtml(opt.help)}</div>` : ''}`;
     default:
       return `<input type="text" id="${id}" data-key="${opt.key}" value="${escapeHtml(String(def))}"${ph} class="co-input">`;
   }
@@ -7813,6 +7824,58 @@ function coRenderForm() {
   `;
   coRebuildLangChecks();
   coWireImageModelPicker();
+  coWireDynamicOptions(r.id);
+}
+
+// M103 · Resolve every option marked type='dynamic' by fetching from
+// the recipe-specific dynamic-options endpoint. Currently supports
+// dynamic_source='canva-templates' (the IG-Canva recipe's per-slot
+// template overrides). Renders into the placeholder div the form
+// just inserted.
+async function coWireDynamicOptions(recipeId) {
+  const hosts = document.querySelectorAll('[data-dynamic-source]');
+  if (!hosts.length) return;
+  let payload = null;
+  try {
+    const j = await fetch(`${PROXY}/canva/dynamic-options/${encodeURIComponent(recipeId)}`).then(r => r.json());
+    if (j && j.ok) payload = j;
+  } catch (_) {}
+  hosts.forEach(host => {
+    const source = host.getAttribute('data-dynamic-source');
+    const renderAs = host.getAttribute('data-render-as') || 'select';
+    if (!payload) {
+      host.innerHTML = `<div style="color:#dc2626;">Failed to load options. Make sure CANVA_API_TOKEN is set + Canva tab in Settings has templates registered.</div>`;
+      return;
+    }
+    if (source === 'canva-templates' && renderAs === 'slot-template-grid') {
+      const tpls = payload.templates || [];
+      if (!tpls.length) {
+        host.innerHTML = `<div style="color:#854d0e;">No Canva templates registered yet. Go to <strong>Settings → Canva → Brand templates</strong> to add some.</div>`;
+        return;
+      }
+      // Discover slot types from registered templates (no hardcoded list)
+      const slots = Array.from(new Set(tpls.map(t => t.slot_type || 'any'))).filter(Boolean);
+      const key = host.getAttribute('data-key');
+      host.innerHTML = `
+        <div class="text-xs mb-2" style="color:#475569;font-weight:500;">Pin a Canva template per slot type:</div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+          ${slots.map(slot => `
+            <div class="flex items-center gap-2">
+              <span class="text-xs mono" style="min-width:80px;color:#1e293b;">${escapeHtml(slot)}</span>
+              <select data-dynamic-key="${escapeHtml(key)}" data-slot="${escapeHtml(slot)}" class="co-select text-xs flex-1">
+                <option value="">— auto —</option>
+                ${tpls.filter(t => (t.slot_type || 'any') === slot).map(t =>
+                  `<option value="${escapeHtml(t.id)}">${escapeHtml(t.name)} (${escapeHtml(t.platform || 'any')})</option>`).join('')}
+              </select>
+            </div>
+          `).join('')}
+        </div>
+        <div class="text-xs mt-2" style="color:#64748b;">Leave any slot on "auto" to let the renderer pick the best match by slot_type → platform → language.</div>
+      `;
+    } else {
+      host.innerHTML = `<div style="color:#64748b;">Unsupported dynamic_source: ${escapeHtml(source)}</div>`;
+    }
+  });
 }
 
 // M38 · Populate the image-model picker from /compose/image-models, and
@@ -7874,6 +7937,18 @@ function coGatherOptions() {
   const r = _coState.selected;
   const out = {};
   for (const opt of (r.options_schema || [])) {
+    if (opt.type === 'dynamic') {
+      // M103 · Collect every dynamic input that belongs to this option key.
+      // For 'slot-template-grid' the result is { <slot>: <template_id>, ... }
+      const selects = document.querySelectorAll(`[data-dynamic-key="${opt.key}"]`);
+      const obj = {};
+      selects.forEach(s => {
+        const slot = s.getAttribute('data-slot');
+        if (slot && s.value) obj[slot] = s.value;
+      });
+      if (Object.keys(obj).length) out[opt.key] = obj;
+      continue;
+    }
     const el = $(`co-opt-${opt.key}`);
     if (!el) continue;
     if (opt.type === 'checkbox') out[opt.key] = !!el.checked;
@@ -8720,6 +8795,62 @@ function _coRenderImageState(stage) {
       <strong>Cover image failed:</strong> ${escapeHtml((stage.error || 'unknown').slice(0, 300))}
     </div>`;
   }
+  // M103 · Canva-rendered carousel — each slide is an editable Canva
+  // design URL + thumbnail. Adds a "Fan out" button that triggers
+  // Magic Resize across the registered canva_sizes rows.
+  if (stage.status === 'done' && stage.output && stage.output._renderer === 'canva' && Array.isArray(stage.output.slides)) {
+    const o = stage.output;
+    const slidesHtml = o.slides.map(s => {
+      if (s.error) {
+        return `<div style="background:#fee2e2;color:#991b1b;padding:10px;border-radius:6px;font-size:12px;">
+          <strong>Slide ${s.n} (${escapeHtml(s.role || '')}) failed:</strong> ${escapeHtml(s.error)}
+          ${s._hint ? `<div class="text-xs mt-1" style="color:#7f1d1d;">${escapeHtml(s._hint)}</div>` : ''}
+        </div>`;
+      }
+      return `
+        <div style="background:#f8fafc;padding:12px;border-radius:8px;border:1px solid #e2e8f0;">
+          <div class="flex items-center gap-2 mb-2 flex-wrap">
+            <strong style="font-size:13px;">Slide ${s.n}</strong>
+            <span class="text-xs" style="color:#64748b;">${escapeHtml(s.role || '')}</span>
+            <span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:3px;font-weight:600;font-size:10px;">🎨 CANVA · ${escapeHtml(s._template_name || 'template')}</span>
+          </div>
+          <div class="flex items-start gap-3" style="flex-wrap:wrap;">
+            ${s._unsplash_hero_url ? `
+              <div style="text-align:center;flex:1;">
+                <div class="text-xs uppercase tracking-wider mb-1" style="color:#1e40af;font-weight:600;">Unsplash hero (input)</div>
+                <img src="${escapeHtml(s._unsplash_hero_url)}" alt="unsplash"
+                     style="max-width:100%;max-height:180px;border-radius:6px;background:#dbeafe;border:1px solid #93c5fd;" />
+              </div>` : ''}
+            <div style="text-align:center;flex:1;">
+              <div class="text-xs uppercase tracking-wider mb-1" style="color:#166534;font-weight:600;">Canva design</div>
+              ${s.thumbnail_url ? `<img src="${escapeHtml(s.thumbnail_url)}" alt="slide ${s.n}"
+                   style="max-width:100%;max-height:200px;border-radius:6px;background:#dcfce7;border:1px solid #86efac;" />` : `<div style="padding:24px;background:#f0fdf4;border-radius:6px;color:#166534;font-size:11px;">design ready · open in Canva to view</div>`}
+              <div class="mt-2 flex items-center justify-center gap-2">
+                ${s.edit_url ? `<a href="${escapeHtml(s.edit_url)}" target="_blank" class="btn btn-primary btn-xs">✎ Edit in Canva</a>` : ''}
+                ${s.view_url ? `<a href="${escapeHtml(s.view_url)}" target="_blank" class="btn btn-ghost btn-xs">👁 View</a>` : ''}
+              </div>
+            </div>
+          </div>
+          ${s._hero_skipped ? `<div class="text-xs mt-2" style="color:#854d0e;">Hero image skipped: ${escapeHtml(s._hero_skipped)}</div>` : ''}
+        </div>`;
+    }).join('');
+    const partial = o.partial_failure ? `
+      <div style="background:#fef3c7;color:#78350f;padding:8px;border-radius:6px;font-size:12px;margin-bottom:10px;">
+        ⚠ ${escapeHtml(o.partial_failure)} — ${o.slides_rendered}/${o.slide_count} slides built.
+      </div>` : '';
+    const runId = (_coState.currentRun && _coState.currentRun.id) || '';
+    return `<div class="card-tight mb-3" style="background:#ffffff;">
+      <div class="flex items-center gap-2 mb-3 flex-wrap">
+        <strong style="font-size:13px;color:#15803d;">Canva carousel · ${o.slide_count} slides</strong>
+        <span class="text-xs" style="color:#64748b;">${o.slides_rendered}/${o.slide_count} ready</span>
+        ${runId ? `<button class="btn btn-primary btn-xs ml-auto" onclick="canvaOpenFanoutModal('${runId}')">↗ Fan out to platforms</button>` : ''}
+      </div>
+      ${partial}
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">${slidesHtml}</div>
+      <div id="canva-fanout-results" class="mt-4"></div>
+    </div>`;
+  }
+
   // M101 · Carousel render — show every slide with the gpt-image-2 composite
   // PLUS the Unsplash hero photo it was built from (when image_source='mixed'
   // or 'unsplash'). Founder can verify the source photo before trusting the
@@ -9022,7 +9153,10 @@ function coShowPreviewLang(lang, btn) {
   // M32/M33 · Cover image stage runs once (master phase), used for all langs.
   // M34 · Surface the image stage state regardless of status — so the founder
   // can see whether it ran, is running, failed, or was skipped.
-  const imageStage = (run.stages || []).find(s => s.stage_name === 'image');
+  // M103 · Either 'image' (Mode A · gpt-image-2) or 'canva-render' (Mode B)
+  // can carry the visual artifact. Prefer canva-render when both exist.
+  const imageStage = (run.stages || []).find(s => s.stage_name === 'canva-render')
+                  || (run.stages || []).find(s => s.stage_name === 'image');
   const coverUrl = imageStage && imageStage.output && imageStage.output.url;
   const imageDebug = _coRenderImageState(imageStage);
 
@@ -12374,10 +12508,10 @@ function renderSettingsMain(data) {
          Hire moved out of Settings entirely (S5 → Agents page header). -->
     <div class="border-b border-slate-200 mb-6">
       <div class="flex gap-1 -mb-px">
-        ${['general','brand','governance','authoring'].map(t => `
+        ${['general','brand','governance','canva','authoring'].map(t => `
           <button class="px-4 py-2 text-sm font-medium border-b-2 ${(window.SET_TAB||'general')===t?'border-indigo-600 text-indigo-600':'border-transparent text-slate-500 hover:text-slate-900'}"
                   onclick="setSettingsTab('${t}')" data-set-tab-btn="${t}">
-            ${({general:'General',brand:'Brand & Models',governance:'Governance',authoring:'Authoring'})[t]}
+            ${({general:'General',brand:'Brand & Models',governance:'Governance',canva:'Canva',authoring:'Authoring'})[t]}
           </button>
         `).join('')}
       </div>
@@ -12487,6 +12621,62 @@ function renderSettingsMain(data) {
       </div>
     </div>
 
+    <!-- M103 · Canva mode B settings -->
+    <div data-set-tab="canva" class="space-y-6">
+      <div class="card">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-semibold">Canva connection</h3>
+          <button class="btn btn-ghost btn-xs" onclick="loadCanvaSettings()">↻ Refresh</button>
+        </div>
+        <div id="canva-health" class="text-sm" style="color:#64748b;">Checking…</div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+          <div>
+            <label class="text-xs text-slate-500 mb-1 block">API token (overrides DB row; preferred)</label>
+            <div class="text-xs mb-2" style="color:#64748b;">Set <code class="mono">CANVA_API_TOKEN</code> in Railway env vars. Status surfaces in the health panel above.</div>
+            <label class="text-xs text-slate-500 mb-1 block">Or paste a token here (stored encrypted-at-rest in DB):</label>
+            <input id="canva-set-token" type="password" placeholder="Connect token (from Canva dev portal)" class="border border-slate-200 rounded px-2 py-1 text-sm w-full mono" />
+            <div class="flex gap-2 mt-2">
+              <button class="btn btn-primary btn-xs" onclick="saveCanvaToken()">Save token to DB</button>
+              <button class="btn btn-ghost btn-xs" onclick="testCanvaConnection()">Test connection</button>
+            </div>
+          </div>
+          <div>
+            <label class="text-xs text-slate-500 mb-1 block">Default Brand ID (optional)</label>
+            <input id="canva-set-brand" type="text" placeholder="brand-..." class="border border-slate-200 rounded px-2 py-1 text-sm w-full mono" onblur="patchCanvaSetting('default_brand_id', this.value)" />
+            <label class="text-xs text-slate-500 mb-1 block mt-3">Autofill poll max (ms)</label>
+            <input id="canva-set-pollmax" type="number" min="5000" step="1000" class="border border-slate-200 rounded px-2 py-1 text-sm w-32 mono" onblur="patchCanvaSetting('poll_max_ms', Number(this.value))" />
+            <label class="text-xs text-slate-500 mb-1 block mt-3">Preferred export format</label>
+            <select id="canva-set-export" class="border border-slate-200 rounded px-2 py-1 text-sm" onchange="patchCanvaSetting('preferred_export_format', this.value)">
+              <option value="png">PNG</option>
+              <option value="jpg">JPG</option>
+              <option value="pdf">PDF</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-semibold">Brand templates <span class="text-xs font-normal" style="color:#64748b;">— founder-managed registry, used by ig-canva runs</span></h3>
+          <div class="flex gap-2">
+            <button class="btn btn-ghost btn-xs" onclick="canvaPickFromCanva()" title="List brand templates from your Canva workspace">📥 Pick from Canva</button>
+            <button class="btn btn-primary btn-xs" onclick="canvaAddTemplate()">+ Add template</button>
+          </div>
+        </div>
+        <p class="text-xs mb-3" style="color:#64748b;">Each row maps a Canva brand template to a slot type (cover/data/cta/...). The compose pipeline auto-resolves a template per slide using slot_type → platform → language. <strong>Slot mappings</strong> tell the autofill which Canva element receives which Tarrah field — edit the JSON inline.</p>
+        <div id="canva-templates-list" class="text-sm">Loading…</div>
+      </div>
+
+      <div class="card">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-semibold">Magic Resize sizes <span class="text-xs font-normal" style="color:#64748b;">— targets for cross-platform fan-out</span></h3>
+          <button class="btn btn-primary btn-xs" onclick="canvaAddSize()">+ Add size</button>
+        </div>
+        <p class="text-xs mb-3" style="color:#64748b;">Pre-seeded with 13 common sizes. Every row is editable — change dimensions, rename, disable, or delete. The Compose run view's "Fan out" button lists all enabled rows.</p>
+        <div id="canva-sizes-list" class="text-sm">Loading…</div>
+      </div>
+    </div>
+
     <div data-set-tab="authoring" class="card">
       <h3 class="font-semibold mb-2">Prompts editor</h3>
       <div class="empty" style="padding:30px;text-align:center;">
@@ -12531,6 +12721,322 @@ function setSettingsTab(name) {
     btn.classList.toggle('text-indigo-600', active);
     btn.classList.toggle('border-transparent', !active);
     btn.classList.toggle('text-slate-500', !active);
+  });
+  // M103 · Lazy-load Canva tab data when it's opened (avoid hitting
+  // /canva/* endpoints on every Settings page render).
+  if (name === 'canva' && typeof loadCanvaSettings === 'function') {
+    setTimeout(loadCanvaSettings, 0);
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// M103 · Canva Settings — health card, settings panel, templates table,
+// sizes table. All data flows through /canva/* endpoints; no Canva
+// state is hardcoded in the UI.
+// ════════════════════════════════════════════════════════════════════
+async function loadCanvaSettings() {
+  // Health card
+  try {
+    const h = await fetch(`${PROXY}/canva/health`).then(r => r.json());
+    const el = $('canva-health');
+    if (!el) return;
+    if (!h.token_set) {
+      el.innerHTML = `<span class="pill" style="background:#fef3c7;color:#854d0e;">⚠ No token set</span>
+        <span class="text-xs ml-2">${escapeHtml(h.note || '')}</span>`;
+    } else if (h.live) {
+      el.innerHTML = `<span class="pill ok">✓ Healthy</span>
+        <span class="text-xs ml-2">${h.latency_ms}ms · ${h.count_first_page || 0} brand templates visible (first page)</span>`;
+    } else {
+      el.innerHTML = `<span class="pill err">✕ Live ping failed</span>
+        <span class="text-xs ml-2">${escapeHtml(h.error || h.code || 'unknown')}</span>`;
+    }
+  } catch (e) { $('canva-health').textContent = 'Health check failed: ' + e.message; }
+
+  // Settings inputs
+  try {
+    const s = await fetch(`${PROXY}/canva/settings`).then(r => r.json());
+    const cfg = (s && s.settings) || {};
+    if ($('canva-set-brand'))   $('canva-set-brand').value   = cfg.default_brand_id || '';
+    if ($('canva-set-pollmax')) $('canva-set-pollmax').value = cfg.poll_max_ms || 60000;
+    if ($('canva-set-export'))  $('canva-set-export').value  = cfg.preferred_export_format || 'png';
+  } catch (_) {}
+
+  loadCanvaTemplates();
+  loadCanvaSizes();
+}
+
+async function patchCanvaSetting(key, value) {
+  try {
+    const r = await authFetch(`${PROXY}/canva/settings`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ [key]: value }),
+    });
+    if (!r.ok) alert('Save failed: ' + (await r.text()));
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function saveCanvaToken() {
+  const v = ($('canva-set-token').value || '').trim();
+  if (!v) { alert('Paste a token first'); return; }
+  await patchCanvaSetting('api_token', v);
+  $('canva-set-token').value = '';
+  await loadCanvaSettings();
+}
+
+async function testCanvaConnection() {
+  const el = $('canva-health');
+  el.textContent = 'Testing…';
+  await loadCanvaSettings();
+}
+
+async function loadCanvaTemplates() {
+  try {
+    const j = await fetch(`${PROXY}/canva/templates`).then(r => r.json());
+    const list = j.templates || [];
+    const el = $('canva-templates-list');
+    if (!list.length) {
+      el.innerHTML = `<div class="empty" style="padding:20px;text-align:center;color:#64748b;">No templates registered yet — click <strong>+ Add template</strong> or <strong>📥 Pick from Canva</strong>.</div>`;
+      return;
+    }
+    el.innerHTML = `
+      <div style="overflow-x:auto;">
+      <table class="text-xs w-full" style="border-collapse:collapse;">
+        <thead>
+          <tr style="background:#f8fafc;color:#475569;text-align:left;">
+            <th class="p-2 border-b">Name</th>
+            <th class="p-2 border-b">Canva ID</th>
+            <th class="p-2 border-b">Slot</th>
+            <th class="p-2 border-b">Platform</th>
+            <th class="p-2 border-b">Lang</th>
+            <th class="p-2 border-b">Slot mappings (JSON)</th>
+            <th class="p-2 border-b">Enabled</th>
+            <th class="p-2 border-b"></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${list.map(t => `
+            <tr style="border-bottom:1px solid #e2e8f0;${!t.enabled ? 'opacity:0.5;' : ''}">
+              <td class="p-2"><input value="${escapeHtml(t.name||'')}" onblur="canvaPatchTemplate('${t.id}', 'name', this.value)" class="border border-slate-200 rounded px-1 py-0.5 text-xs w-full"></td>
+              <td class="p-2"><input value="${escapeHtml(t.canva_template_id||'')}" onblur="canvaPatchTemplate('${t.id}', 'canva_template_id', this.value)" class="border border-slate-200 rounded px-1 py-0.5 text-xs mono w-40"></td>
+              <td class="p-2"><input value="${escapeHtml(t.slot_type||'')}" placeholder="cover/data/cta/..." onblur="canvaPatchTemplate('${t.id}', 'slot_type', this.value || null)" class="border border-slate-200 rounded px-1 py-0.5 text-xs w-24"></td>
+              <td class="p-2"><input value="${escapeHtml(t.platform||'')}" placeholder="instagram" onblur="canvaPatchTemplate('${t.id}', 'platform', this.value || null)" class="border border-slate-200 rounded px-1 py-0.5 text-xs w-24"></td>
+              <td class="p-2"><input value="${escapeHtml(t.language||'')}" placeholder="en/fa" onblur="canvaPatchTemplate('${t.id}', 'language', this.value || null)" class="border border-slate-200 rounded px-1 py-0.5 text-xs w-16"></td>
+              <td class="p-2"><textarea onblur="canvaPatchTemplateJson('${t.id}', 'slot_mappings', this.value)" class="border border-slate-200 rounded px-1 py-0.5 text-xs mono w-full" style="min-height:48px;font-size:11px;">${escapeHtml(JSON.stringify(t.slot_mappings || {}, null, 0))}</textarea></td>
+              <td class="p-2 text-center"><input type="checkbox" ${t.enabled ? 'checked':''} onchange="canvaPatchTemplate('${t.id}', 'enabled', this.checked)"></td>
+              <td class="p-2"><button class="btn btn-ghost btn-xs" onclick="canvaInspectTemplate('${t.id}')" title="Live fetch slot dataset from Canva">🔍</button> <button class="btn btn-ghost btn-xs" onclick="canvaDeleteTemplate('${t.id}')" title="Disable">✕</button></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table></div>`;
+  } catch (e) {
+    $('canva-templates-list').innerHTML = `<div style="color:#dc2626;">Load failed: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function canvaAddTemplate() {
+  const name = prompt('Template name (e.g. "IG cover · carousel · FA"):');
+  if (!name) return;
+  const cid = prompt('Canva brand template ID (paste from Canva URL or "Pick from Canva" first):');
+  if (!cid) return;
+  const slot = prompt('Slot type (cover / data / cta / key_fact / leave blank for any):') || null;
+  try {
+    const r = await authFetch(`${PROXY}/canva/templates`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name, canva_template_id: cid, slot_type: slot, slot_mappings: {} }),
+    });
+    if (!r.ok) { alert('Create failed: ' + (await r.text())); return; }
+    await loadCanvaTemplates();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function canvaPatchTemplate(id, key, value) {
+  try {
+    const r = await authFetch(`${PROXY}/canva/templates/${id}`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ [key]: value }),
+    });
+    if (!r.ok) alert('Save failed: ' + (await r.text()));
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function canvaPatchTemplateJson(id, key, raw) {
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch (e) { alert('Invalid JSON: ' + e.message); return; }
+  await canvaPatchTemplate(id, key, parsed);
+}
+
+async function canvaDeleteTemplate(id) {
+  if (!confirm('Disable this template? (Soft-delete; can re-enable from the row.)')) return;
+  try {
+    const r = await authFetch(`${PROXY}/canva/templates/${id}`, { method: 'DELETE' });
+    if (!r.ok) alert('Delete failed: ' + (await r.text()));
+    await loadCanvaTemplates();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function canvaInspectTemplate(id) {
+  try {
+    const j = await fetch(`${PROXY}/canva/templates/${id}/canva-info`).then(r => r.json());
+    const ds = j && j.dataset;
+    const out = ds
+      ? Object.entries(ds).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join('\n')
+      : (j.dataset_error || 'no dataset returned');
+    alert(`Canva slot dataset for this template:\n\n${out}\n\nUse these element names as VALUES in slot_mappings.`);
+  } catch (e) { alert('Inspect failed: ' + e.message); }
+}
+
+async function canvaPickFromCanva() {
+  try {
+    const j = await fetch(`${PROXY}/canva/brand-templates?limit=50`).then(r => r.json());
+    if (!j.ok) { alert('List failed: ' + (j.error || 'unknown')); return; }
+    if (!j.items || !j.items.length) { alert('No brand templates returned. Make sure you have brand templates in your Canva workspace.'); return; }
+    const opts = j.items.map((t, i) => `${i+1}. ${t.title || '(untitled)'} — ${t.id}`).join('\n');
+    const pick = prompt(`Pick a template (paste the number):\n\n${opts}`);
+    const idx = parseInt(pick, 10) - 1;
+    if (Number.isNaN(idx) || !j.items[idx]) return;
+    const chosen = j.items[idx];
+    const name = prompt('Founder-facing name:', chosen.title || '') || chosen.title || 'Canva template';
+    const slot = prompt('Slot type (cover / data / cta / key_fact / blank for any):') || null;
+    const r = await authFetch(`${PROXY}/canva/templates`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name, canva_template_id: chosen.id, slot_type: slot, slot_mappings: {} }),
+    });
+    if (!r.ok) { alert('Create failed: ' + (await r.text())); return; }
+    await loadCanvaTemplates();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function loadCanvaSizes() {
+  try {
+    const j = await fetch(`${PROXY}/canva/sizes`).then(r => r.json());
+    const list = j.sizes || [];
+    const el = $('canva-sizes-list');
+    if (!list.length) {
+      el.innerHTML = `<div class="empty" style="padding:20px;text-align:center;color:#64748b;">No sizes registered.</div>`;
+      return;
+    }
+    el.innerHTML = `
+      <div style="overflow-x:auto;">
+      <table class="text-xs w-full" style="border-collapse:collapse;">
+        <thead><tr style="background:#f8fafc;color:#475569;text-align:left;">
+          <th class="p-2 border-b">Name</th>
+          <th class="p-2 border-b">Width</th>
+          <th class="p-2 border-b">Height</th>
+          <th class="p-2 border-b">Platform</th>
+          <th class="p-2 border-b">Enabled</th>
+          <th class="p-2 border-b"></th>
+        </tr></thead>
+        <tbody>
+          ${list.map(s => `
+            <tr style="border-bottom:1px solid #e2e8f0;${!s.enabled ? 'opacity:0.5;' : ''}">
+              <td class="p-2"><input value="${escapeHtml(s.name||'')}" onblur="canvaPatchSize('${s.id}', 'name', this.value)" class="border border-slate-200 rounded px-1 py-0.5 text-xs w-full"></td>
+              <td class="p-2"><input type="number" value="${s.width_px||0}" onblur="canvaPatchSize('${s.id}', 'width_px', Number(this.value))" class="border border-slate-200 rounded px-1 py-0.5 text-xs w-20 mono text-right"></td>
+              <td class="p-2"><input type="number" value="${s.height_px||0}" onblur="canvaPatchSize('${s.id}', 'height_px', Number(this.value))" class="border border-slate-200 rounded px-1 py-0.5 text-xs w-20 mono text-right"></td>
+              <td class="p-2"><input value="${escapeHtml(s.platform||'')}" onblur="canvaPatchSize('${s.id}', 'platform', this.value || null)" class="border border-slate-200 rounded px-1 py-0.5 text-xs w-24"></td>
+              <td class="p-2 text-center"><input type="checkbox" ${s.enabled ? 'checked':''} onchange="canvaPatchSize('${s.id}', 'enabled', this.checked)"></td>
+              <td class="p-2"><button class="btn btn-ghost btn-xs" onclick="canvaDeleteSize('${s.id}')">✕</button></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table></div>`;
+  } catch (e) {
+    $('canva-sizes-list').innerHTML = `<div style="color:#dc2626;">Load failed: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function canvaAddSize() {
+  const name = prompt('Size name (e.g. "Custom 1200×1200"):'); if (!name) return;
+  const w = parseInt(prompt('Width (px):'), 10);  if (!w) return;
+  const h = parseInt(prompt('Height (px):'), 10); if (!h) return;
+  const platform = prompt('Platform tag (optional):') || null;
+  try {
+    const r = await authFetch(`${PROXY}/canva/sizes`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name, width_px: w, height_px: h, platform }),
+    });
+    if (!r.ok) { alert('Create failed: ' + (await r.text())); return; }
+    await loadCanvaSizes();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function canvaPatchSize(id, key, value) {
+  try {
+    const r = await authFetch(`${PROXY}/canva/sizes/${id}`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ [key]: value }),
+    });
+    if (!r.ok) alert('Save failed: ' + (await r.text()));
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function canvaDeleteSize(id) {
+  if (!confirm('Disable this size?')) return;
+  try { await authFetch(`${PROXY}/canva/sizes/${id}`, { method: 'DELETE' }); } catch (_) {}
+  await loadCanvaSizes();
+}
+
+// M103 · Fan-out modal · pick which sizes to Magic-Resize the carousel into.
+async function canvaOpenFanoutModal(runId) {
+  let sizes = [];
+  try {
+    const j = await fetch(`${PROXY}/canva/sizes`).then(r => r.json());
+    sizes = (j.sizes || []).filter(s => s.enabled);
+  } catch (e) { alert('Could not load sizes: ' + e.message); return; }
+  if (!sizes.length) { alert('No enabled sizes — add some in Settings → Canva → Magic Resize sizes.'); return; }
+
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;display:flex;align-items:center;justify-content:center;';
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:10px;padding:20px;width:560px;max-width:90vw;max-height:80vh;overflow:auto;">
+      <h3 class="font-semibold mb-2">Fan out via Magic Resize</h3>
+      <p class="text-xs mb-3" style="color:#64748b;">Pick the platforms / sizes to resize the carousel into. Each one creates a new editable Canva design.</p>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mb-4" id="canva-fanout-checks">
+        ${sizes.map(s => `
+          <label class="flex items-center gap-2 text-xs" style="background:#f8fafc;padding:6px 10px;border-radius:6px;border:1px solid #e2e8f0;cursor:pointer;">
+            <input type="checkbox" data-canva-fanout-size="${s.id}">
+            <span><strong>${escapeHtml(s.name)}</strong><br><span style="color:#64748b;">${s.width_px}×${s.height_px}${s.platform ? ' · ' + escapeHtml(s.platform) : ''}</span></span>
+          </label>`).join('')}
+      </div>
+      <div class="flex gap-2 justify-end">
+        <button class="btn btn-ghost btn-xs" onclick="document.body.removeChild(this.closest('div').parentElement.parentElement)">Cancel</button>
+        <button class="btn btn-primary btn-xs" id="canva-fanout-submit">Fan out</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#canva-fanout-submit').addEventListener('click', async () => {
+    const ids = Array.from(overlay.querySelectorAll('[data-canva-fanout-size]:checked')).map(el => el.getAttribute('data-canva-fanout-size'));
+    if (!ids.length) { alert('Pick at least one size.'); return; }
+    overlay.querySelector('#canva-fanout-submit').disabled = true;
+    overlay.querySelector('#canva-fanout-submit').textContent = 'Working…';
+    try {
+      const r = await authFetch(`${PROXY}/compose/runs/${runId}/canva-fanout`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ size_ids: ids }),
+      });
+      const j = await r.json();
+      if (!j.ok) { alert('Fan out failed: ' + (j.error || 'unknown')); return; }
+      document.body.removeChild(overlay);
+      const el = $('canva-fanout-results');
+      if (el) {
+        el.innerHTML = `
+          <div class="card-tight" style="background:#f0fdf4;border:1px solid #86efac;">
+            <strong style="color:#166534;font-size:13px;">Fan-out complete</strong>
+            <span class="text-xs ml-2" style="color:#166534;">source design: ${escapeHtml(j.source_design_id || '')}</span>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-3">
+              ${(j.results || []).map(rr => `
+                <div style="background:#fff;padding:10px;border-radius:6px;border:1px solid #e2e8f0;">
+                  <div class="text-xs"><strong>${escapeHtml(rr.size && rr.size.name || '')}</strong> · ${rr.size && (rr.size.width_px+'×'+rr.size.height_px)}</div>
+                  ${rr.ok ? `
+                    <div class="mt-2 flex gap-2">
+                      ${rr.edit_url ? `<a class="btn btn-primary btn-xs" target="_blank" href="${escapeHtml(rr.edit_url)}">✎ Edit</a>` : ''}
+                      ${rr.view_url ? `<a class="btn btn-ghost btn-xs" target="_blank" href="${escapeHtml(rr.view_url)}">👁 View</a>` : ''}
+                    </div>` : `<div class="text-xs mt-1" style="color:#dc2626;">${escapeHtml(rr.error || 'failed')}</div>`}
+                </div>
+              `).join('')}
+            </div>
+          </div>`;
+      }
+    } catch (e) { alert('Error: ' + e.message); }
   });
 }
 

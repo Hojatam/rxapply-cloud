@@ -60,6 +60,7 @@ const toolsRouter   = require('./tools/router');       // T1 · tools framework 
 const toolsRegistry = require('./tools/registry');     // T1 · static tool catalog
 const toolsRuntime  = require('./tools/runtime');      // T1 · executes per-call gating + cost
 const migrate       = require('./migrate');            // T0 · migration runner (used by /setup + boot)
+const canva         = require('./canva');              // M103 · Canva Connect API client (compose Mode B)
 
 const app = express();
 
@@ -247,6 +248,9 @@ app.get('/health', (_, res) => res.json({
     // GET /health so you can confirm whether Unsplash is wired without
     // grepping Railway logs.
     unsplash: !!process.env.UNSPLASH_ACCESS_KEY,
+    // M103 · Canva mode B. True when CANVA_API_TOKEN is in env (the DB
+    // fallback isn't reflected here — that's reported via /canva/health).
+    canva: !!process.env.CANVA_API_TOKEN,
   },
   routes: ['/health', '/run-agent', '/run-agents-parallel', '/run-helper',
            '/prompts/:agent (GET, PUT)', '/prompts/:agent/versions',
@@ -2679,6 +2683,285 @@ app.post('/compose/runs/:id/publish', auth.middleware, async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ════════════════════════════════════════════════════════════════════════
+// M103 · Canva Connect — settings, templates, sizes, fan-out, dynamic options
+// All persisted in canva_settings / canva_templates / canva_sizes / canva_runs.
+// Nothing about Canva is hardcoded in recipes; the founder edits everything
+// from the dashboard at runtime.
+// ════════════════════════════════════════════════════════════════════════
+
+// ── Health + live-Canva diagnostics ────────────────────────────────────
+app.get('/canva/health', async (_req, res) => {
+  try {
+    const tokenSet = await canva.hasTokenAsync();
+    if (!tokenSet) return res.json({ ok: true, token_set: false, note: 'Set CANVA_API_TOKEN in Railway env vars OR paste it via the Canva settings panel.' });
+    const r = await canva.ping();
+    res.json({ ok: true, token_set: true, live: r.ok, ...r });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Settings (single-row config) ───────────────────────────────────────
+app.get('/canva/settings', async (_req, res) => {
+  try {
+    const s = await canva.getSettings();
+    // Mask the token if it's stored in the DB so the dashboard can show
+    // "set" without exposing the value to the wire.
+    if (s && s.api_token) s.api_token_masked = `${s.api_token.slice(0, 6)}…${s.api_token.slice(-4)}`;
+    if (s) delete s.api_token;
+    res.json({ ok: true, settings: s, env_token_set: !!process.env.CANVA_API_TOKEN });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.patch('/canva/settings', auth.middleware, async (req, res) => {
+  try {
+    const r = await canva.patchSettings(req.body || {});
+    if (!r.ok) return res.status(400).json(r);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Brand templates (founder-managed registry) ─────────────────────────
+app.get('/canva/templates', async (_req, res) => {
+  try {
+    const json = await db.queryValue(`
+      SELECT COALESCE(json_agg(row_to_json(t) ORDER BY enabled DESC, slot_type, name), '[]'::json)
+        FROM (SELECT id::text, name, canva_template_id, slot_type, platform, language,
+                     slot_mappings, notes, enabled, created_at::text, updated_at::text
+                FROM canva_templates) t;`);
+    res.json({ ok: true, templates: JSON.parse(json || '[]') });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.post('/canva/templates', auth.middleware, async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.name || !b.canva_template_id) return res.status(400).json({ ok: false, error: 'name + canva_template_id required' });
+    const id = await db.queryReturning(`
+      INSERT INTO canva_templates (name, canva_template_id, slot_type, platform, language, slot_mappings, notes, enabled)
+      VALUES (
+        ${db.q(b.name)},
+        ${db.q(b.canva_template_id)},
+        ${b.slot_type ? db.q(b.slot_type) : 'NULL'},
+        ${b.platform  ? db.q(b.platform)  : 'NULL'},
+        ${b.language  ? db.q(b.language)  : 'NULL'},
+        ${b.slot_mappings ? db.qJson(b.slot_mappings) : `'{}'::jsonb`},
+        ${b.notes ? db.q(b.notes) : 'NULL'},
+        ${b.enabled === false ? 'false' : 'true'}
+      ) RETURNING id::text;`);
+    res.json({ ok: true, id });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.patch('/canva/templates/:id', auth.middleware, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const sets = [];
+    if ('name' in b)               sets.push(`name = ${db.q(b.name)}`);
+    if ('canva_template_id' in b)  sets.push(`canva_template_id = ${db.q(b.canva_template_id)}`);
+    if ('slot_type' in b)          sets.push(`slot_type = ${b.slot_type == null ? 'NULL' : db.q(b.slot_type)}`);
+    if ('platform' in b)           sets.push(`platform = ${b.platform == null ? 'NULL' : db.q(b.platform)}`);
+    if ('language' in b)           sets.push(`language = ${b.language == null ? 'NULL' : db.q(b.language)}`);
+    if ('slot_mappings' in b)      sets.push(`slot_mappings = ${db.qJson(b.slot_mappings)}`);
+    if ('notes' in b)              sets.push(`notes = ${b.notes == null ? 'NULL' : db.q(b.notes)}`);
+    if ('enabled' in b)            sets.push(`enabled = ${b.enabled ? 'true' : 'false'}`);
+    if (!sets.length) return res.status(400).json({ ok: false, error: 'nothing to update' });
+    sets.push(`updated_at = now()`);
+    await db.query(`UPDATE canva_templates SET ${sets.join(', ')} WHERE id = ${db.q(req.params.id)};`);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.delete('/canva/templates/:id', auth.middleware, async (req, res) => {
+  try {
+    await db.query(`UPDATE canva_templates SET enabled = false, updated_at = now() WHERE id = ${db.q(req.params.id)};`);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Live fetch of slot dataset from Canva to help the founder map slots.
+app.get('/canva/templates/:id/canva-info', async (req, res) => {
+  try {
+    const row = await db.queryOne(`SELECT canva_template_id FROM canva_templates WHERE id = ${db.q(req.params.id)};`);
+    if (!row) return res.status(404).json({ ok: false, error: 'template not registered' });
+    const r = await canva.getBrandTemplate(row.canva_template_id);
+    res.json(r);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Live fetch of all available brand templates from Canva (so founder
+// can pick from a dropdown rather than typing IDs).
+app.get('/canva/brand-templates', async (req, res) => {
+  try {
+    const r = await canva.listBrandTemplates({
+      brandId:   req.query.brand_id || null,
+      query:     req.query.q || null,
+      limit:     parseInt(req.query.limit, 10) || 50,
+      continuation: req.query.continuation || null,
+    });
+    res.json(r);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Sizes (founder-managed Magic-Resize targets) ───────────────────────
+app.get('/canva/sizes', async (_req, res) => {
+  try {
+    const json = await db.queryValue(`
+      SELECT COALESCE(json_agg(row_to_json(s) ORDER BY enabled DESC, platform, name), '[]'::json)
+        FROM (SELECT id::text, name, width_px, height_px, platform, enabled, created_at::text
+                FROM canva_sizes) s;`);
+    res.json({ ok: true, sizes: JSON.parse(json || '[]') });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.post('/canva/sizes', auth.middleware, async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.name || !b.width_px || !b.height_px) return res.status(400).json({ ok: false, error: 'name + width_px + height_px required' });
+    const id = await db.queryReturning(`
+      INSERT INTO canva_sizes (name, width_px, height_px, platform, enabled) VALUES (
+        ${db.q(b.name)}, ${parseInt(b.width_px, 10)}, ${parseInt(b.height_px, 10)},
+        ${b.platform ? db.q(b.platform) : 'NULL'},
+        ${b.enabled === false ? 'false' : 'true'}
+      ) RETURNING id::text;`);
+    res.json({ ok: true, id });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.patch('/canva/sizes/:id', auth.middleware, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const sets = [];
+    if ('name' in b)      sets.push(`name = ${db.q(b.name)}`);
+    if ('width_px' in b)  sets.push(`width_px = ${parseInt(b.width_px, 10)}`);
+    if ('height_px' in b) sets.push(`height_px = ${parseInt(b.height_px, 10)}`);
+    if ('platform' in b)  sets.push(`platform = ${b.platform == null ? 'NULL' : db.q(b.platform)}`);
+    if ('enabled' in b)   sets.push(`enabled = ${b.enabled ? 'true' : 'false'}`);
+    if (!sets.length) return res.status(400).json({ ok: false, error: 'nothing to update' });
+    await db.query(`UPDATE canva_sizes SET ${sets.join(', ')} WHERE id = ${db.q(req.params.id)};`);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.delete('/canva/sizes/:id', auth.middleware, async (req, res) => {
+  try {
+    await db.query(`UPDATE canva_sizes SET enabled = false WHERE id = ${db.q(req.params.id)};`);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Dynamic options resolver — feeds the Compose form ──────────────────
+// The recipe declares `dynamic_source: 'canva-templates'` (or 'canva-sizes').
+// The dashboard hits this endpoint at form-render time so dropdowns
+// populate from live DB rows rather than hardcoded JSON.
+app.get('/canva/dynamic-options/:recipeId', async (req, res) => {
+  try {
+    const tplJson = await db.queryValue(`
+      SELECT COALESCE(json_agg(row_to_json(t) ORDER BY slot_type, name), '[]'::json)
+        FROM (SELECT id::text, name, slot_type, platform, language, canva_template_id
+                FROM canva_templates WHERE enabled = true) t;`);
+    const sizeJson = await db.queryValue(`
+      SELECT COALESCE(json_agg(row_to_json(s) ORDER BY platform, name), '[]'::json)
+        FROM (SELECT id::text, name, width_px, height_px, platform
+                FROM canva_sizes WHERE enabled = true) s;`);
+    res.json({
+      ok: true,
+      recipe_id: req.params.recipeId,
+      templates: JSON.parse(tplJson || '[]'),
+      sizes: JSON.parse(sizeJson || '[]'),
+    });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Magic-Resize fan-out for an existing compose run ───────────────────
+// Body: { lang?: 'fa', size_ids: ['<uuid>', ...], from_slide_n?: 1 }
+// Picks the source design from the run's canva-render output and
+// resizes it across each requested size. Persists one canva_runs row
+// per output for traceability.
+app.post('/compose/runs/:id/canva-fanout', auth.middleware, async (req, res) => {
+  try {
+    if (!await canva.hasTokenAsync()) return res.status(400).json({ ok: false, error: 'Canva token not set' });
+    const run = await composeOrchestrator.getRun(req.params.id);
+    if (!run) return res.status(404).json({ ok: false, error: 'run not found' });
+
+    const lang = (req.body && req.body.lang) || run.master_lang;
+    const fromSlideN = (req.body && req.body.from_slide_n) || 1;
+    const sizeIds = (req.body && Array.isArray(req.body.size_ids)) ? req.body.size_ids : [];
+    if (!sizeIds.length) return res.status(400).json({ ok: false, error: 'size_ids required (array of UUIDs)' });
+
+    // Find the source canva-render stage output
+    const stage = (run.stages || []).find(s =>
+      (s.stage_name === 'canva-render' || s.stage_name === 'render') &&
+      (s.lang || run.master_lang) === lang &&
+      s.status === 'done');
+    if (!stage || !stage.output) return res.status(400).json({ ok: false, error: `no canva-render output for lang=${lang}` });
+
+    const slides = (stage.output.slides || []).filter(s => s && s.canva_design_id);
+    if (!slides.length) return res.status(400).json({ ok: false, error: 'no canva designs found in stage output' });
+
+    const source = slides.find(s => s.n === fromSlideN) || slides[0];
+    if (!source) return res.status(400).json({ ok: false, error: 'source slide not found' });
+
+    // Look up size rows
+    const sizeJson = await db.queryValue(`
+      SELECT COALESCE(json_agg(row_to_json(s)), '[]'::json) FROM (
+        SELECT id::text, name, width_px, height_px, platform FROM canva_sizes
+         WHERE id IN (${sizeIds.map(id => db.q(id)).join(',')}) AND enabled = true
+      ) s;`);
+    const sizes = JSON.parse(sizeJson || '[]');
+    if (!sizes.length) return res.status(400).json({ ok: false, error: 'no enabled sizes match the IDs' });
+
+    const r = await canva.resize({
+      designId: source.canva_design_id,
+      custom: sizes.map(s => ({ width_px: s.width_px, height_px: s.height_px, name: s.name })),
+    });
+    if (!r.ok) return res.status(400).json(r);
+
+    // Persist a canva_runs row per output and find each design's edit URL
+    const out = [];
+    for (let i = 0; i < r.results.length; i++) {
+      const result = r.results[i];
+      const size = sizes[i];
+      const designId = result && result.design && result.design.id;
+      let editUrl = null, viewUrl = null;
+      if (designId) {
+        const d = await canva.getDesign(designId);
+        if (d.ok && d.design && d.design.urls) {
+          editUrl = d.design.urls.edit_url || d.design.urls.edit;
+          viewUrl = d.design.urls.view_url || d.design.urls.view;
+        }
+      }
+      try {
+        await db.query(`
+          INSERT INTO canva_runs (compose_run_id, slide_n, canva_design_id, edit_url, view_url, size_id, status, finished_at)
+          VALUES (
+            ${db.q(req.params.id)}, NULL,
+            ${designId ? db.q(designId) : 'NULL'},
+            ${editUrl ? db.q(editUrl) : 'NULL'},
+            ${viewUrl ? db.q(viewUrl) : 'NULL'},
+            ${db.q(size.id)},
+            ${result.ok ? `'ready'` : `'failed'`},
+            now()
+          );`);
+      } catch (_) {}
+      out.push({ size, ok: !!result.ok, design_id: designId, edit_url: editUrl, view_url: viewUrl, error: result.error || null });
+    }
+    res.json({ ok: true, source_design_id: source.canva_design_id, results: out });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// List canva_runs rows for a compose run (per-slide originals + fan-out children).
+app.get('/compose/runs/:id/canva-runs', async (req, res) => {
+  try {
+    const json = await db.queryValue(`
+      SELECT COALESCE(json_agg(row_to_json(r) ORDER BY parent_run_id NULLS FIRST, slide_n, created_at), '[]'::json)
+        FROM (SELECT id::text, compose_run_id::text, slide_n, canva_design_id, edit_url, view_url,
+                     template_id::text, size_id::text, parent_run_id::text, status, error,
+                     created_at::text, finished_at::text
+                FROM canva_runs WHERE compose_run_id = ${db.q(req.params.id)}) r;`);
+    res.json({ ok: true, runs: JSON.parse(json || '[]') });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ── M43 · Eval harness routes ───────────────────────────────────────────
 //   GET    /evals/golden-prompts                       — list (?country, ?recipe)
 //   GET    /evals/golden-prompts/:id                   — single
@@ -3904,6 +4187,7 @@ app.listen(PORT, () => {
   // Tarrah's image_source='mixed' silently degrades to 'generated' (M101).
   // This boot line tells the founder what to expect at a glance.
   console.log(`    UNSPLASH_ACCESS_KEY  ${present(process.env.UNSPLASH_ACCESS_KEY)}`);
+  console.log(`    CANVA_API_TOKEN      ${present(process.env.CANVA_API_TOKEN)}`);
   log(`startup port=${PORT} mode=${MODE} authInit=${auth.isInitialized()} anth=${!!process.env.ANTHROPIC_API_KEY} openai=${!!process.env.OPENAI_API_KEY} n8n=${!!process.env.N8N_API_KEY}`);
 
   // M95 · Single-source-of-truth control map

@@ -1,0 +1,58 @@
+{
+  "id": "ig-canva",
+  "label": "Instagram (Canva-native)",
+  "icon": "instagram",
+  "description": "Compose Mode B (M103). Same upstream brain as Instagram — plan/research/draft/critique/verify/adapt/Tarrah — but the final step autofills a Canva brand template per slide. The result is an editable Canva design URL, ready for Magic Resize fan-out across platforms.",
+  "version": "1",
+  "length_target_words": "38–75 (mean 60, p95 119 — never exceed 119)",
+
+  "stages": [
+    { "name": "plan",     "capability": "plan" },
+    { "name": "research", "capability": "research", "if_complexity_at_least": "standard" },
+    { "name": "draft",    "capability": "draft", "params": { "length_words": [38, 75], "hard_max_words": 119 } },
+    { "name": "critique", "capability": "critique" },
+    { "name": "verify",   "capability": "verify" },
+    { "name": "voice-critic", "capability": "voice-critic" },
+    { "name": "audit",    "capability": "audit", "if_complexity_at_least": "deep" },
+    { "name": "adapt",    "capability": "adapt",
+      "params": { "produce": ["caption", "hashtags", "design_plan", "design_brief"] } },
+    { "name": "render",        "renderer": "ig" },
+    { "name": "carousel-plan", "capability": "carousel-plan" },
+    { "name": "canva-render",  "capability": "canva-render", "renderer": "canva" }
+  ],
+
+  "gateable_stages": ["critique", "verify", "voice-critic", "audit", "adapt", "carousel-plan"],
+
+  "translate": {
+    "capability": "translate",
+    "stages_to_retranslate": ["caption", "hashtags"]
+  },
+
+  "options_schema": [
+    { "key": "primary_cta",     "label": "CTA URL (link in bio)", "type": "text", "placeholder": "https://rxapply.com" },
+    { "key": "max_hashtags",    "label": "Max hashtags",          "type": "number", "default": 12, "min": 3, "max": 30 },
+    { "key": "carousel_slides", "label": "Slide count",           "type": "number", "default": 4, "min": 1, "max": 12 },
+
+    {
+      "key": "canva_template_overrides",
+      "label": "Per-slot Canva template overrides",
+      "type": "dynamic",
+      "dynamic_source": "canva-templates",
+      "render_as": "slot-template-grid",
+      "help": "Optional. Pin a specific Canva brand template for each slot type (cover/data/cta/...). When unset, the renderer auto-resolves by slot_type → platform → language."
+    },
+
+    {
+      "key": "force_image_source",
+      "label": "Force every slide's image source (override Tarrah)",
+      "type": "select",
+      "default": "",
+      "options": [
+        { "value": "",          "label": "— Trust Tarrah (per-slide) —" },
+        { "value": "mixed",     "label": "All slides: mixed (Unsplash hero, AI overlay in Canva)" },
+        { "value": "unsplash",  "label": "All slides: pure Unsplash photo" },
+        { "value": "generated", "label": "All slides: no hero image (type-only Canva templates)" }
+      ]
+    }
+  ]
+}

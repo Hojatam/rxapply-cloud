@@ -1010,6 +1010,223 @@ illustration style, clean composition, minimal text overlay, no logo.`;
   };
 }
 
+// ════════════════════════════════════════════════════════════════════
+// M103 · Canva renderer (compose Mode B)
+// Iterates Tarrah's slide spec, autofills a Canva brand template per slide,
+// returns editable design URLs. Falls back gracefully when the API token is
+// missing — the stage still completes, just with per-slide errors recorded.
+// All template/slot resolution happens against the canva_templates DB table;
+// nothing about the render is hardcoded here.
+// ════════════════════════════════════════════════════════════════════
+async function canvaRender({ source, run, recipe, lang }) {
+  const canva = require('./canva');
+  const composeImage = require('./compose-image');
+  const unsplash     = require('./unsplash');
+  const { queryValue, query, q } = require('./db');
+
+  const tokenOk = await canva.hasTokenAsync();
+  if (!tokenOk) {
+    return {
+      _renderer: 'canva',
+      _carousel: false,
+      slides: [{ error: 'CANVA_API_TOKEN not set (env or canva_settings).' }],
+      cost_usd: 0,
+      partial_failure: 'token_missing',
+      slides_rendered: 0,
+    };
+  }
+
+  // Pull the carousel spec from the source bundle (same place the
+  // gpt-image-2 path looks).
+  const carouselSpec = source && source._carousel_spec;
+  if (!carouselSpec || !Array.isArray(carouselSpec.slides) || !carouselSpec.slides.length) {
+    return { _renderer: 'canva', _carousel: false, error: 'no carousel-plan output found upstream' };
+  }
+  const slides    = carouselSpec.slides;
+  const platform  = (recipe && recipe.id) || null;
+  const langKey   = lang || (run && run.master_lang) || null;
+
+  // Founder may pin per-slot template overrides via run.options.canva_template_overrides
+  // shape: { cover: '<canva_templates.id>', data: '<id>', cta: '<id>', ... }
+  const overrides = (run && run.options && run.options.canva_template_overrides) || {};
+
+  // Pull all enabled templates ONCE; we'll resolve per-slide in-memory.
+  const tplJson = await queryValue(`
+    SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json)
+      FROM (SELECT id::text, name, canva_template_id, slot_type, platform, language, slot_mappings
+              FROM canva_templates WHERE enabled = true) t;`);
+  const templates = JSON.parse(tplJson || '[]');
+
+  function resolveTemplateForSlide(slide) {
+    // 1. founder override by slot_type wins
+    const ov = overrides[slide.role] || overrides[slide.slot_type] || overrides.default;
+    if (ov) {
+      const t = templates.find(x => x.id === ov);
+      if (t) return t;
+    }
+    // 2. exact match: slot_type + platform-loose + language-loose
+    const slotKey = slide.role || slide.slot_type;
+    const candidates = templates.filter(t =>
+      (!t.slot_type || !slotKey || t.slot_type === slotKey) &&
+      (!t.platform  || !platform || t.platform === platform || t.platform === 'instagram') &&
+      (!t.language  || !langKey  || t.language === langKey || t.language === 'any')
+    );
+    // Prefer most-specific (with all three set)
+    candidates.sort((a, b) => {
+      const score = (x) => (x.slot_type ? 1 : 0) + (x.platform ? 1 : 0) + (x.language ? 1 : 0);
+      return score(b) - score(a);
+    });
+    return candidates[0] || templates[0] || null;
+  }
+
+  // Build the autofill `data` payload for one slide. We map Tarrah's slot
+  // keys → Canva element names using the template's slot_mappings.
+  function buildAutofillData(slide, mapping) {
+    const data = {};
+    const map = mapping || {};
+    // Common slot names Tarrah produces; we accept either Tarrah's
+    // native keys (heading/subheading/bullets/key_number/...) or whatever
+    // the founder mapped them to.
+    const tarrah = {
+      heading:       slide.heading,
+      subheading:    slide.subheading,
+      bullets:       Array.isArray(slide.bullets) ? slide.bullets.join('\n') : slide.bullets,
+      key_number:    slide.key_number,
+      country_pill:  slide.country_pill,
+      date_pill:     slide.date_pill,
+      deadline_pill: slide.deadline_pill,
+      tagline:       carouselSpec.tagline_text,
+      footer:        carouselSpec.tagline_text,
+    };
+    for (const [tKey, tVal] of Object.entries(tarrah)) {
+      if (tVal == null || tVal === '') continue;
+      // The slot_mappings JSON is { "<tarrah-key>": "<canva-element-name>" }
+      const canvaName = map[tKey] || tKey;
+      data[canvaName] = { type: 'text', text: String(tVal) };
+    }
+    return data;
+  }
+
+  // Fetch hero image when the slide wants one and upload to Canva.
+  async function resolveHero(slide) {
+    const wants = slide.image_source === 'unsplash' || slide.image_source === 'mixed';
+    if (!wants) return null;
+    if (!unsplash.hasKey()) return { skipped: 'unsplash_key_missing' };
+    const u = await unsplash.quickPick({
+      query: slide.unsplash_query || (run && run.topic) || '',
+      orientation: slide.unsplash_orientation || 'squarish',
+      topic: run && run.topic, language: langKey,
+    });
+    if (!u.ok) return { skipped: u.error };
+    // Download the image bytes from R2, upload to Canva
+    try {
+      const r = await fetch(u.url);
+      if (!r.ok) return { skipped: `unsplash_download_${r.status}` };
+      const buf = Buffer.from(await r.arrayBuffer());
+      const up = await canva.uploadAsset({ buffer: buf, mimeType: 'image/jpeg', name: `slide-${slide.n || ''}-hero` });
+      if (!up.ok) return { skipped: up.error || 'asset_upload_failed' };
+      return { asset_id: up.asset_id, unsplash_url: u.url, attribution: u.attribution_text, photographer: u.photographer };
+    } catch (e) {
+      return { skipped: e.message };
+    }
+  }
+
+  const renderedSlides = [];
+  const startedAt = Date.now();
+  let firstError = null;
+
+  for (const slide of slides) {
+    const tpl = resolveTemplateForSlide(slide);
+    if (!tpl) {
+      const msg = `no Canva template registered for slot_type='${slide.role || slide.slot_type || '?'}'`;
+      if (!firstError) firstError = msg;
+      renderedSlides.push({ n: slide.n, role: slide.role, error: msg, _hint: 'Add a template via the Canva settings panel and tag it with this slot_type.' });
+      continue;
+    }
+
+    const data = buildAutofillData(slide, tpl.slot_mappings);
+
+    // Hero image — best-effort; missing hero doesn't fail the slide
+    const hero = await resolveHero(slide);
+    if (hero && hero.asset_id) {
+      // map by hero slot name (founder-configured) or fall back to common keys
+      const heroSlot = (tpl.slot_mappings && (tpl.slot_mappings.hero || tpl.slot_mappings.hero_image_url || tpl.slot_mappings.hero_image)) || 'hero';
+      data[heroSlot] = { type: 'image', asset_id: hero.asset_id };
+    }
+
+    const af = await canva.autofillFromTemplate({
+      templateId: tpl.canva_template_id,
+      title: `${run && run.topic || 'compose'} · slide ${slide.n}`,
+      data,
+    });
+    if (!af.ok) {
+      if (!firstError) firstError = `slide ${slide.n}: ${af.error || af.code}`;
+      renderedSlides.push({ n: slide.n, role: slide.role, error: af.error || af.code, _template_id: tpl.id });
+      continue;
+    }
+    const settings = await canva.getSettings();
+    const maxMs = (settings && settings.poll_max_ms) || 60000;
+    const result = await canva.pollAutofill(af.job_id, { maxMs });
+    if (!result.ok) {
+      if (!firstError) firstError = `slide ${slide.n}: ${result.error || result.code}`;
+      renderedSlides.push({ n: slide.n, role: slide.role, error: result.error || result.code, _template_id: tpl.id });
+      // Persist the failed canva_runs row for traceability
+      try {
+        await query(`INSERT INTO canva_runs (compose_run_id, slide_n, template_id, status, error, fields, finished_at)
+                     VALUES (${q(run.id)}, ${slide.n || 'NULL'}, ${q(tpl.id)}, 'failed', ${q(String(result.error || result.code))}, '${JSON.stringify(data).replace(/'/g, "''")}'::jsonb, now());`);
+      } catch (_) {}
+      continue;
+    }
+
+    const editUrl = (result.urls && (result.urls.edit_url || result.urls.edit)) || null;
+    const viewUrl = (result.urls && (result.urls.view_url || result.urls.view)) || null;
+
+    try {
+      await query(`INSERT INTO canva_runs (compose_run_id, slide_n, canva_design_id, edit_url, view_url, template_id, status, fields, finished_at)
+                   VALUES (${q(run.id)}, ${slide.n || 'NULL'},
+                           ${result.design_id ? q(result.design_id) : 'NULL'},
+                           ${editUrl ? q(editUrl) : 'NULL'},
+                           ${viewUrl ? q(viewUrl) : 'NULL'},
+                           ${q(tpl.id)},
+                           'ready',
+                           '${JSON.stringify(data).replace(/'/g, "''")}'::jsonb,
+                           now());`);
+    } catch (_) {}
+
+    renderedSlides.push({
+      n: slide.n,
+      role: slide.role,
+      canva_design_id: result.design_id,
+      edit_url: editUrl,
+      view_url: viewUrl,
+      thumbnail_url: result.thumbnail_url,
+      _template_id: tpl.id,
+      _template_name: tpl.name,
+      ...(hero && hero.unsplash_url ? {
+        _unsplash_hero_url: hero.unsplash_url,
+        _attribution: hero.attribution,
+        _photographer: hero.photographer,
+      } : {}),
+      ...(hero && hero.skipped ? { _hero_skipped: hero.skipped } : {}),
+    });
+  }
+
+  const successCount = renderedSlides.filter(s => s.canva_design_id).length;
+  return {
+    _renderer: 'canva',
+    _carousel: true,
+    slides: renderedSlides,
+    cost_usd: 0,                                   // Canva Pro is a subscription; per-call cost ~0
+    template: 'canva-brand-template',
+    slide_count: slides.length,
+    slides_rendered: successCount,
+    partial_failure: firstError,
+    duration_ms: Date.now() - startedAt,
+    first_design_id: renderedSlides.find(s => s.canva_design_id)?.canva_design_id || null,
+    first_edit_url:  renderedSlides.find(s => s.edit_url)?.edit_url || null,
+  };
+}
+
 module.exports = {
   _default,
   // M26
@@ -1023,4 +1240,6 @@ module.exports = {
   'ig':          instagram,
   // M32
   'image-cover': imageCover,
+  // M103 · Canva-native carousel renderer (compose Mode B)
+  'canva':       canvaRender,
 };

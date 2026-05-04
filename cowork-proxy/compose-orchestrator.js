@@ -1678,17 +1678,16 @@ async function _executeRenderer({ runId, run, recipe, stage, stageIndex, lang })
   } else {
     // master: pick the right upstream output for this renderer.
     const masterDone = stages.filter(s => s.lang == null && s.status === 'done');
-    if (rendererName === 'image-cover') {
-      // Image renderer prefers Afshin's design output (final_prompt) over
-      // Avang's raw brief. Fallback to adapt → draft so old runs (without
-      // a design stage) still work.
+    if (rendererName === 'image-cover' || rendererName === 'canva') {
+      // M103 · Both gpt-image-2 (image-cover) and Canva (canva) renderers
+      // need: Afshin's design output (when present) + Tarrah's carousel
+      // spec + Avang's raw brief. The Canva renderer uses Tarrah's
+      // slot data verbatim; image-cover uses the design.final_prompt.
       const designRow = masterDone.find(s => s.stage_name === 'design');
       const adaptRow  = masterDone.find(s => s.stage_name === 'adapt');
       const draftRow  = masterDone.find(s => s.stage_name === 'draft');
       sourceForRender = (designRow || adaptRow || draftRow || {}).output;
       // M65 · Pipe Tarrah's carousel spec to the renderer when present.
-      // The renderer iterates the spec's slides and renders one image per
-      // slide using the brand-template scaffold from afshin-router.
       const carouselRow = masterDone.find(s => s.stage_name === 'carousel-plan');
       if (carouselRow && carouselRow.output) {
         sourceForRender = { ...(sourceForRender || {}), _carousel_spec: carouselRow.output };

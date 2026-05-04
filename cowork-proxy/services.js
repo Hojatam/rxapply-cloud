@@ -209,7 +209,35 @@ async function probeUnsplash() {
   }
 }
 
-// ── 7. Node process ─────────────────────────────────────────────────
+// ── 7. Canva ────────────────────────────────────────────────────────
+// M103 · Verifies CANVA_API_TOKEN (env or DB row) is set AND that the
+// token can reach the live Connect API. Lists 1 brand template; surfaces
+// rate-limit headers so the founder can see remaining quota.
+async function probeCanva() {
+  const t0 = Date.now();
+  try {
+    const canva = require('./canva');
+    const tokenSet = await canva.hasTokenAsync();
+    if (!tokenSet) return { ok: null, latency_ms: 0, note: 'CANVA_API_TOKEN not set (env or canva_settings — Mode B compose runs will fail until set)' };
+    const r = await canva.ping();
+    if (!r.ok) {
+      return {
+        ok: false, latency_ms: r.latency_ms != null ? r.latency_ms : (Date.now() - t0),
+        api_key_valid: r.code !== 'NO_TOKEN' && r.status !== 401,
+        error: r.error, code: r.code, status: r.status,
+      };
+    }
+    return {
+      ok: true, latency_ms: r.latency_ms,
+      api_key_valid: true,
+      brand_templates_first_page: r.count_first_page,
+    };
+  } catch (e) {
+    return { ok: false, latency_ms: Date.now() - t0, error: e.message.slice(0, 200) };
+  }
+}
+
+// ── 8. Node process ─────────────────────────────────────────────────
 function probeProcess() {
   const m = process.memoryUsage();
   return {
@@ -224,8 +252,8 @@ function probeProcess() {
 
 // ── Public API ──────────────────────────────────────────────────────
 async function probeAll() {
-  const [database, storageR, anthropic, openai, n8n, unsplash] = await Promise.all([
-    probeDatabase(), probeStorage(), probeAnthropic(), probeOpenAI(), probeN8n(), probeUnsplash(),
+  const [database, storageR, anthropic, openai, n8n, unsplash, canvaR] = await Promise.all([
+    probeDatabase(), probeStorage(), probeAnthropic(), probeOpenAI(), probeN8n(), probeUnsplash(), probeCanva(),
   ]);
   return {
     generated_at: new Date().toISOString(),
@@ -236,6 +264,7 @@ async function probeAll() {
       openai,
       n8n,
       unsplash,
+      canva: canvaR,
       process: probeProcess(),
     },
   };
@@ -249,6 +278,7 @@ async function probe(name) {
     case 'openai':    return await probeOpenAI();
     case 'n8n':       return await probeN8n();
     case 'unsplash':  return await probeUnsplash();
+    case 'canva':     return await probeCanva();
     case 'process':   return probeProcess();
     default: return { ok: false, error: `unknown service: ${name}` };
   }
