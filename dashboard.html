@@ -7512,12 +7512,85 @@ function coRenderRun(run) {
     `;
   };
 
+  // M75 · Refine-attempts summary banner. When the orchestrator has
+  // re-run any stage due to critique/verify/audit/voice-critic verdict
+  // failures (M69), surface the activity prominently.
+  const refineAttempts = Array.isArray(run.refine_attempts) ? run.refine_attempts : [];
+  const refineStatus = run.refine_status || 'none';
+  const refineBanner = (refineAttempts.length > 0 || refineStatus === 'cap_reached') ? (() => {
+    const isCap = refineStatus === 'cap_reached';
+    const bgColor = isCap ? '#fee2e2' : '#fef3c7';
+    const borderColor = isCap ? '#dc2626' : '#d97706';
+    const titleColor = isCap ? '#991b1b' : '#92400e';
+    const title = isCap
+      ? `Refine cap reached — founder must intervene`
+      : `${refineAttempts.length} refine ${refineAttempts.length === 1 ? 'attempt' : 'attempts'} fired automatically`;
+    const grouped = {};
+    for (const a of refineAttempts) {
+      const k = `${a.from_stage}→${a.to_stage}`;
+      (grouped[k] = grouped[k] || []).push(a);
+    }
+    const groupedRows = Object.entries(grouped).map(([k, arr]) => {
+      const last = arr[arr.length - 1];
+      return `
+        <div class="text-xs flex items-start gap-2 mt-1">
+          <span class="mono" style="background:#fff;color:${titleColor};padding:1px 6px;border-radius:3px;font-weight:600;min-width:auto;">🔄 ${arr.length}×</span>
+          <div style="flex:1;">
+            <div style="color:${titleColor};">
+              <strong>${escapeHtml(k.replace('→', ' → '))}</strong>
+              <span style="opacity:.7;">· reason: <span class="mono">${escapeHtml(last.reason || '?')}</span></span>
+            </div>
+            ${Array.isArray(last.fixes) && last.fixes.length ? `
+              <ul class="text-xs mt-1" style="padding-left:14px;color:#64748b;">
+                ${last.fixes.slice(0, 3).map(f => `<li>${escapeHtml(String(f).slice(0, 200))}</li>`).join('')}
+                ${last.fixes.length > 3 ? `<li style="font-style:italic;color:#94a3b8;">+ ${last.fixes.length - 3} more</li>` : ''}
+              </ul>` : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+    return `
+      <div style="background:${bgColor};border-left:4px solid ${borderColor};border-radius:6px;padding:10px 14px;margin-bottom:14px;">
+        <div class="flex items-center gap-2">
+          <span style="font-size:18px;">${isCap ? '⚠️' : '🔄'}</span>
+          <div style="font-weight:600;color:${titleColor};font-size:13px;">${escapeHtml(title)}</div>
+        </div>
+        <div class="mt-1 text-xs" style="color:${titleColor};opacity:.85;">
+          ${isCap
+            ? `The orchestrator hit a stage's retry cap. The latest attempt is gated below — review the output and approve or fix manually.`
+            : `Stages below were re-run after a downstream verdict failure. The agent saw a "REFINE NOTES" block with the fixes from the failing stage.`}
+        </div>
+        ${groupedRows}
+      </div>
+    `;
+  })() : '';
+
+  // Compute which stages were targets of refines so we can badge them.
+  const refineTargets = new Set();
+  for (const a of refineAttempts) refineTargets.add(a.to_stage);
+  const refineTargetCounts = {};
+  for (const a of refineAttempts) {
+    refineTargetCounts[a.to_stage] = (refineTargetCounts[a.to_stage] || 0) + 1;
+  }
+
+  // Re-render rows with refine badges. Patch the existing renderRow
+  // closure by wrapping it with a refine-aware decorator.
+  const decorate = (s, html) => {
+    if (refineTargets.has(s.stage_name) && s.status === 'done') {
+      const n = refineTargetCounts[s.stage_name] || 0;
+      const badge = `<span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;margin-left:6px;" title="This stage was re-run ${n} time${n === 1 ? '' : 's'} after a refine">🔄 attempt #${n + 1}</span>`;
+      return html.replace(/(<div class="co-stage-name">[\s\S]*?)<\/div>/, (_, head) => `${head}${badge}</div>`);
+    }
+    return html;
+  };
+
   $('co-pipeline').innerHTML = `
+    ${refineBanner}
     <div class="co-form-section-title" style="margin-bottom:10px;">Master · ${escapeHtml(run.master_lang)}</div>
-    ${masterRows.map(renderRow).join('') || '<div class="text-xs text-slate-400 italic">no stages yet</div>'}
+    ${masterRows.map(s => decorate(s, renderRow(s))).join('') || '<div class="text-xs text-slate-400 italic">no stages yet</div>'}
     ${targetRows.length ? `
       <div class="co-form-section-title" style="margin-top:18px;margin-bottom:10px;">Translations</div>
-      ${targetRows.map(renderRow).join('')}
+      ${targetRows.map(s => decorate(s, renderRow(s))).join('')}
     ` : ''}
   `;
 
