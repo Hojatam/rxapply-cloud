@@ -5806,8 +5806,81 @@ function renderPipelines() {
         </div>
       </div>
     </div>
+
+    <!-- M74 · Live runs panel · last 20 runs for current pipeline -->
+    <div class="card mt-3" id="pl-runs-panel" style="padding:0;">
+      <div style="padding:8px 14px;border-bottom:1px solid #f1f5f9;background:#fafbff;display:flex;align-items:center;gap:10px;font-size:12px;">
+        <div style="font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;font-size:11px;">Recent runs</div>
+        <div id="pl-runs-meta" style="color:#94a3b8;font-size:11px;"></div>
+        <div class="ml-auto flex gap-2 items-center">
+          <label style="font-size:11px;color:#64748b;">
+            <input type="checkbox" id="pl-runs-autorefresh" style="vertical-align:middle;"> auto-refresh (5s)
+          </label>
+          <button class="btn btn-ghost btn-xs" onclick="plLoadRuns()" id="pl-runs-refresh-btn" disabled>↻</button>
+        </div>
+      </div>
+      <div id="pl-runs-list" style="max-height:240px;overflow-y:auto;">
+        <div class="empty" style="padding:18px;font-size:12px;color:#94a3b8;font-style:italic;">Pick a pipeline to see its recent runs.</div>
+      </div>
+    </div>
   `;
   plRefresh();
+}
+
+// ── M74 · Live runs panel ─────────────────────────────────────────
+async function plLoadRuns() {
+  if (!_plState.current) return;
+  const listEl = $('pl-runs-list');
+  const metaEl = $('pl-runs-meta');
+  if (!listEl) return;
+  try {
+    const r = await fetch(`${PROXY}/compose/runs?recipe=${encodeURIComponent(_plState.current.id)}&limit=20`);
+    const j = await r.json();
+    if (!j.ok) { listEl.innerHTML = `<div class="empty" style="padding:14px;color:#dc2626;">${escapeHtml(j.error || 'failed')}</div>`; return; }
+    const runs = j.items || [];
+    if (metaEl) metaEl.textContent = `${runs.length} runs · click to open`;
+    if (!runs.length) {
+      listEl.innerHTML = '<div class="empty" style="padding:18px;font-size:12px;color:#94a3b8;font-style:italic;">No runs yet for this pipeline.</div>';
+      return;
+    }
+    listEl.innerHTML = runs.map(rn => {
+      const refineCount = Array.isArray(rn.refine_attempts) ? rn.refine_attempts.length : 0;
+      const refineStatus = rn.refine_status || 'none';
+      const status = rn.status || 'unknown';
+      const statusColor = status === 'done' ? '#16a34a' : status === 'failed' ? '#dc2626' : status === 'awaiting_approval' ? '#d97706' : '#94a3b8';
+      const refineBadge = refineCount > 0 ? `
+        <span style="background:${refineStatus === 'cap_reached' ? '#fee2e2' : '#fef3c7'};color:${refineStatus === 'cap_reached' ? '#dc2626' : '#92400e'};padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;margin-left:6px;" title="${refineCount} refine attempts · ${refineStatus}">
+          🔄 ${refineCount}${refineStatus === 'cap_reached' ? ' ⚠' : ''}
+        </span>` : '';
+      const cost = rn.total_cost_usd ? `$${Number(rn.total_cost_usd).toFixed(4)}` : '—';
+      return `
+        <div onclick="navigate('compose'); setTimeout(() => coOpenRun('${escapeHtml(rn.id)}'), 200);"
+             style="padding:8px 14px;border-bottom:1px solid #f1f5f9;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:12px;"
+             onmouseover="this.style.background='#fafbff'" onmouseout="this.style.background=''">
+          <span style="background:${statusColor};color:#fff;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;min-width:60px;text-align:center;">${escapeHtml(status.replace('_', ' '))}</span>
+          ${refineBadge}
+          <div style="flex:1;min-width:0;">
+            <div style="color:#1e293b;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(rn.topic || '(no topic)')}</div>
+            <div style="font-size:10px;color:#94a3b8;margin-top:1px;">${escapeHtml(rn.master_lang || '')} → ${escapeHtml((rn.target_langs || []).join(', ') || rn.master_lang || '')} · ${fmtTime(rn.created_at)}</div>
+          </div>
+          <span class="mono" style="font-size:11px;color:#64748b;">${cost}</span>
+          <span style="color:#cbd5e1;font-size:14px;">›</span>
+        </div>
+      `;
+    }).join('');
+  } catch (e) {
+    listEl.innerHTML = `<div class="empty" style="padding:14px;color:#dc2626;">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+let _plRunsTimer = null;
+function _plToggleAutoRefresh() {
+  const cb = $('pl-runs-autorefresh');
+  if (!cb) return;
+  if (_plRunsTimer) { clearInterval(_plRunsTimer); _plRunsTimer = null; }
+  if (cb.checked && _plState.current) {
+    _plRunsTimer = setInterval(() => plLoadRuns(), 5000);
+  }
 }
 
 // ── Left panel · list of pipelines ────────────────────────────────
@@ -5868,8 +5941,13 @@ async function plLoad(id) {
     _plRenderDrawer();
     plRefresh();   // re-highlight in left panel
     // toggle buttons
-    ['pl-clone-btn','pl-export-btn','pl-versions-btn'].forEach(id => { const b = $(id); if (b) b.disabled = false; });
+    ['pl-clone-btn','pl-export-btn','pl-versions-btn','pl-runs-refresh-btn'].forEach(id => { const b = $(id); if (b) b.disabled = false; });
     _plUpdateSaveButton();
+    // M74 · load runs panel for the newly selected pipeline
+    plLoadRuns();
+    // bind autorefresh checkbox once
+    const cb = $('pl-runs-autorefresh');
+    if (cb && !cb._bound) { cb.addEventListener('change', _plToggleAutoRefresh); cb._bound = true; }
   } catch (e) { alert(e.message); }
 }
 
