@@ -1342,9 +1342,14 @@ async function _executeLlmStage({ runId, run, recipe, stage, stageIndex, lang, p
   // recipe stage doesn't pin its own cap, choose a generous per-capability
   // default. This is the floor; recipes can still override via stage.max_tokens.
   const _defaultMaxTokens = ({
-    design:           6000,   // carousel art direction · per-slide directives
-    'carousel-plan':  5000,   // Tarrah · slot-spec for 4–8 slides
-    adapt:            4000,   // channel-specific fields incl. design_plan
+    // M100b · sonnet is materially more verbose than opus on per-slide art
+    // direction. Real-world failure: opus truncated at char 6307, sonnet at
+    // char 8121 on the SAME 4-slide ig carousel. Bumped to 12000 so Afshin
+    // has room for design_directive + visual_concept + final_prompt across
+    // up to 8 slides without the truncation-retry having to fire.
+    design:           12000,  // carousel art direction · per-slide directives
+    'carousel-plan':  8000,   // Tarrah · slot-spec for 4–8 slides
+    adapt:            5000,   // channel-specific fields incl. design_plan
     audit:            3500,   // claim-by-claim red-team table
     verify:           3500,   // KB cross-check table
     research:         3000,
@@ -1380,7 +1385,7 @@ async function _executeLlmStage({ runId, run, recipe, stage, stageIndex, lang, p
           model,
           system: systemPrompt,
           messages: [{ role: 'user', content: userPrompt }],
-          maxTokens: Math.min(_maxTokens * 2, 16000),
+          maxTokens: Math.min(_maxTokens * 2, 24000),
         });
         usage = {
           input_tokens:  (usage.input_tokens  || 0) + ((r2.usage && r2.usage.input_tokens)  || 0),
