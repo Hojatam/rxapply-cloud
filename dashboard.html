@@ -4765,6 +4765,7 @@ function renderAgents() {
         <input id="ag-filter" placeholder="🔍 search…" class="border border-slate-200 rounded px-2 py-1 text-sm w-40"
                value="${escapeHtml(window.AGENT_FILTER || '')}" oninput="window.AGENT_FILTER=this.value;_applyAgentFilter()">
         <button class="btn btn-ghost btn-xs" onclick="openTrainerPanel()" title="M84 · Moallem trainer — review pattern proposals">📚 Trainer</button>
+        <button class="btn btn-ghost btn-xs" onclick="openCapabilityMap()" title="M86 · Cross-agent capability matrix — who runs what">🗺 Capability map</button>
         ${sel ? `<button class="btn btn-ghost btn-xs" onclick="closeAgent()">✕ Close detail</button>` : ''}
         <button class="btn btn-primary btn-xs" onclick="openHireModal()">+ Hire</button>
       </div>
@@ -4978,6 +4979,125 @@ async function approveTrainerProposal(id) {
     if (!j.ok) { alert(j.error || 'failed'); return; }
     loadTrainerProposals();
   } catch (e) { alert(e.message); }
+}
+
+// ── M86 · Cross-agent capability map ─────────────────────────────
+// Visual matrix: rows = agents, columns = capabilities + pipelines.
+// Shows at a glance which agent owns which capability and where each
+// agent appears in real production pipelines.
+async function openCapabilityMap() {
+  const overlayId = 'capmap-overlay';
+  if ($(overlayId)) return;
+  document.body.insertAdjacentHTML('beforeend', `
+    <div id="${overlayId}" style="position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:9000;display:flex;align-items:flex-start;justify-content:center;padding:48px 16px;overflow-y:auto;" onclick="if(event.target===this)closeCapabilityMap()">
+      <div style="background:#fff;border-radius:12px;width:100%;max-width:1100px;box-shadow:0 20px 60px rgba(0,0,0,.25);" onclick="event.stopPropagation()">
+        <div style="padding:14px 18px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;">
+          <div>
+            <div style="font-size:18px;font-weight:700;color:#1e293b;">🗺 Cross-agent capability map</div>
+            <div style="font-size:12px;color:#64748b;margin-top:2px;">Who owns what capability · which pipelines they appear in · click any agent for details.</div>
+          </div>
+          <button class="btn btn-ghost btn-xs" onclick="closeCapabilityMap()">✕</button>
+        </div>
+        <div id="capmap-body" style="padding:16px 18px;max-height:75vh;overflow-y:auto;">
+          <div class="empty" style="padding:30px;text-align:center;color:#94a3b8;">Loading capability matrix…</div>
+        </div>
+      </div>
+    </div>
+  `);
+  loadCapabilityMap();
+}
+
+function closeCapabilityMap() {
+  const el = $('capmap-overlay');
+  if (el) el.remove();
+}
+
+async function loadCapabilityMap() {
+  const body = $('capmap-body');
+  if (!body) return;
+  try {
+    // Pull all agents + their full-context (capabilities + pipelines_appearing_in)
+    // We use Promise.all to parallelize but cap at AGENTS.length (small).
+    const all = await Promise.all(AGENTS.map(async a => {
+      try {
+        const r = await fetch(`${PROXY}/agents/${encodeURIComponent(a.name)}/full-context`);
+        const j = await r.json();
+        return { name: a.name, group: a.group, capabilities: j.capabilities || [], pipelines: j.pipelines_appearing_in || [], stages: (j.stages || []).map(s => s.stage) };
+      } catch (_) { return { name: a.name, group: a.group, capabilities: [], pipelines: [], stages: [] }; }
+    }));
+
+    // Collect all unique capabilities seen
+    const allCaps = new Set();
+    for (const a of all) for (const c of a.capabilities) allCaps.add(c);
+    const caps = Array.from(allCaps).sort();
+
+    // Group agents by division
+    const byGroup = {};
+    for (const a of all) (byGroup[a.group] = byGroup[a.group] || []).push(a);
+    const groups = Object.keys(byGroup).sort();
+
+    // Render matrix table
+    const groupSection = (groupName, agents) => {
+      return `
+        <div style="margin-bottom:18px;">
+          <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">${escapeHtml(groupName)}</div>
+          <div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:8px;">
+            <table style="width:100%;border-collapse:collapse;font-size:12px;">
+              <thead>
+                <tr style="background:#fafbff;">
+                  <th style="text-align:left;padding:8px 10px;border-bottom:1px solid #e2e8f0;position:sticky;left:0;background:#fafbff;z-index:1;min-width:140px;">Agent</th>
+                  ${caps.map(c => `<th style="text-align:center;padding:8px 6px;border-bottom:1px solid #e2e8f0;font-size:10px;color:#475569;font-weight:600;letter-spacing:.02em;min-width:70px;">${escapeHtml(c)}</th>`).join('')}
+                  <th style="text-align:left;padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:10px;color:#475569;min-width:200px;">Pipelines</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${agents.map(a => `
+                  <tr style="border-bottom:1px solid #f1f5f9;cursor:pointer;" onclick="closeCapabilityMap();openAgent('${escapeHtml(a.name)}')">
+                    <td style="padding:10px;font-weight:600;color:#1e293b;position:sticky;left:0;background:#fff;">
+                      ${a.name}
+                      ${a.stages.length ? `<div class="text-xs text-slate-400 mono" style="font-size:10px;font-weight:400;">${a.stages.length} stage${a.stages.length===1?'':'s'}</div>` : ''}
+                    </td>
+                    ${caps.map(c => {
+                      const has = a.capabilities.includes(c);
+                      return `<td style="text-align:center;padding:6px;background:${has?'#dcfce7':'transparent'};">${has?'<span style="color:#15803d;font-weight:700;">●</span>':'<span style="color:#cbd5e1;">·</span>'}</td>`;
+                    }).join('')}
+                    <td style="padding:8px 10px;">
+                      ${a.pipelines.length ? a.pipelines.slice(0,4).map(p => `<span style="background:#eef2ff;color:#4338ca;padding:1px 6px;border-radius:3px;font-size:10px;margin-right:3px;font-weight:500;">${escapeHtml(p.label || p.pipeline_id)}<span class="text-slate-400" style="font-size:9px;font-weight:400;"> ${p.stages.length}</span></span>`).join('') + (a.pipelines.length>4 ? `<span class="text-slate-400 text-xs">+${a.pipelines.length-4} more</span>` : '') : '<span class="text-slate-400 italic text-xs">unassigned</span>'}
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    };
+
+    // Stats summary
+    const totalAgents = all.length;
+    const totalCaps = caps.length;
+    const unassigned = all.filter(a => a.capabilities.length === 0).length;
+    const orphanedCaps = caps.filter(c => all.filter(a => a.capabilities.includes(c)).length > 1);
+
+    body.innerHTML = `
+      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px;font-size:12px;">
+        <span style="background:#f1f5f9;padding:6px 12px;border-radius:4px;"><strong>${totalAgents}</strong> agents</span>
+        <span style="background:#f1f5f9;padding:6px 12px;border-radius:4px;"><strong>${totalCaps}</strong> capabilities</span>
+        <span style="background:#f1f5f9;padding:6px 12px;border-radius:4px;color:${unassigned>0?'#92400e':'#16a34a'};"><strong>${unassigned}</strong> unassigned</span>
+        <span style="background:#f1f5f9;padding:6px 12px;border-radius:4px;color:${orphanedCaps.length>0?'#1e40af':'#475569'};"><strong>${orphanedCaps.length}</strong> shared capabilities (multiple owners)</span>
+      </div>
+      ${groups.map(g => groupSection(g, byGroup[g])).join('')}
+      <div style="margin-top:14px;padding:10px;background:#fef3c7;border-radius:6px;font-size:12px;color:#92400e;">
+        <strong>Reading the matrix:</strong>
+        <span style="color:#15803d;font-weight:700;">●</span> = agent owns this capability ·
+        <span style="color:#cbd5e1;">·</span> = doesn't own ·
+        Pipelines column shows where the agent actually runs in production (label + stage count).
+        Click any row to open the agent's Brain tab.
+      </div>
+    `;
+  } catch (e) {
+    body.innerHTML = `<div class="empty" style="padding:30px;text-align:center;color:#dc2626;">${escapeHtml(e.message)}</div>`;
+  }
 }
 
 async function rejectTrainerProposal(id) {
