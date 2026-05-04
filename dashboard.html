@@ -2718,6 +2718,9 @@
       <div class="nav-link" data-route="designs" data-tip="Designs">
         <span class="nav-icon"></span><span class="nav-label">Designs</span><span class="nav-num">7</span>
       </div>
+      <div class="nav-link" data-route="unsplash" data-tip="Unsplash search">
+        <span class="nav-icon"></span><span class="nav-label">Unsplash</span>
+      </div>
       <div class="nav-link" data-route="pipelines" data-tip="Pipelines">
         <span class="nav-icon"></span><span class="nav-label">Pipelines</span><span class="nav-num">8</span>
       </div>
@@ -3526,6 +3529,7 @@ const ROUTES = {
   logs: renderLogs,
   approvals: renderApprovals,
   designs: renderDesigns,
+  unsplash: () => renderUnsplash(),    // M104 · direct Unsplash search + import
   knowledge: renderKnowledge,
   tools: renderTools,
   settings: renderSettings,
@@ -11618,6 +11622,179 @@ function dismissToolBanner() {
 }
 setInterval(pollToolApprovalBanner, 8000);
 window.addEventListener('load', () => setTimeout(pollToolApprovalBanner, 1500));
+
+// ════════════════════════════════════════════════════════════════════
+// M104 · Direct Unsplash search.
+// A no-agent surface for the founder to search Unsplash, preview photos
+// with attribution, and import any photo straight into the media library
+// (R2 + media_library row tagged 'stock_photo'). Useful for verifying
+// the Unsplash key works end-to-end and for hand-picking photos the
+// agents would otherwise auto-pick.
+// ════════════════════════════════════════════════════════════════════
+const _USTATE = { results: [], lastQuery: '', importing: new Set() };
+
+async function renderUnsplash() {
+  $('main').innerHTML = `
+    <div class="section-h">
+      <div>
+        <h1>Unsplash</h1>
+        <div class="breadcrumb">Direct search · no agents · imports straight to media library (R2 + media_library row).</div>
+      </div>
+      <div class="flex gap-2 items-center">
+        <span id="us-key-status" class="text-xs" style="color:#64748b;">Checking key…</span>
+        <button class="btn btn-ghost btn-xs" onclick="renderUnsplash()">↻ Refresh</button>
+      </div>
+    </div>
+
+    <div class="card mb-6">
+      <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+        <div class="md:col-span-5">
+          <label class="text-xs text-slate-500 mb-1 block">Search query</label>
+          <input id="us-q" type="text" placeholder="e.g. dental clinic Canada · tooth model lab · doctor portrait"
+                 class="border border-slate-200 rounded px-2 py-2 text-sm w-full"
+                 onkeydown="if(event.key==='Enter') usSearch()">
+        </div>
+        <div class="md:col-span-2">
+          <label class="text-xs text-slate-500 mb-1 block">Orientation</label>
+          <select id="us-orient" class="border border-slate-200 rounded px-2 py-2 text-sm w-full">
+            <option value="">Any</option>
+            <option value="landscape">Landscape</option>
+            <option value="portrait">Portrait</option>
+            <option value="squarish">Square</option>
+          </select>
+        </div>
+        <div class="md:col-span-2">
+          <label class="text-xs text-slate-500 mb-1 block">Per page</label>
+          <select id="us-perpage" class="border border-slate-200 rounded px-2 py-2 text-sm w-full">
+            <option>12</option><option>24</option><option>30</option>
+          </select>
+        </div>
+        <div class="md:col-span-2">
+          <label class="text-xs text-slate-500 mb-1 block">Content filter</label>
+          <select id="us-filter" class="border border-slate-200 rounded px-2 py-2 text-sm w-full">
+            <option value="low">Standard (low)</option>
+            <option value="high">Strict (high)</option>
+          </select>
+        </div>
+        <div class="md:col-span-1">
+          <button class="btn btn-primary w-full" onclick="usSearch()">🔍 Search</button>
+        </div>
+      </div>
+      <div class="mt-3 text-xs" style="color:#64748b;">
+        Each search hits the Unsplash <code class="mono">/search/photos</code> endpoint.
+        Free dev tier = 50 requests / hour.
+        Imported photos register in your media library and trigger Unsplash's download counter (per their terms).
+      </div>
+    </div>
+
+    <div id="us-results" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+      <div class="empty col-span-full" style="padding:40px;text-align:center;color:#64748b;">
+        Enter a query above and hit Search.
+      </div>
+    </div>
+  `;
+
+  // Populate key-status pill
+  try {
+    const j = await fetch(`${PROXY}/unsplash/status`).then(r => r.json());
+    const el = $('us-key-status');
+    if (el) el.innerHTML = j.has_key
+      ? '<span class="pill ok">✓ key set</span>'
+      : '<span class="pill err">✕ UNSPLASH_ACCESS_KEY not set</span>';
+  } catch (_) {}
+}
+
+async function usSearch() {
+  const q = ($('us-q').value || '').trim();
+  if (!q) { alert('Enter a query first.'); return; }
+  const orient = $('us-orient').value || null;
+  const perPage = parseInt($('us-perpage').value, 10) || 12;
+  const cf = $('us-filter').value || 'low';
+  const grid = $('us-results');
+  grid.innerHTML = `<div class="col-span-full text-sm" style="color:#64748b;text-align:center;padding:24px;">Searching Unsplash…</div>`;
+  try {
+    const usp = new URLSearchParams({ query: q, per_page: String(perPage), content_filter: cf });
+    if (orient) usp.set('orientation', orient);
+    const r = await fetch(`${PROXY}/unsplash/search?${usp.toString()}`);
+    const j = await r.json();
+    if (!j.ok) {
+      grid.innerHTML = `<div class="col-span-full" style="background:#fee2e2;color:#991b1b;padding:14px;border-radius:6px;">${escapeHtml(j.error || 'search failed')}</div>`;
+      return;
+    }
+    _USTATE.results = j.items || [];
+    _USTATE.lastQuery = q;
+    if (!_USTATE.results.length) {
+      grid.innerHTML = `<div class="col-span-full text-sm" style="color:#64748b;text-align:center;padding:24px;">No matches for "${escapeHtml(q)}". Try a broader query.</div>`;
+      return;
+    }
+    grid.innerHTML = _USTATE.results.map((p, idx) => usCardHtml(p, idx)).join('');
+  } catch (e) {
+    grid.innerHTML = `<div class="col-span-full" style="background:#fee2e2;color:#991b1b;padding:14px;border-radius:6px;">Error: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function usCardHtml(p, idx) {
+  const desc = p.description || `(${p.width}×${p.height})`;
+  const photog = p.photographer && p.photographer.name || 'Unknown';
+  const profileUrl = p.photographer && p.photographer.profile_url || '#';
+  const photoUrl = p.photographer && p.photographer.photo_url || '#';
+  return `
+    <div data-us-idx="${idx}" style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;display:flex;flex-direction:column;">
+      <a href="${escapeHtml(p.urls.regular || p.urls.small)}" target="_blank" style="display:block;background:${escapeHtml(p.color || '#e2e8f0')};">
+        <img src="${escapeHtml(p.urls.small || p.urls.thumb)}" alt="${escapeHtml(desc).slice(0,80)}"
+             style="display:block;width:100%;height:200px;object-fit:cover;" loading="lazy" />
+      </a>
+      <div style="padding:10px;flex:1;display:flex;flex-direction:column;gap:6px;">
+        <div class="text-xs" style="color:#475569;line-height:1.4;">${escapeHtml(desc.slice(0, 120))}</div>
+        <div class="text-xs" style="color:#64748b;">
+          📷 <a href="${escapeHtml(profileUrl)}" target="_blank" class="text-indigo-600 underline">${escapeHtml(photog)}</a>
+          · <a href="${escapeHtml(photoUrl)}" target="_blank" class="text-indigo-600 underline">on Unsplash</a>
+          · ❤ ${p.likes || 0}
+        </div>
+        <div class="flex gap-2 mt-1 flex-wrap">
+          <button class="btn btn-primary btn-xs" onclick="usImport(${idx}, 'regular')">↓ Import (regular)</button>
+          <button class="btn btn-ghost btn-xs" onclick="usImport(${idx}, 'full')" title="Full-resolution">↓ full-res</button>
+          <button class="btn btn-ghost btn-xs" onclick="window.open('${escapeHtml(p.urls.full || p.urls.regular)}','_blank')">👁 Open</button>
+        </div>
+        <div id="us-status-${idx}" class="text-xs"></div>
+      </div>
+    </div>`;
+}
+
+async function usImport(idx, sizeKey) {
+  const p = _USTATE.results[idx];
+  if (!p) return;
+  if (_USTATE.importing.has(idx)) return;
+  _USTATE.importing.add(idx);
+  const statusEl = $(`us-status-${idx}`);
+  if (statusEl) statusEl.innerHTML = `<span style="color:#64748b;">Importing…</span>`;
+  try {
+    const r = await authFetch(`${PROXY}/unsplash/import`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        photo_id: p.id,
+        download_location: p.download_location,
+        url_to_fetch: p.urls[sizeKey] || p.urls.regular,
+        photographer: p.photographer,
+        topic: _USTATE.lastQuery,
+        topic_tags: _USTATE.lastQuery.split(/\s+/).filter(w => w.length >= 3).slice(0, 6),
+      }),
+    });
+    const j = await r.json();
+    if (!j.ok) {
+      if (statusEl) statusEl.innerHTML = `<span style="color:#dc2626;">✕ ${escapeHtml(j.error || 'import failed')}</span>`;
+      return;
+    }
+    if (statusEl) statusEl.innerHTML = `
+      <span style="color:#15803d;">✓ Imported</span>
+      · <a href="${escapeHtml(j.url)}" target="_blank" class="text-indigo-600 underline">view</a>
+      · <a href="#" onclick="navigate('designs');return false;" class="text-indigo-600 underline">→ Designs</a>`;
+  } catch (e) {
+    if (statusEl) statusEl.innerHTML = `<span style="color:#dc2626;">✕ ${escapeHtml(e.message)}</span>`;
+  } finally {
+    _USTATE.importing.delete(idx);
+  }
+}
 
 async function renderDesigns() {
   $('main').innerHTML = `
