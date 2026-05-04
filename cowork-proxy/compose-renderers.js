@@ -448,7 +448,10 @@ async function _renderCarousel({ source, carouselSpec, run, recipe, lang }) {
   const globalSlots = carouselSpec.global || {};
 
   // Pull top-3 brand reference URLs once — same anchor for every slide.
+  // M70 · Also pulls descriptive metadata so the per-slide prompt can be
+  // enriched (style/layout/typography rules from the visual_style_profile).
   let referenceUrls = [];
+  let designBriefs = [];
   try {
     const trainingRetrieval = require('./agent-training-retrieval');
     const topicKw = (run.topic || '').toLowerCase().split(/\s+/).filter(w => w.length >= 4).slice(0, 5);
@@ -457,7 +460,7 @@ async function _renderCarousel({ source, carouselSpec, run, recipe, lang }) {
       platform: recipe && recipe.id, language: lang || run.master_lang,
       topicTags: [...topicKw, 'visual-reference'],
     });
-    const designBriefs = (packet.exemplars || []).filter(e => e.kind === 'design_brief').slice(0, 3);
+    designBriefs = (packet.exemplars || []).filter(e => e.kind === 'design_brief').slice(0, 3);
     for (const d of designBriefs) {
       const m = String(d.body || '').match(/URL:\s*(\S+)/);
       if (m) referenceUrls.push(m[1]);
@@ -501,9 +504,18 @@ async function _renderCarousel({ source, carouselSpec, run, recipe, lang }) {
                     `This is slide ${slide.n} of ${slides.length} in a carousel — keep palette, fonts, ` +
                     `and brand identity consistent across slides.]`;
 
+    // M70 · Enrich with carousel slot block + brand exemplar metadata +
+    // hex colors + RTL/numeral direction + negative prompt list.
+    const enrichedPrompt = _buildEnrichedImagePrompt({
+      baseBrief: slidePrompt,
+      source: { _carousel_slot: mergedSlots },
+      run, recipe, lang,
+      designBriefs,
+    });
+
     try {
       const r = await composeImage.generateCover({
-        prompt: slidePrompt,
+        prompt: enrichedPrompt,
         runId: run.id,
         lang: lang || run.master_lang,
         recipeId: recipe && recipe.id,
@@ -557,6 +569,117 @@ async function _renderCarousel({ source, carouselSpec, run, recipe, lang }) {
     first_key: renderedSlides.find(s => s.url) ? renderedSlides.find(s => s.url).key : null,
     partial_failure: firstError && successes < slides.length ? firstError : null,
   };
+}
+
+// ── M70 · Enriched image-gen prompt builder ──────────────────────────
+// Composes the prompt sent to gpt-image-2 / Recraft / etc with explicit
+// structured blocks. The model sees structured context, not just a 60-160
+// word art-direction paragraph.
+//
+// Six blocks (only included when applicable):
+//   1. Afshin's final_prompt              — art direction
+//   2. Carousel slot block                — when Tarrah's spec exists; lists
+//                                            title/subtitle/country_pill etc
+//                                            verbatim per slide
+//   3. Brand exemplar context             — descriptive metadata, not just URLs
+//                                            (style/layout/palette/typography
+//                                            from visual_style_profile.json)
+//   4. Brand color hex block              — explicit hexes called out
+//   5. Language direction block           — RTL + font + numerals when fa/ar
+//   6. Negative-prompt block              — clichéd dental imagery, etc
+function _buildEnrichedImagePrompt({ baseBrief, source, run, recipe, lang, designBriefs }) {
+  const blocks = [];
+  const language = lang || (run && run.master_lang) || 'en';
+
+  // Block 1 · Afshin's art direction (the heart of the prompt)
+  if (baseBrief && baseBrief.trim()) {
+    blocks.push(baseBrief.trim());
+  }
+
+  // Block 2 · Carousel slot block — when Tarrah's spec is present, the
+  // image renderer is processing a SINGLE slide; spell out the slot values
+  // verbatim so the model renders the exact text Tarrah specified.
+  // (For the multi-slide path, _renderCarousel passes per-slide context;
+  // this block also fires when source carries _carousel_slot for that slide.)
+  const slot = source && (source._carousel_slot || source.slot);
+  if (slot && typeof slot === 'object') {
+    const lines = ['', '## RENDER VERBATIM (carousel slot values — do not paraphrase or translate)'];
+    for (const [k, v] of Object.entries(slot)) {
+      if (v == null || v === '') continue;
+      if (Array.isArray(v)) {
+        lines.push(`  ${k}: ${v.map(x => `"${x}"`).join(', ')}`);
+      } else {
+        lines.push(`  ${k}: "${v}"`);
+      }
+    }
+    blocks.push(lines.join('\n'));
+  }
+
+  // Block 3 · Brand exemplar context (descriptive — the URLs go to the
+  // model as image attachments separately, but the model also benefits
+  // from knowing what those references are).
+  if (Array.isArray(designBriefs) && designBriefs.length) {
+    const lines = ['', '## BRAND VISUAL REFERENCES (style anchors — match these, attached as input images)'];
+    designBriefs.forEach((d, idx) => {
+      // Each exemplar's body is multiline metadata. Take the first 6 lines
+      // (Style/Layout/Subject/Dominant colors/Logo/Motifs) and skip the URL.
+      const meta = String(d.body || '')
+        .split('\n')
+        .filter(l => !l.startsWith('URL:') && !l.startsWith('('))
+        .slice(0, 6)
+        .map(l => '    ' + l.trim())
+        .filter(Boolean)
+        .join('\n');
+      if (meta) {
+        lines.push(`  Reference #${idx + 1}:`);
+        lines.push(meta);
+      }
+    });
+    if (lines.length > 1) blocks.push(lines.join('\n'));
+  }
+
+  // Block 4 · Brand color hex callouts (always — the brand is anchored
+  // in 100% of the archive on this teal).
+  blocks.push([
+    '',
+    '## BRAND COLORS (use these exact hex values)',
+    '  Primary teal   #13a597   — logo, accents, CTA, key word highlights',
+    '  Navy block     #1c3a52   — analytical mood, fact-heavy posts',
+    '  Urgent red     #cb3a3a   — USA-themed posts',
+    '  Germany green  #1f3d22   — Germany-themed posts',
+    '  Earth/brown    #bca175   — occasion / cultural posts',
+    '  Orange         #ff7a1a   — DEADLINE pressure ONLY',
+    '  Surface        #ffffff or #f0f1ee',
+  ].join('\n'));
+
+  // Block 5 · Language direction (when Persian/Arabic is involved)
+  if (language === 'fa' || language === 'ar') {
+    blocks.push([
+      '',
+      `## TEXT RENDERING (language: ${language})`,
+      `  Direction:  right-to-left (RTL).`,
+      `  Typeface:   bold sans-serif Persian/Arabic-supporting (Vazirmatn,`,
+      `              IRANSans, or equivalent). Latin wordmarks (RXAPPLY)`,
+      `              stay in Latin font.`,
+      `  Numerals:   Persian numerals (۰۱۲۳۴۵۶۷۸۹) for Persian text,`,
+      `              not Latin (0-9).`,
+      `  Spacing:    Persian text needs slightly more line-height than Latin.`,
+    ].join('\n'));
+  }
+
+  // Block 6 · Negative-prompt list (brand never-do, from brand_intelligence)
+  blocks.push([
+    '',
+    '## DO NOT INCLUDE',
+    '  • Clichéd dental imagery (toothbrushes, pills, white-coat-stock-photo)',
+    '  • Generic stock photos with no brand specificity',
+    '  • English text on a Persian-only design (or vice versa)',
+    '  • Marketing-buzzword superlatives in any visible text',
+    '  • Fake regulator names or invented credentials',
+    '  • More than one logo per slide',
+  ].join('\n'));
+
+  return blocks.join('\n\n');
 }
 
 async function imageCover({ source, run, recipe, lang }) {
@@ -629,14 +752,13 @@ async function imageCover({ source, run, recipe, lang }) {
      || (source && source.design_prompt)
      || '';
 
-  // M56 batch B · Retrieve top-3 brand visual references whose topic_tags
-  // best match this run. We embed their URLs + descriptive metadata into
-  // the prompt so the image model has a strong style anchor. When the
-  // selected provider supports a literal reference-image API parameter
-  // (Recraft V3, Ideogram V3, Flux Redux), compose-image.js can pass the
-  // URLs through. For OpenAI / generic, the URLs serve as descriptive
-  // anchors only.
+  // M56 batch B + M70 · Retrieve top-3 brand visual references whose
+  // topic_tags best match this run. Their URLs go to the provider as
+  // attached input images (where supported). Their descriptive metadata
+  // (style/layout/palette) is woven into the enriched prompt by
+  // _buildEnrichedImagePrompt below.
   let referenceUrls = [];
+  let designBriefs = [];
   try {
     const trainingRetrieval = require('./agent-training-retrieval');
     const topicKw = (run.topic || '').toLowerCase().split(/\s+/).filter(w => w.length >= 4).slice(0, 5);
@@ -645,18 +767,10 @@ async function imageCover({ source, run, recipe, lang }) {
       platform: recipe && recipe.id, language: lang || run.master_lang,
       topicTags: [...topicKw, 'visual-reference'],
     });
-    const designBriefs = (packet.exemplars || []).filter(e => e.kind === 'design_brief').slice(0, 3);
-    if (designBriefs.length) {
-      const refLines = ['', '--- BRAND VISUAL REFERENCES (style anchor — match these as closely as the topic allows) ---'];
-      for (const d of designBriefs) {
-        // Each exemplar's body has a `URL: ...` line we can extract
-        const urlMatch = String(d.body || '').match(/URL:\s*(\S+)/);
-        if (urlMatch) referenceUrls.push(urlMatch[1]);
-        refLines.push(d.body);
-        refLines.push('');
-      }
-      // Append the references to the brief so generation considers them
-      brief = brief + refLines.join('\n');
+    designBriefs = (packet.exemplars || []).filter(e => e.kind === 'design_brief').slice(0, 3);
+    for (const d of designBriefs) {
+      const m = String(d.body || '').match(/URL:\s*(\S+)/);
+      if (m) referenceUrls.push(m[1]);
     }
   } catch (_) { /* non-fatal — fall back to text-only brief */ }
 
@@ -669,6 +783,15 @@ Brand: RxApply (helping internationally trained dentists migrate). Editorial
 illustration style, clean composition, minimal text overlay, no logo.`;
   }
   if (!brief.trim()) throw new Error('no design brief available for image stage');
+
+  // M70 · Compose the enriched prompt (carousel slot + exemplar context +
+  // hex colors + language direction + negative list). gpt-image-2 sees
+  // structured context, not just narrative.
+  brief = _buildEnrichedImagePrompt({
+    baseBrief: brief,
+    source, run, recipe, lang,
+    designBriefs,
+  });
 
   // M38 · model selection signals (priority handled inside generateCover):
   //   1. Founder's per-run UI override
