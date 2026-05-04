@@ -3783,6 +3783,22 @@ app.listen(PORT, () => {
   console.log(`    N8N_API_KEY        ${present(process.env.N8N_API_KEY)}`);
   log(`startup port=${PORT} mode=${MODE} authInit=${auth.isInitialized()} anth=${!!process.env.ANTHROPIC_API_KEY} openai=${!!process.env.OPENAI_API_KEY} n8n=${!!process.env.N8N_API_KEY}`);
 
+  // M95 · Single-source-of-truth control map
+  // Print which endpoint owns which write path so the founder can audit
+  // for parallel writes. After V10's consolidation, every piece of agent
+  // state should have ONE owner.
+  console.log('');
+  console.log('  \x1b[1mM95 · Control surface map (single source of truth):\x1b[0m');
+  console.log('    SKILL.md             → PUT /prompts/:agent             (Brain tab)');
+  console.log('    Stage instructions   → PUT /agents/:agent/stages/:stage (Brain tab + Pipeline drawer)');
+  console.log('    Brand rules          → POST/PATCH/DELETE /brand/intelligence (Brain tab Constitution)');
+  console.log('    Brand exemplars      → POST/PATCH/DELETE /brand/exemplars (Brand tab)');
+  console.log('    Agent memory         → POST/PATCH/DELETE /agents/:name/memory (Brain tab Memory)');
+  console.log('    Pipeline definition  → PUT /pipelines/:id              (Pipeline tab)');
+  console.log('    Per-agent model pin  → PATCH /agent-models/:agent      (Settings/Brain top-right)');
+  console.log('    Training proposals   → POST /trainer/proposals/:id/{approve,reject} (Trainer overlay)');
+  console.log('    Inbox aggregator     → GET /inbox/all (8 sources unified — M91)');
+
   // F2 · run log retention (gzip >7d, delete >30d). Idempotent.
   try {
     const r = logWriter.cleanupOldLogs();

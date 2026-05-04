@@ -11300,29 +11300,35 @@ async function inboxReject(id, btn) {
 // ── Inbox badge + page-title counter ───────────────────────────────
 let _inboxPollTimer = null;
 async function pollInboxBadge() {
+  // M96 · Pull from /inbox/count-all which aggregates all 8 sources
+  // matching the Inbox tab UI. One number, everywhere.
   try {
-    // S3 · sum K1 actions + K4 handoffs + legacy approval_queue so the
-    // badge matches the Overview Inbox stat exactly. One number, everywhere.
-    const [r1, r2, r3] = await Promise.all([
-      fetch(`${PROXY}/inbox/count`).then(r => r.json()).catch(() => ({ count: 0 })),
-      fetch(`${PROXY}/handoffs/count`).then(r => r.json()).catch(() => ({ count: 0 })),
-      fetchCount('approval_queue', 'status=eq.pending').catch(() => 0),
-    ]);
-    const legacy = Number(r3) || 0;
-    const n = ((r1 && r1.count) || 0) + ((r2 && r2.count) || 0) + legacy;
-    // Two distinct DOM elements (key chip + badge). Only one is shown at a
-    // time, so they can't visually overlap. Empty inbox → key chip "4";
-    // pending items → amber count badge takes over.
+    const r = await fetch(`${PROXY}/inbox/count-all`);
+    const j = await r.json().catch(() => ({ ok: false }));
+    const n = (j && j.ok && Number.isFinite(j.total)) ? j.total : 0;
     const key   = $('inbox-key');
     const badge = $('inbox-badge');
     if (n > 0) {
       if (badge) {
         badge.textContent = String(n);
         badge.hidden = false;
+        // M96 · Tooltip shows per-source breakdown so founder knows
+        // what's contributing without opening the tab.
+        if (j.breakdown) {
+          const parts = [];
+          if (j.breakdown.gated_runs)        parts.push(`${j.breakdown.gated_runs} gated runs`);
+          if (j.breakdown.trainer_proposals) parts.push(`${j.breakdown.trainer_proposals} Moallem proposals`);
+          if (j.breakdown.hot_dms)           parts.push(`${j.breakdown.hot_dms} hot DMs`);
+          if (j.breakdown.reg_drift)         parts.push(`${j.breakdown.reg_drift} drift events`);
+          if (j.breakdown.designs_pending)   parts.push(`${j.breakdown.designs_pending} designs awaiting`);
+          if (j.breakdown.handoffs)          parts.push(`${j.breakdown.handoffs} handoffs`);
+          if (j.breakdown.action_approvals)  parts.push(`${j.breakdown.action_approvals} action approvals`);
+          badge.title = parts.join(' · ');
+        }
       }
       if (key) key.hidden = true;
     } else {
-      if (badge) badge.hidden = true;
+      if (badge) { badge.hidden = true; badge.title = ''; }
       if (key) { key.textContent = '4'; key.hidden = false; }
     }
     document.title = (n > 0 ? `(${n}) ` : '') + 'RxApply · Control Plane';
@@ -12361,16 +12367,21 @@ function renderSettingsMain(data) {
     </div>
 
     <div data-set-tab="authoring" class="card">
-      <h3 class="font-semibold mb-4">Prompts editor</h3>
-      <div class="flex gap-3 mb-4 text-sm">
-        <select id="pe-agent" class="border border-slate-200 rounded px-2 py-1 bg-white" onchange="loadPrompt()">
-          <option value="">— pick an agent —</option>
-          ${AGENTS.filter(a => !a.deferred).map(a => `<option value="${a.name}">${a.name} · ${a.role}</option>`).join('')}
-        </select>
-        <span id="pe-version" class="text-xs text-slate-500 self-center"></span>
-        <span class="ml-auto text-xs text-slate-500 self-center" id="pe-status"></span>
+      <h3 class="font-semibold mb-2">Prompts editor</h3>
+      <div class="empty" style="padding:30px;text-align:center;">
+        <div class="empty-icon">📜</div>
+        <div class="empty-text text-sm" style="color:#64748b;line-height:1.6;">
+          <strong>Moved to the Brain tab (M90).</strong><br>
+          To edit any agent's SKILL.md or per-stage instructions, open
+          <a href="#/agents" onclick="navigate('agents');return false;" class="text-indigo-600 underline">Agents</a>
+          → click the agent → 🧠 Brain tab.
+          <br><br>
+          The Brain tab now hosts the unified agent control surface:
+          identity (SKILL.md), constitution rules, per-stage instructions,
+          memory, training, performance, and live prompt preview — all
+          editable inline with version history.
+        </div>
       </div>
-      <div id="pe-body"><div class="empty"><div class="empty-text">Pick an agent above.</div></div></div>
     </div>
   `;
   // Async load the model defaults grid after DOM is ready
