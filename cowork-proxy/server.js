@@ -2035,6 +2035,279 @@ app.post('/kb/:id/reembed', auth.middleware, async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ── M110 · External-AI JSON ingest ────────────────────────────────────
+// The founder uses ChatGPT / Gemini / Claude.ai to extract structured
+// facts from regulator PDFs / web pages, and uploads the resulting
+// JSON straight to the KB. Two helper downloads:
+//   /kb/json-template       — empty template the AI fills in
+//   /kb/json-prompt-guide   — markdown instructions to paste into the AI
+// One upload route:
+//   /kb/upload-json         — batch-creates entries with per-row error capture
+
+// Build the template payload. Returns a real example so the AI sees
+// the shape (one realistic UK exam entry, one minimal CA visa entry).
+function _kbJsonTemplate() {
+  return {
+    "rxapply_kb_format_version": 1,
+    "default_country":  "UK",
+    "default_status":   "draft",
+    "default_importance": 3,
+    "entries": [
+      {
+        "country":    "UK",
+        "topic":      "exam",
+        "subtopic":   "ore_part_1",
+        "title":      "ORE Part 1 — eligibility",
+        "content":    "Candidates must hold a dental qualification of at least four years that is recognised by the GDC. The degree must be from outside the EEA. Applicants need to demonstrate English-language ability via IELTS Academic 7.0 overall (no band below 6.5) or equivalent OET grade B.",
+        "facts":      { "fee_gbp": 1066, "year": 2025, "ielts_overall": 7.0 },
+        "source":     "https://www.gdc-uk.org/registration-applications/the-overseas-registration-examination",
+        "source_type": "manual",
+        "tags":       ["ore", "exam", "uk", "eligibility", "ielts"],
+        "importance": 4,
+        "status":     "draft"
+      },
+      {
+        "country":    "CA",
+        "topic":      "visa",
+        "subtopic":   "express_entry",
+        "title":      "Express Entry — Comprehensive Ranking System (CRS) overview",
+        "content":    "Express Entry ranks candidates by CRS score across age, education, language, and Canadian work experience. Provincial nominations add 600 points.",
+        "facts":      { "max_crs_score": 1200, "pnp_bonus": 600 },
+        "source":     "https://www.canada.ca/en/immigration-refugees-citizenship/services/immigrate-canada/express-entry.html",
+        "tags":       ["express-entry", "crs", "canada", "immigration"]
+      }
+    ]
+  };
+}
+
+// Build the AI prompt guide as markdown. The founder pastes this into
+// any LLM chat along with their source material; the LLM returns a
+// JSON conforming to the template; founder uploads that JSON here.
+function _kbAiPromptGuide() {
+  return `# RxApply Knowledge Base · AI Extraction Guide
+
+You are an extraction assistant for RxApply, a multilingual brand that
+helps internationally-trained dentists migrate. Your job: read source
+material (regulator handbooks, government pages, founder notes,
+interview transcripts) and return structured **JSON** that conforms
+to the schema below. The founder will upload your JSON directly into
+the RxApply Knowledge Base.
+
+---
+
+## OUTPUT FORMAT
+
+Return ONE JSON object, exactly matching this shape:
+
+\`\`\`json
+{
+  "rxapply_kb_format_version": 1,
+  "default_country":  "UK",
+  "default_status":   "draft",
+  "default_importance": 3,
+  "entries": [
+    { /* entry 1 */ },
+    { /* entry 2 */ }
+  ]
+}
+\`\`\`
+
+No prose before or after. No markdown code fences in your final answer.
+Just the JSON object.
+
+---
+
+## ENTRY SCHEMA
+
+Each \`entries[]\` object can include these fields. **country**,
+**title**, and **content** are REQUIRED; the rest are optional.
+
+| Field        | Type    | Required | Notes |
+|--------------|---------|----------|-------|
+| \`country\`    | string  | ✅       | One of: UK · USA · DE · AU · CA · UAE · SA · GLOBAL. Use GLOBAL only for facts that apply across all countries. |
+| \`title\`      | string  | ✅       | Short label (3–10 words). Examples: "ORE Part 1 — eligibility", "GDC ARF — annual fee 2025". |
+| \`content\`    | string  | ✅       | The canonical fact in prose (1–4 sentences). Include numbers, dates, named bodies. Avoid marketing language. |
+| \`topic\`      | string  | strongly recommended | One of: \`visa\` · \`exam\` · \`courses\` · \`fees\` · \`tax\` · \`quality_of_life\` · \`regulator\` · \`timeline\` · \`document\` · \`other\`. |
+| \`subtopic\`   | string  | recommended | The specific item within the topic. Use lowercase snake_case. Examples: \`ore_part_1\`, \`tier_2_skilled_worker\`, \`j1_visa\`, \`ndeb_afk\`. |
+| \`facts\`      | object  | recommended | Structured key/value extraction of numbers, dates, names. Examples: \`{"fee_gbp": 1066, "year": 2025}\`, \`{"deadline": "2025-09-30"}\`. Use SI units / ISO dates where possible. |
+| \`source\`     | string  | recommended | The URL of the source page, OR a citation like "GDC handbook 2025 ch. 4". |
+| \`source_type\`| string  | optional | \`manual\` (default) · \`parsed\` · \`web\` · \`inherited\`. |
+| \`tags\`       | array of strings | recommended | Free-form lowercase tags for retrieval. Examples: \`["ore", "exam", "uk"]\`. 3–8 tags is ideal. |
+| \`importance\` | integer 1–5 | optional | 1 = trivia · 3 = standard fact · 5 = critical (deadline-bearing or regulatory). Default 3. |
+| \`status\`     | string  | optional | \`active\` (verified) · \`draft\` (needs review). Default \`draft\` when extracting from external sources. |
+
+---
+
+## CHOOSING TOPIC AND SUBTOPIC
+
+The KB is hierarchical: **country → topic → subtopic**. Pick the
+narrowest applicable level.
+
+**Topic decision tree:**
+- Is it about who can enter the country? → \`visa\`
+- Is it a licensing/certification exam? → \`exam\`
+- Is it a school/course/CE? → \`courses\`
+- Is it a numerical fee, currency, or money figure? → \`fees\`
+- Is it about taxes / withholding / tax residency? → \`tax\`
+- Is it about cost of living, healthcare, schooling, climate? → \`quality_of_life\`
+- Is it about a regulatory body itself (mandate, contact)? → \`regulator\`
+- Is it a step in the migration journey? → \`timeline\`
+- Is it about a specific document / form / attestation? → \`document\`
+- None of the above → \`other\`
+
+**Subtopic — be specific:**
+- Don't write \`ore\` if you mean \`ore_part_1\`. Use the actual exam name.
+- For visas, use the official class: \`tier_2_skilled_worker\`, \`j1_exchange_visitor\`, \`subclass_482\`, \`express_entry\`, \`approbation\`.
+- For exams: \`inbde\`, \`adat\`, \`ndeb_afk\`, \`acs\`, \`adc_written\`, \`kenntnisprufung\`, \`fsp\`.
+- For documents: \`apostille\`, \`certified_translation\`, \`cos\`, \`wes_eca\`.
+
+If you genuinely can't pin a subtopic, leave it out — better than guessing.
+
+---
+
+## CONTENT QUALITY RULES
+
+DO:
+- Quote numbers, dates, named bodies VERBATIM from the source.
+- Use ISO date format: \`2025-09-30\` (not "September 30, 2025").
+- Mark currency in field names: \`fee_gbp\`, \`fee_usd\`, \`fee_cad\`.
+- Group related fields into \`facts\` even if mentioned in \`content\`.
+- Split a long paragraph into MULTIPLE entries — one fact per entry.
+- Use \`status: "draft"\` for any fact you weren't 100% certain about.
+
+DON'T:
+- Fabricate numbers. If the source says "approximately £1000" do NOT invent £1066.
+- Include marketing language ("fast-track", "easy", "guaranteed").
+- Include opinions or testimonials.
+- Repeat the same fact under multiple subtopics — pick the most specific.
+- Output content longer than 4 sentences per entry. Split it instead.
+
+---
+
+## EXAMPLES
+
+### Example 1 — Single regulatory fact
+
+Source paragraph:
+> "The General Dental Council requires all internationally qualified
+> applicants to pass the Overseas Registration Examination (ORE).
+> Part 1 is a written exam covering biomedical and clinical sciences.
+> The current Part 1 fee is £1,066, set in April 2025."
+
+Produces:
+\`\`\`json
+{
+  "country": "UK",
+  "topic": "exam",
+  "subtopic": "ore_part_1",
+  "title": "ORE Part 1 — overview and 2025 fee",
+  "content": "The Overseas Registration Examination (ORE) Part 1 is a written exam covering biomedical and clinical sciences, required by the GDC for internationally-qualified applicants. The 2025 fee is £1,066, effective April 2025.",
+  "facts": { "fee_gbp": 1066, "year": 2025, "fee_effective_from": "2025-04-01" },
+  "source": "https://www.gdc-uk.org/...",
+  "tags": ["ore", "exam", "uk", "fee", "2025"],
+  "importance": 4
+}
+\`\`\`
+
+### Example 2 — Splitting a multi-fact paragraph into multiple entries
+
+Source paragraph:
+> "Express Entry candidates need a CRS score above the most recent
+> draw cutoff. The minimum draw cutoff in 2024 ranged from 524 to 561
+> for general draws. Provincial nominations add 600 CRS points."
+
+Produces THREE entries:
+1. \`title: "Express Entry — CRS draw cutoffs (2024)"\` with \`facts: { "min_cutoff_2024": 524, "max_cutoff_2024": 561 }\`
+2. \`title: "Express Entry — Provincial Nomination CRS bonus"\` with \`facts: { "pnp_bonus": 600 }\`
+3. \`title: "Express Entry — CRS score gating mechanism"\` with prose explaining the draw mechanism.
+
+This is BETTER than one long entry because each fact lives at its own granularity and gets its own embedding for retrieval.
+
+### Example 3 — When NOT to include in KB
+
+> "Many of our clients have successfully relocated to the UK and love
+> their new lives in London."
+
+Skip this. It's marketing, has no verifiable fact, and pollutes recall.
+
+---
+
+## CHECKLIST BEFORE YOU RETURN
+
+1. ✅ All entries have \`country\`, \`title\`, \`content\`.
+2. ✅ \`topic\` is one of the 10 valid values (or omitted if you genuinely can't pick).
+3. ✅ \`subtopic\` uses lowercase snake_case.
+4. ✅ Numbers + dates + named bodies are exactly as in the source.
+5. ✅ One fact = one entry. Long paragraphs are split.
+6. ✅ The output is valid JSON. No code fences. No prose around it.
+7. ✅ \`status: "draft"\` for anything you weren't 100% sure about.
+
+That's it. Read the source carefully, follow the schema, return JSON.
+`;
+}
+
+app.get('/kb/json-template', (_req, res) => {
+  const body = JSON.stringify(_kbJsonTemplate(), null, 2);
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="rxapply-kb-template.json"');
+  res.end(body);
+});
+
+app.get('/kb/json-prompt-guide', (_req, res) => {
+  const body = _kbAiPromptGuide();
+  res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="rxapply-kb-ai-extraction-guide.md"');
+  res.end(body);
+});
+
+app.post('/kb/upload-json', auth.middleware, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const entries = Array.isArray(body.entries) ? body.entries : null;
+    if (!entries || !entries.length) {
+      return res.status(400).json({ ok: false, error: 'expected { entries: [...] } in body' });
+    }
+    const defaultCountry = body.default_country || null;
+    const defaultStatus  = body.default_status  || 'draft';
+    const defaultImp     = parseInt(body.default_importance, 10) || 3;
+
+    const created = [], failed = [];
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i];
+      try {
+        const r = await KB.add({
+          country:     e.country     || defaultCountry,
+          topic:       e.topic       || null,
+          subtopic:    e.subtopic    || null,
+          category:    e.category    || null,
+          title:       e.title,
+          content:     e.content,
+          facts:       e.facts       || {},
+          source:      e.source      || null,
+          sourceType:  e.source_type || 'manual',
+          tags:        Array.isArray(e.tags) ? e.tags : [],
+          importance:  Number.isFinite(e.importance) ? e.importance : defaultImp,
+          status:      e.status      || defaultStatus,
+          verifiedBy:  e.status === 'active' ? 'founder' : null,
+          updatedBy:   'founder',
+        });
+        if (r.ok) created.push({ index: i, id: r.id, title: e.title });
+        else      failed.push({ index: i, title: e.title || '(no title)', error: r.error });
+      } catch (ex) {
+        failed.push({ index: i, title: e.title || '(no title)', error: ex.message });
+      }
+    }
+    log(`kb.upload-json created=${created.length} failed=${failed.length}`);
+    res.json({
+      ok: true,
+      total: entries.length,
+      created_count: created.length,
+      failed_count: failed.length,
+      created, failed,
+    });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ── M107 · Versioning · history + restore ─────────────────────────────
 // History walks the supersede chain in both directions and returns a
 // chronologically-ordered list of versions. Restore copies an old

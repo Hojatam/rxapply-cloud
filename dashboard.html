@@ -12188,6 +12188,57 @@ async function renderKnowledge() {
       <div id="kb-up-result" class="mt-3 text-sm"></div>
     </div>
 
+    <!-- M110 · External-AI JSON ingest. The founder uses ChatGPT / Gemini /
+         Claude to extract structured facts from regulator PDFs into JSON,
+         then uploads the JSON straight here — bypassing Daneshyar entirely.
+         Also surfaces two helper downloads: the empty template + the AI
+         prompt guide. -->
+    <div class="card mb-4" style="background:linear-gradient(90deg,#f0fdf4,#fff);border-color:#bbf7d0;">
+      <div class="flex items-start gap-3 flex-wrap">
+        <div style="flex:1;min-width:300px;">
+          <h3 class="font-semibold mb-1">📦 Upload JSON (extract via external AI)</h3>
+          <div class="text-xs mb-3" style="color:#475569;">
+            Use any AI (ChatGPT, Gemini, Claude.ai, etc.) to extract structured facts from a regulator PDF or web page, then upload the resulting JSON here. Bypasses Daneshyar — facts go straight into the KB.
+          </div>
+          <div class="flex gap-2 mb-3 flex-wrap">
+            <a class="btn btn-ghost btn-xs" href="${typeof PROXY === 'string' ? PROXY : ''}/kb/json-template" download="rxapply-kb-template.json">📄 Download template JSON</a>
+            <a class="btn btn-ghost btn-xs" href="${typeof PROXY === 'string' ? PROXY : ''}/kb/json-prompt-guide" download="rxapply-kb-ai-extraction-guide.md">🤖 Download AI prompt guide</a>
+          </div>
+          <div class="text-xs" style="color:#64748b;">
+            Workflow: <strong>1)</strong> download both files. <strong>2)</strong> in your AI chat, paste the prompt guide + your source material → AI returns JSON. <strong>3)</strong> save AI's JSON to a file. <strong>4)</strong> upload below.
+          </div>
+        </div>
+        <div style="flex:1;min-width:300px;">
+          <div class="border-2 border-dashed border-slate-300 rounded p-4 text-center text-sm cursor-pointer transition-colors"
+               id="kb-json-drop"
+               onclick="document.getElementById('kb-json-file').click()"
+               ondragover="event.preventDefault(); this.classList.add('bg-emerald-50','border-emerald-400');"
+               ondragleave="this.classList.remove('bg-emerald-50','border-emerald-400');"
+               ondrop="event.preventDefault(); this.classList.remove('bg-emerald-50','border-emerald-400'); kbHandleJsonFiles(event.dataTransfer.files);">
+            <div class="text-slate-600">📦 Click or drag a JSON file here</div>
+            <div class="text-xs text-slate-400 mt-1">.json only · max 5 MB</div>
+          </div>
+          <input id="kb-json-file" type="file" accept=".json,application/json" class="hidden"
+                 onchange="kbHandleJsonFiles(this.files); this.value='';" />
+          <div class="flex flex-wrap gap-2 items-center mt-2 text-xs">
+            <label class="text-slate-500">Default country (override per-entry):</label>
+            <select id="kb-json-country" class="border border-slate-200 rounded px-2 py-1 text-xs bg-white">
+              <option value="">(use entry's country)</option>
+              <option>UK</option><option>USA</option><option>DE</option>
+              <option>AU</option><option>CA</option><option>UAE</option>
+              <option>SA</option><option>GLOBAL</option>
+            </select>
+            <label class="text-slate-500 ml-2">Default status:</label>
+            <select id="kb-json-status" class="border border-slate-200 rounded px-2 py-1 text-xs bg-white">
+              <option value="draft" selected>draft (review before agents use)</option>
+              <option value="active">active (verified now)</option>
+            </select>
+          </div>
+          <div id="kb-json-result" class="mt-3 text-sm"></div>
+        </div>
+      </div>
+    </div>
+
     <div class="card mb-4">
       <h3 class="font-semibold mb-2">Paste &amp; parse</h3>
       <div class="text-xs text-slate-500 mb-2">Paste any block of source text — regulator handbook, founder note, web page text. Daneshyar will split it into structured per-country facts and save them as drafts for your review.</div>
@@ -12232,11 +12283,11 @@ async function renderKnowledge() {
           <div>
             <div style="font-weight:600;color:#78350f;margin-bottom:4px;">➕ Adding entries</div>
             <div class="text-xs" style="color:#57534e;line-height:1.55;">
-              Three ways:
-              <br>• <strong>+ New entry</strong> on the right — manual, fast for one fact. Pre-fills country/topic/subtopic from whatever node you've selected.
-              <br>• <strong>Paste &amp; parse</strong> — drop a chunk of regulator text in the textarea; Daneshyar splits it into structured drafts.
-              <br>• <strong>Upload file</strong> — PDF/DOCX/PPTX/HTML/MD. Same parser, file-aware.
-              <br>All three feed the same <code class="mono">knowledge_base</code> table.
+              Four ways:
+              <br>• <strong>+ New entry</strong> on the right — manual, fast for one fact. Pre-fills from selected tree node.
+              <br>• <strong>Paste &amp; parse</strong> — drop a chunk of regulator text; Daneshyar splits it into drafts.
+              <br>• <strong>Upload file</strong> — PDF/DOCX/PPTX/HTML/MD via Daneshyar.
+              <br>• <strong>📦 Upload JSON</strong> (M110) — use ChatGPT/Gemini/Claude.ai to extract facts into JSON, then upload that JSON straight in. Bypasses Daneshyar. Two helper downloads on the green card: <strong>📄 template JSON</strong> (the schema) and <strong>🤖 AI prompt guide</strong> (paste into your AI of choice along with source material).
             </div>
           </div>
 
@@ -12966,6 +13017,101 @@ function _kbCard(e) {
 // Upload one or more files through Daneshyar's extract→parse→save pipeline.
 // Multiple-file selection is supported (we run them sequentially so cost +
 // progress is clear rather than firing N parallel Anthropic calls).
+// M110 · Upload pre-extracted JSON straight into the KB. Bypasses
+// Daneshyar — used when the founder uses ChatGPT/Gemini/Claude.ai to
+// extract facts from a regulator PDF and uploads the AI's output here.
+async function kbHandleJsonFiles(fileList) {
+  const files = Array.from(fileList || []);
+  if (!files.length) return;
+  const f = files[0];                                   // single-file workflow
+  const out = $('kb-json-result');
+  out.innerHTML = `<div class="text-xs" style="color:#64748b;">Reading ${escapeHtml(f.name)} (${(f.size/1024).toFixed(1)} KB)…</div>`;
+  if (f.size > 5 * 1024 * 1024) {
+    out.innerHTML = `<div class="text-rose-600 text-xs">File too large (${(f.size/1024/1024).toFixed(1)} MB). Max 5 MB.</div>`;
+    return;
+  }
+
+  let parsed;
+  try {
+    const text = await f.text();
+    parsed = JSON.parse(text);
+  } catch (e) {
+    out.innerHTML = `<div class="text-rose-600 text-xs">Invalid JSON: ${escapeHtml(e.message)}</div>`;
+    return;
+  }
+
+  // Accept either { entries: [...] } shape OR a bare array (be lenient).
+  const entries = Array.isArray(parsed) ? parsed
+                : Array.isArray(parsed.entries) ? parsed.entries
+                : null;
+  if (!entries) {
+    out.innerHTML = `<div class="text-rose-600 text-xs">JSON must be either an array of entries OR an object with an <code>entries</code> array. Download the template for reference.</div>`;
+    return;
+  }
+  if (!entries.length) {
+    out.innerHTML = `<div class="text-amber-700 text-xs">JSON parsed but contains 0 entries.</div>`;
+    return;
+  }
+
+  const country = $('kb-json-country').value || parsed.default_country || null;
+  const status  = $('kb-json-status').value  || parsed.default_status  || 'draft';
+
+  // Show preview with a confirm button before committing
+  const titlesPreview = entries.slice(0, 5).map((e, i) => `<li>${i+1}. ${escapeHtml(e.title || '(no title)')} <span class="text-xs" style="color:#64748b;">[${escapeHtml(e.country || country || '?')} · ${escapeHtml(e.topic || '?')}${e.subtopic ? ' · ' + escapeHtml(e.subtopic) : ''}]</span></li>`).join('');
+  out.innerHTML = `
+    <div style="background:#f0fdf4;border:1px solid #86efac;padding:10px;border-radius:6px;">
+      <div class="text-sm" style="color:#166534;">
+        <strong>${entries.length}</strong> ${entries.length === 1 ? 'entry' : 'entries'} ready to import.
+        ${country ? `Default country: <code class="mono">${escapeHtml(country)}</code>.` : ''}
+        Default status: <code class="mono">${escapeHtml(status)}</code>.
+      </div>
+      <ul class="text-xs mt-2" style="color:#1f2937;list-style:none;padding-left:0;">${titlesPreview}${entries.length > 5 ? `<li style="color:#64748b;">…and ${entries.length - 5} more.</li>` : ''}</ul>
+      <div class="flex gap-2 mt-3">
+        <button class="btn btn-primary btn-xs" id="kb-json-confirm">↓ Import all</button>
+        <button class="btn btn-ghost btn-xs" id="kb-json-cancel">Cancel</button>
+      </div>
+    </div>`;
+  document.getElementById('kb-json-cancel').onclick = () => { out.innerHTML = ''; };
+  document.getElementById('kb-json-confirm').onclick = async () => {
+    out.innerHTML = `<div class="text-xs" style="color:#64748b;">Importing ${entries.length} entries…</div>`;
+    try {
+      const r = await authFetch(`${PROXY}/kb/upload-json`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          entries,
+          default_country:    country,
+          default_status:     status,
+          default_importance: parsed.default_importance || 3,
+        }),
+      });
+      const j = await r.json();
+      if (!j.ok) {
+        out.innerHTML = `<div class="text-rose-600 text-xs">Upload failed: ${escapeHtml(j.error || 'unknown')}</div>`;
+        return;
+      }
+      const okList = j.created || [];
+      const failList = j.failed || [];
+      out.innerHTML = `
+        <div style="background:#dcfce7;border:1px solid #86efac;padding:10px;border-radius:6px;">
+          <div class="text-sm" style="color:#166534;">
+            ✅ Imported <strong>${j.created_count}</strong> of <strong>${j.total}</strong>.
+            ${j.failed_count ? ` <span style="color:#991b1b;">⚠ ${j.failed_count} failed.</span>` : ''}
+          </div>
+          ${failList.length ? `<details class="mt-2"><summary class="text-xs cursor-pointer" style="color:#991b1b;">Show failures</summary>
+            <ul class="text-xs mt-1" style="color:#7f1d1d;">${failList.map(f => `<li>• ${escapeHtml(f.title)} — ${escapeHtml(f.error)}</li>`).join('')}</ul>
+          </details>` : ''}
+          <div class="text-xs mt-2" style="color:#64748b;">
+            New entries are queued for embedding automatically. Click <strong>↻</strong> on the embeddings strip to refresh, or <strong>▶ Backfill</strong> to embed them now.
+          </div>
+        </div>`;
+      // Refresh the tree + entries list + embeddings status under the import card.
+      await Promise.all([loadKB(), kbTreeReload(), kbEmbedReload()]);
+    } catch (e) {
+      out.innerHTML = `<div class="text-rose-600 text-xs">Error: ${escapeHtml(e.message)}</div>`;
+    }
+  };
+}
+
 async function kbHandleFiles(fileList) {
   const files = Array.from(fileList || []);
   if (!files.length) return;
