@@ -29,6 +29,21 @@
      prototype remain alive (.btn-primary, .pill.ok, .nav-link, .section-h …)
      so the existing JS keeps working — only the visual is swapped.
      ════════════════════════════════════════════════════════════════════════ */
+
+  /* M115 · Auto-RTL polish. The JS scanner sets dir="rtl" on elements with
+     Persian/Arabic content; these rules make the visual right (text-align,
+     list-position, table cell alignment, fact pills). Inputs use
+     unicode-bidi:plaintext as a fallback so even without the dir attribute,
+     a Persian buffer aligns correctly per-paragraph. */
+  input, textarea { unicode-bidi: plaintext; }
+  [dir="rtl"] { text-align: right; }
+  [dir="rtl"] input, [dir="rtl"] textarea { text-align: right; }
+  [dir="rtl"] ul, [dir="rtl"] ol { padding-right: 1.25rem; padding-left: 0; }
+  [dir="rtl"] .pill, [dir="rtl"] .fact-pill, [dir="rtl"] .tag-pill { direction: ltr; unicode-bidi: isolate; }
+  /* Numbers stay left-to-right inside RTL containers — Persian text reads
+     right-to-left, but "$1,066" or "2025-04-01" should remain LTR. */
+  [dir="rtl"] .mono, [dir="rtl"] code, [dir="rtl"] .stars { direction: ltr; unicode-bidi: isolate; display: inline-block; }
+  [dir="rtl"] td, [dir="rtl"] th { text-align: right; }
   :root {
     /* Brand */
     --brand-teal: #009b98;
@@ -2787,6 +2802,120 @@
 -->
 <script src="/config.js"></script>
 <script>
+// ════════════════════════════════════════════════════════════════════
+// M115 · Auto-RTL for Persian / Arabic content
+// Scans inputs, textareas, and content containers; if any character is
+// in Arabic/Persian Unicode ranges, applies dir="rtl" to that element.
+// Works for mixed content (Persian + English words) — applies RTL to
+// the WHOLE element, not just the Persian segments.
+// Uses a MutationObserver so dynamically-rendered cards get treated.
+// ════════════════════════════════════════════════════════════════════
+(function() {
+  // Arabic + Arabic Supplement + Arabic Extended-A + Persian-specific
+  // letters + Arabic Presentation Forms-A/B + ZWJ/ZWNJ markers
+  const RTL_CHAR = /[؀-ۿݐ-ݿࢠ-ࣿ‌‍‎‏ﭐ-﷿ﹰ-﻿]/;
+
+  // Inputs we touch. Excluded: number, password, date, file, etc — user
+  // intent there is unambiguous and changing dir would be confusing.
+  const INPUT_SELECTOR = 'input:not([type="password"]):not([type="number"]):not([type="email"]):not([type="url"]):not([type="date"]):not([type="time"]):not([type="datetime-local"]):not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="submit"]):not([type="button"]):not([type="color"]):not([type="range"]), textarea';
+
+  // Content surfaces — broad, opt-in via class or data attribute, plus
+  // a few specific selectors used heavily for Persian content.
+  const CONTENT_SELECTOR = [
+    '.kb-entry',                  // KB cards
+    '.modal-body',                // every modal
+    '.modal-card',
+    '.co-stage-detail',           // compose stage outputs
+    '.co-preview-body',           // compose run preview
+    '.co-stage-body .co-stage-output',
+    '[data-auto-rtl]',            // explicit opt-in
+  ].join(',');
+
+  function isRTL(text) {
+    return !!(text && RTL_CHAR.test(text));
+  }
+
+  function applyToInput(el) {
+    if (!el || el.dataset.rtlSkip) return;
+    const v = el.value || el.placeholder || '';
+    if (isRTL(v)) {
+      if (el.getAttribute('dir') !== 'rtl') {
+        el.setAttribute('dir', 'rtl');
+        el.style.textAlign = 'right';
+      }
+    } else if (el.getAttribute('dir') === 'rtl') {
+      el.removeAttribute('dir');
+      el.style.textAlign = '';
+    }
+  }
+
+  function applyToContainer(el) {
+    if (!el || el.dataset.rtlSkip) return;
+    // Use textContent so we read the rendered text without HTML noise
+    const text = el.textContent || '';
+    if (isRTL(text)) {
+      if (el.getAttribute('dir') !== 'rtl') {
+        el.setAttribute('dir', 'rtl');
+      }
+    }
+    // Note: we don't unset dir if it's already set, because removing it
+    // mid-flight when a re-render produces partial empty content would
+    // cause flicker. The next full scan with content present catches it.
+  }
+
+  function scan(root) {
+    const r = root || document;
+    if (r.nodeType === 1) {
+      // If the added node itself matches, treat it
+      if (r.matches && r.matches(INPUT_SELECTOR)) applyToInput(r);
+      if (r.matches && r.matches(CONTENT_SELECTOR)) applyToContainer(r);
+    }
+    if (r.querySelectorAll) {
+      r.querySelectorAll(INPUT_SELECTOR).forEach(applyToInput);
+      r.querySelectorAll(CONTENT_SELECTOR).forEach(applyToContainer);
+    }
+  }
+
+  // Live updates: as the founder types, dir flips when the buffer becomes
+  // mostly Persian. Delegated for low overhead.
+  document.addEventListener('input', e => {
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) {
+      applyToInput(t);
+    }
+  }, true);
+
+  // Catch all dynamically-rendered content. The dashboard rebuilds large
+  // chunks of HTML via innerHTML on every nav; this observer reapplies
+  // RTL detection within the same tick.
+  let pendingRoot = null;
+  const obs = new MutationObserver(muts => {
+    for (const m of muts) {
+      m.addedNodes.forEach(node => {
+        if (node.nodeType === 1) {
+          if (!pendingRoot) {
+            pendingRoot = document;
+            queueMicrotask(() => { scan(pendingRoot); pendingRoot = null; });
+          }
+        }
+      });
+    }
+  });
+
+  function start() {
+    obs.observe(document.body, { childList: true, subtree: true });
+    scan(document);
+  }
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    start();
+  } else {
+    window.addEventListener('DOMContentLoaded', start);
+  }
+
+  // Manual trigger for after big render cycles (optional belt-and-braces)
+  window.applyAutoRTL = scan;
+})();
+
 // ── Configuration ────────────────────────────────────────────────
 // Values come from window.* set by /config.js (above). Fallbacks here
 // are local-dev defaults if /config.js is unreachable; they no longer
