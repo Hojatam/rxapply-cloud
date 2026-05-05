@@ -12201,8 +12201,8 @@ async function renderKnowledge() {
             Use any AI (ChatGPT, Gemini, Claude.ai, etc.) to extract structured facts from a regulator PDF or web page, then upload the resulting JSON here. Bypasses Daneshyar — facts go straight into the KB.
           </div>
           <div class="flex gap-2 mb-3 flex-wrap">
-            <a class="btn btn-ghost btn-xs" href="${typeof PROXY === 'string' ? PROXY : ''}/kb/json-template" download="rxapply-kb-template.json">📄 Download template JSON</a>
-            <a class="btn btn-ghost btn-xs" href="${typeof PROXY === 'string' ? PROXY : ''}/kb/json-prompt-guide" download="rxapply-kb-ai-extraction-guide.md">🤖 Download AI prompt guide</a>
+            <a class="btn btn-ghost btn-xs" href="${typeof PROXY === 'string' ? PROXY : ''}/knowledge/json-template" download="rxapply-kb-template.json">📄 Download template JSON</a>
+            <a class="btn btn-ghost btn-xs" href="${typeof PROXY === 'string' ? PROXY : ''}/knowledge/json-prompt-guide" download="rxapply-kb-ai-extraction-guide.md">🤖 Download AI prompt guide</a>
           </div>
           <div class="text-xs" style="color:#64748b;">
             Workflow: <strong>1)</strong> download both files. <strong>2)</strong> in your AI chat, paste the prompt guide + your source material → AI returns JSON. <strong>3)</strong> save AI's JSON to a file. <strong>4)</strong> upload below.
@@ -13163,7 +13163,7 @@ async function kbHandleJsonFiles(fileList) {
   document.getElementById('kb-json-confirm').onclick = async () => {
     out.innerHTML = `<div class="text-xs" style="color:#64748b;">Importing ${entries.length} entries…</div>`;
     try {
-      const r = await authFetch(`${PROXY}/kb/upload-json`, {
+      const r = await authFetch(`${PROXY}/knowledge/upload-json`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           entries,

@@ -2246,21 +2246,36 @@ That's it. Read the source carefully, follow the schema, return JSON.
 `;
 }
 
-app.get('/kb/json-template', (_req, res) => {
+// M111b · Routes under /knowledge/ namespace to avoid collision with the
+// parametric /kb/:id route registered earlier in this file. (Express
+// matches /kb/json-template against /kb/:id first, treating
+// "json-template" as an id and never reaching this handler.)
+app.get('/knowledge/json-template', (_req, res) => {
   const body = JSON.stringify(_kbJsonTemplate(), null, 2);
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="rxapply-kb-template.json"');
   res.end(body);
 });
 
-app.get('/kb/json-prompt-guide', (_req, res) => {
+app.get('/knowledge/json-prompt-guide', (_req, res) => {
   const body = _kbAiPromptGuide();
   res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="rxapply-kb-ai-extraction-guide.md"');
   res.end(body);
 });
 
-app.post('/kb/upload-json', auth.middleware, async (req, res) => {
+// Back-compat aliases — same handlers under the old /kb/ paths in case
+// any external bookmark or curl script was already using them. These
+// also work now because the parametric /kb/:id is async and the static
+// path lands here first when registered later — but safer to keep them.
+app.get('/kb-export/json-template', (req, res) => {
+  res.redirect(307, '/knowledge/json-template');
+});
+app.get('/kb-export/json-prompt-guide', (req, res) => {
+  res.redirect(307, '/knowledge/json-prompt-guide');
+});
+
+app.post('/knowledge/upload-json', auth.middleware, async (req, res) => {
   try {
     const body = req.body || {};
     const entries = Array.isArray(body.entries) ? body.entries : null;
