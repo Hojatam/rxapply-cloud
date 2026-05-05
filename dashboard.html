@@ -12359,9 +12359,10 @@ async function renderKnowledge() {
               <option>SA</option><option>GLOBAL</option>
             </select>
             <label class="text-slate-500 ml-2">Default status:</label>
-            <select id="kb-json-status" class="border border-slate-200 rounded px-2 py-1 text-xs bg-white">
-              <option value="draft" selected>draft (review before agents use)</option>
-              <option value="active">active (verified now)</option>
+            <select id="kb-json-status" class="border border-slate-200 rounded px-2 py-1 text-xs bg-white" title="Founder choice OVERRIDES the status field in the JSON. Pick 'use entry's value' to respect what the AI put in each row.">
+              <option value="draft" selected>draft (force — review before agents use)</option>
+              <option value="active">active (force — verified now)</option>
+              <option value="inherit">use entry's value (respect what's in the JSON)</option>
             </select>
           </div>
           <div id="kb-json-result" class="mt-3 text-sm"></div>

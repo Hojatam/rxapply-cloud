@@ -2283,13 +2283,25 @@ app.post('/knowledge/upload-json', auth.middleware, async (req, res) => {
       return res.status(400).json({ ok: false, error: 'expected { entries: [...] } in body' });
     }
     const defaultCountry = body.default_country || null;
-    const defaultStatus  = body.default_status  || 'draft';
-    const defaultImp     = parseInt(body.default_importance, 10) || 3;
-    const filename       = body.filename        || null;
+    // M116 · The dashboard's "Default status" dropdown is the founder's
+    // authoritative knob — when they explicitly pick "active", every
+    // entry should land active regardless of what's in the per-entry
+    // status field. Previously per-entry won, so AI-generated JSONs
+    // (which the prompt guide tells the AI to default to "draft") always
+    // came in as drafts. Empty string = "respect per-entry value".
+    const defaultStatusRaw = (typeof body.default_status === 'string') ? body.default_status.trim() : '';
+    const overrideStatus   = defaultStatusRaw && defaultStatusRaw !== 'inherit';
+    const defaultImp       = parseInt(body.default_importance, 10) || 3;
+    const filename         = body.filename        || null;
 
     const created = [], failed = [];
     for (let i = 0; i < entries.length; i++) {
       const e = entries[i];
+      // Resolve final status: founder override wins over per-entry, falls
+      // back to per-entry, falls back to 'draft'.
+      const finalStatus = overrideStatus
+        ? defaultStatusRaw
+        : (e.status || 'draft');
       try {
         const r = await KB.add({
           country:     e.country     || defaultCountry,
@@ -2303,8 +2315,8 @@ app.post('/knowledge/upload-json', auth.middleware, async (req, res) => {
           sourceType:  e.source_type || 'manual',
           tags:        Array.isArray(e.tags) ? e.tags : [],
           importance:  Number.isFinite(e.importance) ? e.importance : defaultImp,
-          status:      e.status      || defaultStatus,
-          verifiedBy:  e.status === 'active' ? 'founder' : null,
+          status:      finalStatus,
+          verifiedBy:  finalStatus === 'active' ? 'founder' : null,
           updatedBy:   'founder',
         });
         if (r.ok) created.push({ index: i, id: r.id, title: e.title });
@@ -2328,7 +2340,7 @@ app.post('/knowledge/upload-json', auth.middleware, async (req, res) => {
           'founder',
           ${filename ? db.q(filename) : 'NULL'},
           ${defaultCountry ? db.q(defaultCountry) : 'NULL'},
-          ${defaultStatus  ? db.q(defaultStatus)  : 'NULL'},
+          ${defaultStatusRaw ? db.q(defaultStatusRaw) : 'NULL'},
           ${defaultImp},
           ${entries.length}, ${created.length}, ${failed.length},
           ${idsLit},

@@ -176,7 +176,10 @@ async function parseAndSave({ text, country = null, hint = null }) {
   const saved = [];
   const errors = [];
   for (const e of (r.entries || [])) {
-    const ins = KB.add({
+    // M116 · KB.add is async; without await we never see whether the
+    // insert succeeded and `ins.ok` is undefined on a Promise (truthy
+    // for the wrong reason — the catch branch never fires).
+    const ins = await KB.add({
       country: e.country, category: e.category, title: e.title, content: e.content,
       facts: e.facts || {}, source: e.source, sourceType: 'parsed',
       tags: e.tags || [], importance: e.importance || 3, status: 'draft',
@@ -192,7 +195,11 @@ async function parseAndSave({ text, country = null, hint = null }) {
 }
 
 async function verify({ id }) {
-  const entry = KB.getOne(id);
+  // M116 · KB.getOne is async — without await, `entry` is a Promise and
+  // every field access returns undefined. That's why the verify prompt
+  // arrived at the model as "country: undefined" and either silently
+  // failed or produced unusable output.
+  const entry = await KB.getOne(id);
   if (!entry) return { ok: false, error: 'entry not found' };
   const { id: model } = agentModels.resolveModel('daneshyar');
   const brand = brandProfile.renderAsPromptBlock();
@@ -218,7 +225,8 @@ async function verify({ id }) {
 }
 
 async function findMore({ id }) {
-  const entry = KB.getOne(id);
+  // M116 · same async-not-awaited bug as verify — fixed.
+  const entry = await KB.getOne(id);
   if (!entry) return { ok: false, error: 'entry not found' };
   const { id: model } = agentModels.resolveModel('daneshyar');
   const brand = brandProfile.renderAsPromptBlock();
