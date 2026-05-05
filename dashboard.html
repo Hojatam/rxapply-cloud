@@ -12348,6 +12348,94 @@ async function renderKnowledge() {
         <div class="text-xs mt-3" style="color:#a16207;border-top:1px solid #fde68a;padding-top:8px;">
           <strong>Tip:</strong> the taxonomy itself is data, not code. Add country-specific subtopics (e.g. <code class="mono">UK/exam/ore_part_1</code>, <code class="mono">USA/visa/j1</code>) as your KB grows. The tree will show them; agents will retrieve more narrowly. No deploy, no code change.
         </div>
+
+        <!-- M111 · Deep dive on what embeddings actually do. Collapsed by
+             default to keep the main grid scannable. Founder opens it once
+             when curious; the detail justifies the extra column. -->
+        <details class="mt-3" style="border-top:1px solid #fde68a;padding-top:10px;">
+          <summary style="cursor:pointer;font-weight:600;font-size:13px;color:#78350f;list-style:none;display:flex;align-items:center;gap:6px;">
+            <span style="font-size:14px;">🧠</span>
+            <span>Deep dive: how semantic embeddings work</span>
+            <span class="text-xs" style="color:#a16207;font-weight:400;margin-left:auto;">click to expand</span>
+          </summary>
+          <div class="text-sm mt-3" style="color:#451a03;line-height:1.65;background:#fffbeb;padding:12px;border-radius:6px;">
+
+            <div style="font-weight:600;color:#78350f;margin-bottom:4px;">What an embedding actually is</div>
+            <div class="text-xs" style="color:#57534e;">
+              Every KB entry's <code class="mono">title + content + facts + tags</code> are sent to OpenAI's <code class="mono">text-embedding-3-small</code> model. The model returns a list of <strong>1,536 floating-point numbers</strong> — a "vector". This vector represents the <em>meaning</em> of the text in a high-dimensional space.
+              <br>Two texts about the same concept land at roughly the same coordinates in that space, even if they share zero words. That's the magic: <strong>"ORE Part 1 fee is £1066"</strong> in English and <strong>«هزینه آزمون ORE قسمت ۱، ۱۰۶۶ پوند است»</strong> in Persian end up almost identical vectors. So a Persian query finds the English fact and vice versa.
+            </div>
+
+            <div style="font-weight:600;color:#78350f;margin:10px 0 4px;">How recall works (the math, plain)</div>
+            <div class="text-xs" style="color:#57534e;">
+              When an agent (or you, in <strong>/kb/recall/preview</strong>) asks for facts, the orchestrator:
+              <ol class="list-decimal pl-5 mt-1" style="margin-left:14px;">
+                <li>Filters by <code class="mono">country</code> (and <code class="mono">GLOBAL</code>) + status (<code class="mono">active</code>/<code class="mono">draft</code>).</li>
+                <li>If a query is supplied AND <code class="mono">OPENAI_API_KEY</code> is set, embeds the query into the same 1536-dim space.</li>
+                <li>Computes a <strong>combined score</strong> per row, then orders by score DESC and takes the top N.</li>
+              </ol>
+              The score formula (from <code class="mono">knowledge-base.js</code>):
+              <pre class="mono" style="background:#fef3c7;padding:8px;border-radius:4px;margin-top:6px;font-size:11px;line-height:1.4;overflow-x:auto;">score =
+   importance × recency_decay
+ + topic_match    × 4   (boost when topic equals query topic)
+ + subtopic_match × 6   (stronger boost when subtopic matches)
+ + title_or_content_contains_keyword × 5
+ + tag_array_overlaps_query_keywords × 3
+ + (1 - cosine_distance) × 8     ← semantic similarity</pre>
+              The semantic term gives <strong>up to +8 points</strong> for a perfect cosine match (1.0 similarity), 0 for orthogonal, negative for opposite-meaning. It's <em>additive</em>, not exclusive — so a tag-exact-match (+3) plus title-contains (+5) plus a moderate semantic match (+5) still ranks naturally.
+            </div>
+
+            <div style="font-weight:600;color:#78350f;margin:10px 0 4px;">When semantic helps</div>
+            <div class="text-xs" style="color:#57534e;">
+              <strong>Cross-language drift.</strong> Persian topic, English KB. Or vice versa. Pure keyword recall finds nothing; semantic finds everything.
+              <br><strong>Paraphrase.</strong> Query is <em>"How much does it cost to register with the GDC?"</em> — KB has <em>"GDC ARF (Annual Retention Fee)"</em>. Zero shared keywords beyond "GDC", but the meaning is identical. Semantic catches it.
+              <br><strong>Conceptual drilling.</strong> Query <em>"licensing pathway for foreign-trained dentists"</em> surfaces ORE-related facts even though "licensing pathway" isn't in any title.
+              <br><strong>Synonyms.</strong> "salary" / "compensation" / "earnings" / "income" all map near each other in vector space.
+            </div>
+
+            <div style="font-weight:600;color:#78350f;margin:10px 0 4px;">When keyword still wins</div>
+            <div class="text-xs" style="color:#57534e;">
+              <strong>Exact identifiers.</strong> Query <em>"NDEB AFK"</em> — the +3 tag-exact-match plus +5 title-contains usually outscores any semantic neighbour. That's correct; you wanted that exact thing, not a vibe-similar fact.
+              <br><strong>Rare tokens.</strong> Codes like <em>"H-1B"</em>, <em>"NOC 31110"</em>, <em>"INBDE"</em> — keyword and tag matching are more reliable than semantic for these because the embedding model has thinner training signal on rarities.
+              <br><strong>Recently-edited facts</strong> already get a recency boost; semantic can't override that, which is what you want — fresh facts > stale near-matches.
+            </div>
+
+            <div style="font-weight:600;color:#78350f;margin:10px 0 4px;">Status states explained</div>
+            <div class="text-xs" style="color:#57534e;">
+              <ul class="list-disc pl-5" style="margin-left:14px;">
+                <li><strong>🧠 vector (ready)</strong> — embedding computed and stored. The row participates in semantic recall. This is the steady state.</li>
+                <li><strong>⏳ pending</strong> — row exists but hasn't been embedded yet. Two reasons: (a) just created, background job will pick it up within seconds; (b) backfill hasn't run for older rows. Pending rows still appear in keyword recall — they just don't get the semantic boost yet.</li>
+                <li><strong>⚠ failed</strong> — embedding call failed (network glitch, malformed input, OpenAI 5xx). The error is stored on the row. Click 🔄 to retry that single row, or 🔄 in the strip and Backfill again.</li>
+                <li><strong>↪ skipped</strong> — the embedder explicitly chose not to embed (e.g. <code class="mono">OPENAI_API_KEY</code> was missing at insert time, or the row had empty content). You can fix the cause and 🔄 retry.</li>
+              </ul>
+            </div>
+
+            <div style="font-weight:600;color:#78350f;margin:10px 0 4px;">When does an embedding refresh?</div>
+            <div class="text-xs" style="color:#57534e;">
+              The embedder watches four fields: <code class="mono">title</code>, <code class="mono">content</code>, <code class="mono">facts</code>, <code class="mono">tags</code>. If you edit any of those (manual or bulk-retag), the row flips back to <code class="mono">pending</code> and re-embeds in the background.
+              <br>Editing <code class="mono">topic</code>, <code class="mono">subtopic</code>, <code class="mono">status</code>, <code class="mono">importance</code>, or <code class="mono">source</code> does NOT trigger a re-embed — those are filter/scoring metadata, not semantic content. Saves money and avoids needless API calls.
+            </div>
+
+            <div style="font-weight:600;color:#78350f;margin:10px 0 4px;">Cost &amp; performance numbers</div>
+            <div class="text-xs" style="color:#57534e;">
+              <strong>Per embedding:</strong> ~150 tokens average × $0.00002 per 1k tokens ≈ <strong>$0.000003</strong> per row.
+              <br><strong>Backfill 1,000 rows:</strong> ≈ <strong>$0.003</strong>. The backfill button processes 50 rows per click — about $0.0001 per batch.
+              <br><strong>Recall query:</strong> one embed call (~$0.000001) + one HNSW index lookup. Adds ~30–80 ms to a recall round-trip. Not noticeable in compose runs that take 30+ seconds anyway.
+              <br><strong>Index size:</strong> 1,536 dims × 4 bytes × N rows. 10,000 rows = ~62 MB on disk. HNSW search stays sub-100 ms even at 100k+ rows.
+            </div>
+
+            <div style="font-weight:600;color:#78350f;margin:10px 0 4px;">Tuning the boost</div>
+            <div class="text-xs" style="color:#57534e;">
+              The <strong>×8 multiplier</strong> on the semantic term is heuristic. If you find vector results dominating too much (random near-matches outranking exact tag hits), tell me to lower it to ×4. If keyword keeps winning when semantic should clearly help (cross-language failures, missed paraphrases), tell me to raise it to ×12. It's a single number in <code class="mono">cowork-proxy/knowledge-base.js</code>; ship in 30 seconds.
+            </div>
+
+            <div style="font-weight:600;color:#78350f;margin:10px 0 4px;">What this isn't</div>
+            <div class="text-xs" style="color:#57534e;">
+              Semantic embeddings are <strong>not</strong> a fact-checker, a summariser, or an LLM. The embedding model has zero understanding beyond surface meaning — it can't tell you whether a fact is up-to-date, whether two facts contradict each other, or whether a number is plausible. That's still Daneshyar's job.
+              <br>Embeddings just answer <em>"which existing entries are most semantically related to this query?"</em> — nothing more.
+            </div>
+          </div>
+        </details>
       </div>
     </details>
 
