@@ -12209,6 +12209,97 @@ async function renderKnowledge() {
       <div id="kb-paste-result" class="mt-3 text-sm"></div>
     </div>
 
+    <!-- M109 · Inline how-to guide. Collapsed by default so it doesn't
+         dominate the page; first-time visitors expand it once. The state
+         is persisted in localStorage so a founder who's read it doesn't
+         see it pop open on every Knowledge tab visit. -->
+    <details id="kb-guide" class="card mb-3" style="background:linear-gradient(90deg,#fefce8,#fff);border-color:#fde68a;" ${localStorage.getItem('rxapply-kb-guide-collapsed')==='1' ? '' : 'open'} ontoggle="localStorage.setItem('rxapply-kb-guide-collapsed', this.open ? '0' : '1')">
+      <summary style="cursor:pointer;font-weight:600;font-size:14px;color:#78350f;list-style:none;display:flex;align-items:center;gap:8px;">
+        <span style="font-size:16px;">📖</span>
+        <span>How to use the Knowledge Base</span>
+        <span class="text-xs" style="color:#a16207;font-weight:400;margin-left:auto;">(click to collapse)</span>
+      </summary>
+      <div class="text-sm mt-3" style="color:#451a03;line-height:1.6;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+          <div>
+            <div style="font-weight:600;color:#78350f;margin-bottom:4px;">🌳 The tree (left rail)</div>
+            <div class="text-xs" style="color:#57534e;line-height:1.55;">
+              Country → topic → subtopic. <strong>Click any node to filter the right pane</strong> to that scope. Numbers on the right are entry counts.
+              <br>The taxonomy is <strong>editable</strong> — click <strong>+ Topic</strong> below a country to add a new topic, or <strong>+</strong> next to a topic to add a subtopic. Existing entries that don't have a matching taxonomy node show as <span style="color:#854d0e;">⚠ untaxonomised</span>; that's a hint to fix the taxonomy or move them via Bulk re-tag.
+            </div>
+          </div>
+
+          <div>
+            <div style="font-weight:600;color:#78350f;margin-bottom:4px;">➕ Adding entries</div>
+            <div class="text-xs" style="color:#57534e;line-height:1.55;">
+              Three ways:
+              <br>• <strong>+ New entry</strong> on the right — manual, fast for one fact. Pre-fills country/topic/subtopic from whatever node you've selected.
+              <br>• <strong>Paste &amp; parse</strong> — drop a chunk of regulator text in the textarea; Daneshyar splits it into structured drafts.
+              <br>• <strong>Upload file</strong> — PDF/DOCX/PPTX/HTML/MD. Same parser, file-aware.
+              <br>All three feed the same <code class="mono">knowledge_base</code> table.
+            </div>
+          </div>
+
+          <div>
+            <div style="font-weight:600;color:#78350f;margin-bottom:4px;">🧠 Semantic embeddings (M106)</div>
+            <div class="text-xs" style="color:#57534e;line-height:1.55;">
+              Every entry gets a vector embedding (OpenAI text-embedding-3-small, 1536 dims). Agents recall facts by <strong>keyword + tags + cosine similarity</strong> combined — Persian queries find English facts and vice versa.
+              <br>The <strong>Embeddings status strip</strong> below shows ready / pending / failed. Click <strong>▶ Backfill 50</strong> repeatedly until "All ready" — costs about $0.0001 per click. New entries embed in the background automatically.
+              <br>Per-entry indicator: 🧠 vector / ⏳ pending / ⚠ failed. Failed rows get a 🔄 retry button.
+            </div>
+          </div>
+
+          <div>
+            <div style="font-weight:600;color:#78350f;margin-bottom:4px;">📜 Version history (M107)</div>
+            <div class="text-xs" style="color:#57534e;line-height:1.55;">
+              Click <strong>📜 History</strong> on any entry → modal shows every prior version side-by-side. Yellow highlights = fields that differ from current. <strong>↺ Restore this version</strong> archives the current row (status → superseded) and creates a fresh active row from the old content. Nothing is destructively deleted.
+            </div>
+          </div>
+
+          <div>
+            <div style="font-weight:600;color:#78350f;margin-bottom:4px;">🏷 Bulk re-tag (M108)</div>
+            <div class="text-xs" style="color:#57534e;line-height:1.55;">
+              Move many entries at once. <strong>🏷 Bulk re-tag</strong> on the entries header → modal with WHERE (country/topic/subtopic/status/search) and SET (new fields, plus tags ADD/REMOVE).
+              <br>Always <strong>previews matches before applying</strong>; Apply stays disabled until preview succeeds. Affected rows auto-queue re-embed.
+              <br>Useful pattern: select <code class="mono">UK/exam</code> in the tree → Bulk re-tag → set new subtopic <code class="mono">ore_part_1</code> → Preview → Apply.
+            </div>
+          </div>
+
+          <div>
+            <div style="font-weight:600;color:#78350f;margin-bottom:4px;">🤖 What agents see</div>
+            <div class="text-xs" style="color:#57534e;line-height:1.55;">
+              Every agent recall block is prefixed with <code class="mono">[country/topic/subtopic]</code> so structural address is visible. The orchestrator passes the run's country (and topic/subtopic when known) to <code class="mono">recall()</code>; semantic similarity boosts cross-language matches; tag exact-matches still win for narrow lookups.
+              <br>Importance (★1–5) is also part of the score — a verified ★5 fact will outrank a fresh ★2 even if their similarity is identical.
+            </div>
+          </div>
+
+          <div>
+            <div style="font-weight:600;color:#78350f;margin-bottom:4px;">🟢 Lifecycle states</div>
+            <div class="text-xs" style="color:#57534e;line-height:1.55;">
+              <strong>active</strong> — verified, included in agent recall<br>
+              <strong>draft</strong> — auto-imported, awaiting your review (still recalled, lower-confidence)<br>
+              <strong>stale</strong> — manually flagged out-of-date (excluded from recall)<br>
+              <strong>superseded</strong> — replaced by a newer version (excluded; preserved for audit)<br>
+              <strong>rejected</strong> — wrong fact (excluded permanently)
+            </div>
+          </div>
+
+          <div>
+            <div style="font-weight:600;color:#78350f;margin-bottom:4px;">⚡ Daneshyar (the KB agent)</div>
+            <div class="text-xs" style="color:#57534e;line-height:1.55;">
+              <strong>🔍 Verify</strong> on any entry — Daneshyar re-checks freshness/coherence against current sources, flags inconsistencies.
+              <br><strong>💡 Find more</strong> — Daneshyar proposes related missing facts (always queued as drafts; you approve before they go active).
+              <br>Daneshyar runs automatically on every compose run with <code class="mono">verify</code> in the recipe. Manual buttons here are for one-off audits.
+            </div>
+          </div>
+        </div>
+
+        <div class="text-xs mt-3" style="color:#a16207;border-top:1px solid #fde68a;padding-top:8px;">
+          <strong>Tip:</strong> the taxonomy itself is data, not code. Add country-specific subtopics (e.g. <code class="mono">UK/exam/ore_part_1</code>, <code class="mono">USA/visa/j1</code>) as your KB grows. The tree will show them; agents will retrieve more narrowly. No deploy, no code change.
+        </div>
+      </div>
+    </details>
+
     <!-- M106 · Embeddings status strip. Shows how many rows have a vector,
          pending count, and a Backfill button. Lazily loaded. -->
     <div id="kb-embed-status" class="card mb-3" style="background:linear-gradient(90deg,#f0f9ff,#fff);border-color:#bae6fd;">
