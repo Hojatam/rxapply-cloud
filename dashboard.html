@@ -12235,6 +12235,7 @@ async function renderKnowledge() {
           <div class="flex items-center justify-between mb-2">
             <h3 class="font-semibold text-sm" id="kb-scope-label">All entries</h3>
             <div class="flex gap-2">
+              <button class="btn btn-ghost btn-xs" title="Bulk move/re-tag entries matching the current scope" onclick="kbBulkRetagModal()">🏷 Bulk re-tag</button>
               <button class="btn btn-primary btn-xs" onclick="kbNewModal()">+ New entry</button>
             </div>
           </div>
@@ -12477,6 +12478,289 @@ async function kbReembed(id) {
   } catch (e) { alert('Error: ' + e.message); }
 }
 
+// ════════════════════════════════════════════════════════════════════
+// M107 · Version history modal — full audit chain for a KB entry, with
+// per-version diff against the current row + one-click restore.
+// ════════════════════════════════════════════════════════════════════
+async function kbHistoryModal(id) {
+  let r;
+  try {
+    r = await authFetch(`${PROXY}/kb/${id}/history`).then(r => r.json());
+  } catch (e) { alert('History fetch failed: ' + e.message); return; }
+  if (!r.ok) { alert('History failed: ' + (r.error || '?')); return; }
+  const versions = r.versions || [];
+  if (!versions.length) { alert('No history available.'); return; }
+
+  const current = versions.find(v => v.is_current) || versions[versions.length - 1];
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-backdrop';
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="modal-card" style="max-width:920px;width:95vw;">
+      <div class="modal-head">
+        <div>
+          <h3>📜 Version history</h3>
+          <div class="modal-sub">${escapeHtml(current.title || '')} · ${versions.length} ${versions.length === 1 ? 'version' : 'versions'} · oldest first</div>
+        </div>
+        <button class="modal-close" id="kbh-close" aria-label="Close">${ICONS.x}</button>
+      </div>
+      <div class="modal-body" style="max-height:65vh;overflow-y:auto;">
+        ${versions.map((v, i) => _kbHistoryRowHtml(v, current, i + 1, versions.length)).join('')}
+      </div>
+      <div class="modal-foot">
+        <button class="btn" id="kbh-cancel">Close</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#kbh-close').onclick = () => overlay.remove();
+  overlay.querySelector('#kbh-cancel').onclick = () => overlay.remove();
+}
+
+function _kbHistoryRowHtml(v, current, n, total) {
+  const isCurrent = v.is_current;
+  const isSuperseded = v.status === 'superseded';
+  const factsTxt = v.facts && Object.keys(v.facts).length
+    ? Object.entries(v.facts).slice(0, 6).map(([k, x]) => `${k}=${x}`).join(', ')
+    : '(no facts)';
+  const tagsTxt = (v.tags || []).join(', ') || '(no tags)';
+  const verifiedTxt = v.verified_at ? `✓ ${v.verified_by || 'verified'} on ${(v.verified_at || '').slice(0, 16)}` : '· not verified';
+  // Diff vs current — count distinct fields that differ
+  const fields = ['title', 'content', 'topic', 'subtopic', 'importance', 'status'];
+  const diffs = isCurrent ? [] : fields.filter(f => JSON.stringify(v[f]) !== JSON.stringify(current[f]));
+  const factDiff = JSON.stringify(v.facts || {}) !== JSON.stringify(current.facts || {}) ? ['facts'] : [];
+  const tagDiff  = JSON.stringify(v.tags || []) !== JSON.stringify(current.tags || []) ? ['tags'] : [];
+  const allDiffs = [...diffs, ...factDiff, ...tagDiff];
+
+  const headerColor = isCurrent ? '#15803d' : isSuperseded ? '#64748b' : '#0c4a6e';
+  const bg = isCurrent ? 'linear-gradient(90deg,#f0fdf4,#fff)' : isSuperseded ? 'linear-gradient(90deg,#f8fafc,#fff)' : '#fff';
+
+  return `
+    <div style="background:${bg};border:1px solid ${isCurrent ? '#86efac' : '#e2e8f0'};border-radius:8px;padding:12px;margin-bottom:8px;">
+      <div class="flex items-center gap-2 flex-wrap mb-2">
+        <strong style="font-size:13px;color:${headerColor};">v${n} of ${total}</strong>
+        ${isCurrent ? '<span class="pill ok" style="font-size:10px;">● CURRENT</span>' : ''}
+        ${isSuperseded ? '<span class="pill" style="font-size:10px;background:#f1f5f9;color:#64748b;">superseded</span>' : ''}
+        <span class="pill" style="font-size:10px;">${escapeHtml(v.country)} · ${escapeHtml(v.topic || v.category || '?')}${v.subtopic ? ' · ' + escapeHtml(v.subtopic) : ''}</span>
+        <span class="text-xs" style="color:#64748b;">created ${(v.created_at || '').slice(0, 16)}</span>
+        ${!isCurrent && allDiffs.length ? `<span class="text-xs" style="color:#7c2d12;font-weight:600;">↔ differs in: ${allDiffs.map(escapeHtml).join(', ')}</span>` : ''}
+        <div class="ml-auto flex gap-2">
+          ${!isCurrent ? `<button class="btn btn-primary btn-xs" onclick="kbRestore('${current.id}', '${v.id}')">↺ Restore this version</button>` : ''}
+        </div>
+      </div>
+      <div style="font-weight:600;font-size:13px;${diffs.includes('title') ? 'background:#fef3c7;padding:2px 4px;border-radius:3px;' : ''}">${escapeHtml(v.title || '')}</div>
+      <div style="font-size:12px;color:#475569;margin-top:4px;line-height:1.5;${diffs.includes('content') ? 'background:#fef3c7;padding:4px;border-radius:3px;' : ''}">${escapeHtml((v.content || '').slice(0, 400))}${(v.content || '').length > 400 ? '…' : ''}</div>
+      <div class="text-xs mt-2" style="color:#64748b;">
+        <span style="${factDiff.length ? 'background:#fef3c7;padding:1px 4px;border-radius:3px;' : ''}">facts: ${escapeHtml(factsTxt)}</span>
+        · <span style="${tagDiff.length ? 'background:#fef3c7;padding:1px 4px;border-radius:3px;' : ''}">tags: ${escapeHtml(tagsTxt)}</span>
+        · ${escapeHtml(verifiedTxt)}
+        ${v.source ? ` · src: ${escapeHtml(String(v.source).slice(0, 50))}` : ''}
+        · importance: ★${v.importance || 3}
+      </div>
+    </div>`;
+}
+
+async function kbRestore(currentId, versionId) {
+  if (!confirm('Restore this version? The current row will be archived (status → superseded) and a new active row will be created with this old content. Audit history is preserved.')) return;
+  try {
+    const r = await authFetch(`${PROXY}/kb/${currentId}/restore`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ version_id: versionId }),
+    });
+    const j = await r.json();
+    if (!j.ok) { alert('Restore failed: ' + (j.error || 'unknown')); return; }
+    alert('Restored. New active version created.');
+    document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+    await Promise.all([loadKB(), kbTreeReload(), kbEmbedReload()]);
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// M108 · Bulk re-tag modal — pre-fills filter from the currently
+// selected tree node (so "select UK/exam → bulk re-tag" is one click),
+// always previews before applying.
+// ════════════════════════════════════════════════════════════════════
+function kbBulkRetagModal() {
+  const sel = _KBTREE.selected || {};
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-backdrop';
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="modal-card" style="max-width:780px;width:95vw;">
+      <div class="modal-head">
+        <div>
+          <h3>🏷 Bulk re-tag</h3>
+          <div class="modal-sub">Move/re-tag many entries at once. Always previews matches before applying. Re-embeds affected rows automatically.</div>
+        </div>
+        <button class="modal-close" id="kbb-close" aria-label="Close">${ICONS.x}</button>
+      </div>
+      <div class="modal-body">
+        <div style="background:#f8fafc;padding:12px;border-radius:8px;border:1px solid #e2e8f0;">
+          <h4 style="font-weight:600;font-size:13px;margin-bottom:8px;color:#475569;">WHERE — match these entries</h4>
+          <div class="grid grid-cols-2 gap-2 text-sm">
+            <div>
+              <label class="text-xs text-slate-500 block mb-1">Country</label>
+              <input id="kbb-f-country" type="text" placeholder="UK / USA / CA / ..." value="${escapeHtml(sel.country || '')}" class="border border-slate-200 rounded px-2 py-1 text-sm w-full">
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 block mb-1">Topic</label>
+              <input id="kbb-f-topic" type="text" placeholder="visa / exam / fees / ..." value="${escapeHtml(sel.topic || '')}" class="border border-slate-200 rounded px-2 py-1 text-sm w-full">
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 block mb-1">Subtopic</label>
+              <input id="kbb-f-subtopic" type="text" placeholder="ore_part_1 / j1 / ..." value="${escapeHtml(sel.subtopic || '')}" class="border border-slate-200 rounded px-2 py-1 text-sm w-full">
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 block mb-1">Status</label>
+              <select id="kbb-f-status" class="border border-slate-200 rounded px-2 py-1 text-sm w-full">
+                <option value="">— any —</option>
+                <option>active</option><option>draft</option><option>stale</option><option>superseded</option><option>rejected</option>
+              </select>
+            </div>
+            <div class="col-span-2">
+              <label class="text-xs text-slate-500 block mb-1">Search (title/content)</label>
+              <input id="kbb-f-query" type="text" placeholder="optional substring" class="border border-slate-200 rounded px-2 py-1 text-sm w-full">
+            </div>
+          </div>
+        </div>
+
+        <div style="background:#f0fdf4;padding:12px;border-radius:8px;border:1px solid #86efac;margin-top:12px;">
+          <h4 style="font-weight:600;font-size:13px;margin-bottom:8px;color:#166534;">SET — change these fields (leave blank to keep)</h4>
+          <div class="grid grid-cols-2 gap-2 text-sm">
+            <div>
+              <label class="text-xs text-slate-500 block mb-1">New country</label>
+              <input id="kbb-p-country" type="text" placeholder="leave blank to keep" class="border border-slate-200 rounded px-2 py-1 text-sm w-full">
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 block mb-1">New topic</label>
+              <input id="kbb-p-topic" type="text" placeholder="leave blank to keep" class="border border-slate-200 rounded px-2 py-1 text-sm w-full">
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 block mb-1">New subtopic</label>
+              <input id="kbb-p-subtopic" type="text" placeholder="leave blank to keep · empty string clears" class="border border-slate-200 rounded px-2 py-1 text-sm w-full">
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 block mb-1">New status</label>
+              <select id="kbb-p-status" class="border border-slate-200 rounded px-2 py-1 text-sm w-full">
+                <option value="">— keep —</option>
+                <option>active</option><option>draft</option><option>stale</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 block mb-1">New importance</label>
+              <select id="kbb-p-importance" class="border border-slate-200 rounded px-2 py-1 text-sm w-full">
+                <option value="">— keep —</option>
+                ${[1,2,3,4,5].map(n => `<option value="${n}">★ ${n}</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 block mb-1">Tags to ADD (comma-separated)</label>
+              <input id="kbb-p-tags-add" type="text" placeholder="e.g. priority,2026" class="border border-slate-200 rounded px-2 py-1 text-sm w-full">
+            </div>
+            <div class="col-span-2">
+              <label class="text-xs text-slate-500 block mb-1">Tags to REMOVE (comma-separated)</label>
+              <input id="kbb-p-tags-remove" type="text" placeholder="e.g. legacy,old-pricing" class="border border-slate-200 rounded px-2 py-1 text-sm w-full">
+            </div>
+          </div>
+        </div>
+
+        <div id="kbb-preview" class="mt-3 text-sm" style="max-height:300px;overflow-y:auto;"></div>
+        <div id="kbb-error" class="text-rose-600 text-xs mt-2"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" id="kbb-cancel">Cancel</button>
+        <button class="btn btn-ghost" id="kbb-preview-btn">👁 Preview matches</button>
+        <button class="btn btn-primary" id="kbb-apply" disabled style="opacity:0.5;">↻ Apply (after preview)</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#kbb-close').onclick   = () => overlay.remove();
+  overlay.querySelector('#kbb-cancel').onclick  = () => overlay.remove();
+  overlay.querySelector('#kbb-preview-btn').onclick = () => _kbBulkRetag(true, overlay);
+  overlay.querySelector('#kbb-apply').onclick   = () => _kbBulkRetag(false, overlay);
+}
+
+function _kbBulkBuildPayload() {
+  const filter = {};
+  if ($('kbb-f-country').value)  filter.country  = $('kbb-f-country').value.trim();
+  if ($('kbb-f-topic').value)    filter.topic    = $('kbb-f-topic').value.trim();
+  if ($('kbb-f-subtopic').value) filter.subtopic = $('kbb-f-subtopic').value.trim();
+  if ($('kbb-f-status').value)   filter.status   = $('kbb-f-status').value;
+  if ($('kbb-f-query').value)    filter.query    = $('kbb-f-query').value.trim();
+
+  const patch = {};
+  // Only set keys that were actually filled in (leave blank = keep)
+  // Note: empty string in subtopic input means "clear the subtopic"
+  if ($('kbb-p-country').value)  patch.country  = $('kbb-p-country').value.trim();
+  if ($('kbb-p-topic').value)    patch.topic    = $('kbb-p-topic').value.trim();
+  if ($('kbb-p-subtopic').value !== undefined && document.activeElement !== $('kbb-p-subtopic')) {
+    // Only include subtopic patch if the field has been touched
+  }
+  const subVal = $('kbb-p-subtopic').value;
+  if (subVal !== '') patch.subtopic = subVal.trim();
+  // (leaving subtopic blank means "don't change". To clear, set status=null via API directly.)
+  if ($('kbb-p-status').value)     patch.status     = $('kbb-p-status').value;
+  if ($('kbb-p-importance').value) patch.importance = parseInt($('kbb-p-importance').value, 10);
+  const tAdd = $('kbb-p-tags-add').value.split(',').map(s => s.trim()).filter(Boolean);
+  const tRm  = $('kbb-p-tags-remove').value.split(',').map(s => s.trim()).filter(Boolean);
+  if (tAdd.length) patch.tags_add = tAdd;
+  if (tRm.length)  patch.tags_remove = tRm;
+  return { filter, patch };
+}
+
+async function _kbBulkRetag(dryRun, overlay) {
+  const { filter, patch } = _kbBulkBuildPayload();
+  const errEl = overlay.querySelector('#kbb-error');
+  const prevEl = overlay.querySelector('#kbb-preview');
+  errEl.textContent = '';
+
+  if (!Object.keys(filter).length) {
+    errEl.textContent = 'Set at least one WHERE field — refusing to bulk-update the entire table.';
+    return;
+  }
+  if (!dryRun && !Object.keys(patch).length) {
+    errEl.textContent = 'Set at least one SET field, or click Preview only.';
+    return;
+  }
+
+  prevEl.innerHTML = `<div style="color:#64748b;">Working…</div>`;
+  try {
+    const r = await authFetch(`${PROXY}/kb/bulk-update`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filter, patch, dry_run: dryRun }),
+    });
+    const j = await r.json();
+    if (!j.ok) { errEl.textContent = j.error || 'failed'; prevEl.innerHTML = ''; return; }
+    if (j.dry_run) {
+      const list = j.preview || [];
+      if (!list.length) {
+        prevEl.innerHTML = `<div style="background:#fef3c7;color:#854d0e;padding:8px;border-radius:6px;">No matches for that filter.</div>`;
+        overlay.querySelector('#kbb-apply').disabled = true;
+        overlay.querySelector('#kbb-apply').style.opacity = '0.5';
+        return;
+      }
+      prevEl.innerHTML = `
+        <div style="background:#dbeafe;color:#1e40af;padding:8px;border-radius:6px;margin-bottom:6px;">
+          ↪ ${list.length} ${list.length === 1 ? 'entry matches' : 'entries match'} the filter. Review below; click <strong>Apply</strong> to commit the patch.
+        </div>
+        <div style="border:1px solid #e2e8f0;border-radius:6px;max-height:240px;overflow-y:auto;">
+          ${list.map(e => `
+            <div style="padding:6px 10px;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;gap:8px;">
+              <span class="pill" style="font-size:10px;">${escapeHtml(e.country)} · ${escapeHtml(e.topic || '?')}${e.subtopic ? ' · ' + escapeHtml(e.subtopic) : ''}</span>
+              <span style="font-size:12px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(e.title)}</span>
+              <span class="text-xs" style="color:#64748b;">★${e.importance || 3} · ${escapeHtml(e.status)}</span>
+            </div>`).join('')}
+        </div>`;
+      overlay.querySelector('#kbb-apply').disabled = false;
+      overlay.querySelector('#kbb-apply').style.opacity = '1';
+    } else {
+      prevEl.innerHTML = `<div style="background:#dcfce7;color:#166534;padding:8px;border-radius:6px;">✓ Applied to ${j.matched_count} ${j.matched_count === 1 ? 'entry' : 'entries'}.${j.embed_queued ? ' Affected rows are queued for re-embedding.' : ''}</div>`;
+      // Refresh tree + entry list under the modal
+      setTimeout(() => Promise.all([loadKB(), kbTreeReload(), kbEmbedReload()]), 200);
+    }
+  } catch (e) { errEl.textContent = e.message; prevEl.innerHTML = ''; }
+}
+
 async function loadKB() {
   try {
     const params = new URLSearchParams();
@@ -12580,6 +12864,7 @@ function _kbCard(e) {
         <button class="btn btn-ghost btn-xs" title="Daneshyar verify" onclick="kbVerify('${e.id}')">🔍 Verify</button>
         <button class="btn btn-ghost btn-xs" title="Daneshyar find more" onclick="kbFindMore('${e.id}')">💡 Find more</button>
         <button class="btn btn-ghost btn-xs" onclick="kbEditModal('${e.id}')">✎ Edit</button>
+        <button class="btn btn-ghost btn-xs" title="Version history" onclick="kbHistoryModal('${e.id}')">📜 History</button>
         <button class="btn btn-danger btn-xs" onclick="kbDelete('${e.id}')">✕ Delete</button>
       </div>
     </div>

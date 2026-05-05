@@ -153,6 +153,85 @@ async function backfillEmbeddings({ limit = 50 } = {}) {
   };
 }
 
+// M108 · Bulk re-tag. Given a filter (country/topic/subtopic/status/query)
+// and a patch (any subset of country/topic/subtopic/status/importance/tags
+// add/remove), apply to all matching rows. Always supports dryRun=true so
+// the founder can preview before committing. Tags can be:
+//   tags_add:    [array]   — append to existing tags (deduped)
+//   tags_remove: [array]   — remove specific tags
+//   tags:        [array]   — replace tags entirely
+async function bulkUpdate({ filter = {}, patch = {}, dryRun = true, updatedBy = null } = {}) {
+  const conds = [];
+  if (filter.country)  conds.push(`country = ${q(_normCountry(filter.country))}`);
+  if (filter.topic)    conds.push(`(topic = ${q(String(filter.topic).toLowerCase())} OR category = ${q(String(filter.topic).toLowerCase())})`);
+  if (filter.subtopic) conds.push(`subtopic = ${q(String(filter.subtopic).toLowerCase())}`);
+  if (filter.status)   conds.push(`status = ${q(filter.status)}`);
+  if (filter.query) {
+    const safe = String(filter.query).replace(/'/g, "''").slice(0, 200);
+    conds.push(`(title ILIKE '%${safe}%' OR content ILIKE '%${safe}%')`);
+  }
+  if (Array.isArray(filter.ids) && filter.ids.length) {
+    const idsSql = filter.ids.map(s => q(s)).join(',');
+    conds.push(`id IN (${idsSql})`);
+  }
+  if (!conds.length) return { ok: false, error: 'filter required (refusing to bulk-update entire table)' };
+  const where = conds.join(' AND ');
+
+  // Preview: pull all matching rows so the founder sees exactly what changes
+  const previewJson = await queryValue(`
+    SELECT COALESCE(json_agg(row_to_json(k) ORDER BY country, topic, subtopic, title), '[]'::json) FROM (
+      SELECT id::text, country, category, topic, subtopic, title, status, importance, tags
+        FROM knowledge_base WHERE ${where}
+      LIMIT 500
+    ) k;`);
+  const matched = JSON.parse(previewJson || '[]');
+  if (!matched.length) return { ok: true, dry_run: dryRun, matched_count: 0, preview: [] };
+  if (dryRun) return { ok: true, dry_run: true, matched_count: matched.length, preview: matched };
+
+  // Build the SET clause from patch
+  const sets = [];
+  let affectsEmbedding = false;
+  if ('country'    in patch) sets.push(`country = ${q(_normCountry(patch.country))}`);
+  if ('topic'      in patch) sets.push(`topic = ${patch.topic == null ? 'NULL' : q(String(patch.topic).toLowerCase())}`);
+  if ('subtopic'   in patch) sets.push(`subtopic = ${patch.subtopic == null ? 'NULL' : q(String(patch.subtopic).toLowerCase())}`);
+  if ('category'   in patch && VALID_CATEGORIES.has(patch.category)) sets.push(`category = ${q(patch.category)}`);
+  if ('status'     in patch && VALID_STATUS.has(patch.status))      sets.push(`status = ${q(patch.status)}`);
+  if ('importance' in patch) sets.push(`importance = ${parseInt(patch.importance, 10) || 3}`);
+  if ('tags' in patch && Array.isArray(patch.tags)) {
+    sets.push(`tags = ${qArr(patch.tags)}`);
+    affectsEmbedding = true;
+  }
+  if (Array.isArray(patch.tags_add) && patch.tags_add.length) {
+    // Append unique tags. Postgres array_cat + de-dup via subquery.
+    const newTags = qArr(patch.tags_add);
+    sets.push(`tags = (SELECT ARRAY(SELECT DISTINCT UNNEST(tags || ${newTags})))`);
+    affectsEmbedding = true;
+  }
+  if (Array.isArray(patch.tags_remove) && patch.tags_remove.length) {
+    // Remove specific tags from the array.
+    const rmTags = qArr(patch.tags_remove);
+    sets.push(`tags = (SELECT ARRAY(SELECT UNNEST(tags) EXCEPT SELECT UNNEST(${rmTags})))`);
+    affectsEmbedding = true;
+  }
+  if (updatedBy) sets.push(`updated_by = ${q(updatedBy)}`);
+  if (!sets.length) return { ok: false, error: 'patch is empty' };
+  sets.push(`updated_at = NOW()`);
+  if (affectsEmbedding) sets.push(`embedding_status = 'pending'`, `embedding_error = NULL`);
+
+  try {
+    await query(`UPDATE knowledge_base SET ${sets.join(', ')} WHERE ${where};`);
+    // Queue re-embed for affected rows so semantic recall stays accurate.
+    if (affectsEmbedding) {
+      for (const r of matched) {
+        embedRowAsync(r.id);
+      }
+    }
+    return { ok: true, dry_run: false, matched_count: matched.length, applied: true, embed_queued: affectsEmbedding };
+  } catch (e) {
+    return { ok: false, error: e.message.slice(0, 300) };
+  }
+}
+
 async function embeddingsStatus() {
   const json = await queryValue(`
     SELECT json_build_object(
@@ -268,6 +347,102 @@ async function markStale(id) {
     await query(`UPDATE knowledge_base SET status='stale', updated_at=NOW() WHERE id=${q(id)};`);
     return { ok: true, entry: await getOne(id) };
   } catch (e) { return { ok: false, error: e.message.slice(0, 300) }; }
+}
+
+// M107 · Walk the supersede chain in both directions and return a flat,
+// chronologically-ordered list of versions for a given KB entry id.
+// Strategy:
+//   1. Walk BACKWARD: from current row, follow superseded_by IS NULL to
+//      itself, but the predecessors point at us via THEIR superseded_by.
+//      So we need: SELECT * FROM kb WHERE superseded_by IN (set we've seen).
+//      Iteratively expand until no new rows surface. (Cheap — depth is at most a few.)
+//   2. Walk FORWARD: from current row, follow .superseded_by until null.
+// Each row is annotated with `is_current` (status != 'superseded' AND no
+// row points to it) and `is_starting_point` (no row in the chain points
+// to it as its descendant).
+async function history(id) {
+  if (!id) return { ok: false, error: 'id required' };
+  const start = await getOne(id);
+  if (!start) return { ok: false, error: 'not found' };
+
+  const seen = new Map();
+  seen.set(start.id, start);
+
+  // Walk forward: keep following superseded_by
+  let cursor = start;
+  while (cursor && cursor.superseded_by) {
+    if (seen.has(cursor.superseded_by)) break;   // cycle guard
+    const next = await getOne(cursor.superseded_by);
+    if (!next) break;
+    seen.set(next.id, next);
+    cursor = next;
+  }
+
+  // Walk backward: find rows whose superseded_by points at any in `seen`.
+  // Loop a few times so we capture deep chains.
+  for (let i = 0; i < 20; i++) {
+    const ids = Array.from(seen.keys()).map(s => `'${s}'::uuid`).join(',');
+    const json = await queryValue(`
+      SELECT COALESCE(json_agg(row_to_json(k)), '[]'::json) FROM (
+        SELECT id::text, country, category, topic, subtopic, parent_id::text,
+               title, content, facts, source, source_type,
+               status, verified_at::text, verified_by, superseded_by::text, tags,
+               importance, updated_by,
+               embedding_status, embedding_error, embedded_at::text, embedding_model,
+               created_at::text, updated_at::text, last_used_at::text, use_count
+          FROM knowledge_base WHERE superseded_by IN (${ids})
+      ) k;`);
+    const rows = JSON.parse(json || '[]');
+    let added = 0;
+    for (const r of rows) if (!seen.has(r.id)) { seen.set(r.id, r); added++; }
+    if (!added) break;
+  }
+
+  // Order by created_at ASC (oldest version first)
+  const list = Array.from(seen.values()).sort((a, b) =>
+    String(a.created_at).localeCompare(String(b.created_at))
+  );
+  // Annotate
+  const supersedeTargets = new Set(list.map(r => r.superseded_by).filter(Boolean));
+  for (const r of list) {
+    r.is_current = r.status !== 'superseded' && !supersedeTargets.has(r.id);
+    r.is_starting_point = !list.some(x => x.superseded_by === r.id) === false ? false : !list.some(x => x.id !== r.id && x.superseded_by === r.id);
+  }
+  return { ok: true, versions: list };
+}
+
+// M107 · Restore a previous version: takes the OLD row's payload, copies
+// its content into a fresh row, and supersedes the CURRENT row with it.
+// Net effect: the chain advances forward to a copy of the old version,
+// preserving full audit history. Old row's status flips to 'superseded'.
+async function restore(versionId, currentId, restoredBy = 'founder') {
+  if (!versionId || !currentId) return { ok: false, error: 'versionId + currentId required' };
+  if (versionId === currentId) return { ok: false, error: 'version is already current' };
+  const v = await getOne(versionId);
+  if (!v) return { ok: false, error: 'version not found' };
+  const c = await getOne(currentId);
+  if (!c) return { ok: false, error: 'current row not found' };
+
+  // Copy the version's content as a brand-new active row, then mark the
+  // current row superseded by it.
+  const r = await supersede(currentId, {
+    country:    v.country,
+    category:   v.category,
+    topic:      v.topic,
+    subtopic:   v.subtopic,
+    parent_id:  v.parent_id,
+    title:      v.title,
+    content:    v.content,
+    facts:      v.facts || {},
+    source:     v.source,
+    sourceType: 'inherited',                 // marks provenance — derived from older row
+    tags:       v.tags || [],
+    importance: v.importance || 3,
+    status:     'active',
+    verifiedBy: restoredBy,
+  });
+  if (!r.ok) return r;
+  return { ok: true, restored_from: versionId, new_id: r.id, superseded: r.superseded };
 }
 
 async function supersede(oldId, newPayload) {
@@ -615,6 +790,8 @@ module.exports = {
   tree, topicsList, topicsAdd, topicsUpdate, topicsRemove, subtopicSuggestions,
   // M106 · embeddings
   embedRowAsync, backfillEmbeddings, embeddingsStatus,
+  // M107 · versioning · M108 · bulk re-tag
+  history, restore, bulkUpdate,
   VALID_CATEGORIES: Array.from(VALID_CATEGORIES),
   VALID_STATUS: Array.from(VALID_STATUS),
 };

@@ -2035,6 +2035,55 @@ app.post('/kb/:id/reembed', auth.middleware, async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ── M107 · Versioning · history + restore ─────────────────────────────
+// History walks the supersede chain in both directions and returns a
+// chronologically-ordered list of versions. Restore copies an old
+// version's content into a new row that supersedes the current one,
+// preserving full audit history.
+app.get('/kb/:id/history', auth.middleware, async (req, res) => {
+  try {
+    const r = await KB.history(req.params.id);
+    if (!r.ok) return res.status(404).json(r);
+    res.json(r);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.post('/kb/:id/restore', auth.middleware, async (req, res) => {
+  try {
+    const versionId = (req.body && req.body.version_id) || null;
+    if (!versionId) return res.status(400).json({ ok: false, error: 'version_id required in body' });
+    const r = await KB.restore(versionId, req.params.id, 'founder');
+    if (!r.ok) return res.status(400).json(r);
+    log(`kb.restore current=${req.params.id.slice(0,8)} from=${versionId.slice(0,8)} → new=${(r.new_id || '').slice(0,8)}`);
+    res.json(r);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── M108 · Bulk re-tag ────────────────────────────────────────────────
+// POST /kb/bulk-update
+// Body: { filter: {country?, topic?, subtopic?, status?, query?, ids?[]},
+//         patch:  {country?, topic?, subtopic?, category?, status?,
+//                  importance?, tags?[], tags_add?[], tags_remove?[]},
+//         dry_run: bool }
+// Always require some filter (refuses to update entire table). Returns
+// either a preview of matched rows (dry_run) or applied=true with count.
+app.post('/kb/bulk-update', auth.middleware, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const r = await KB.bulkUpdate({
+      filter:    b.filter || {},
+      patch:     b.patch  || {},
+      dryRun:    b.dry_run !== false,         // default to dry-run for safety
+      updatedBy: 'founder',
+    });
+    if (!r.ok) return res.status(400).json(r);
+    if (!r.dry_run && r.applied) {
+      log(`kb.bulk-update applied=${r.matched_count} embed_queued=${!!r.embed_queued}`);
+    }
+    res.json(r);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ── K6 · Daneshyar agent endpoints ────────────────────────────────────
 // /parse        → preview entries; do not save
 // /parse-and-save → parse then INSERT each entry as draft
