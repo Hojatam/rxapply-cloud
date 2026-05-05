@@ -12618,8 +12618,16 @@ function _kbRenderTree() {
       if (tOpen && t.subtopics && t.subtopics.length) {
         row += t.subtopics.map(s => {
           const isSel = sel.country === c.country && sel.topic === t.topic_slug && sel.subtopic === s.subtopic_slug;
+          // M114 · Entry-derived subtopics (from data, not registered in
+          // kb_topics yet) get a small italicised hint so the founder
+          // can spot what to formalise. Click "+ Subtopic" with the same
+          // slug to give it a proper display name.
+          const isDerived = !!s._entry_derived;
+          const label = isDerived
+            ? `<span style="font-style:italic;color:#475569;" title="Auto-detected from entries — click + on the topic with the same slug to formalize">${escapeHtml(s.display_name || s.subtopic_slug)} <span style="font-size:9px;color:#94a3b8;">·auto</span></span>`
+            : escapeHtml(s.display_name || s.subtopic_slug);
           return `<div style="margin-left:42px;">
-            ${nodeBtn(escapeHtml(s.display_name || s.subtopic_slug), s.entry_count, isSel,
+            ${nodeBtn(label, s.entry_count, isSel,
               `kbTreeSelect('${c.country}', '${t.topic_slug}', '${s.subtopic_slug}')`)}
           </div>`;
         }).join('');

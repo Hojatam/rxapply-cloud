@@ -572,38 +572,75 @@ async function tree({ country = null } = {}) {
     const row = counts.find(r => r.country === cnt && r.topic === top && (sub == null ? r.subtopic == null : r.subtopic === sub));
     return row ? row.n : 0;
   };
-  // Also: orphan entries (have a topic the founder hasn't added to taxonomy yet)
-  const orphanRows = counts.filter(c => !taxonomy.find(t =>
-    t.country === c.country && t.topic_slug === c.topic && (c.subtopic ? t.subtopic_slug === c.subtopic : true)
-  ));
 
-  // Group taxonomy: country → topic → subtopics
-  const byCountry = new Map();
+  // M114 · Build country → topic → subtopics maps from the registered
+  // taxonomy. Use Map-of-Map so we can auto-merge entry-derived subtopics
+  // efficiently below.
+  const byCountry = new Map();   // cnt → Map<topic_slug, {topic-row, subtopics: Map<subtopic_slug, sub-row>}>
   for (const t of taxonomy) {
     if (!byCountry.has(t.country)) byCountry.set(t.country, new Map());
     const tmap = byCountry.get(t.country);
     if (!t.subtopic_slug) {
-      // top-level topic
-      if (!tmap.has(t.topic_slug)) tmap.set(t.topic_slug, { ...t, subtopics: [] });
+      if (!tmap.has(t.topic_slug)) tmap.set(t.topic_slug, { ...t, subtopics: new Map() });
       else Object.assign(tmap.get(t.topic_slug), t);
     } else {
-      // subtopic
-      if (!tmap.has(t.topic_slug)) tmap.set(t.topic_slug, { country: t.country, topic_slug: t.topic_slug, display_name: t.topic_slug, subtopics: [] });
-      tmap.get(t.topic_slug).subtopics.push(t);
+      if (!tmap.has(t.topic_slug)) tmap.set(t.topic_slug, { country: t.country, topic_slug: t.topic_slug, display_name: t.topic_slug, subtopics: new Map() });
+      tmap.get(t.topic_slug).subtopics.set(t.subtopic_slug, t);
     }
   }
 
+  // M114 · Walk the entry counts. An entry is OUR DEFINITION of orphan
+  // when its TOPIC isn't in the taxonomy at all (true taxonomy drift —
+  // the founder added entries under a topic that doesn't exist yet).
+  // If the topic IS registered but the subtopic isn't, AUTO-MERGE the
+  // subtopic into the tree so it shows up naturally with its entry
+  // count. The founder can later "+ Subtopic" to formalize the display
+  // name, but seeing the subtopic is the default.
+  const orphans = [];
+  for (const c of counts) {
+    if (!c.topic) continue;                   // null-topic rows are pre-M105
+    const tmap = byCountry.get(c.country);
+    if (!tmap || !tmap.has(c.topic)) {
+      // True orphan: topic not in taxonomy
+      orphans.push(c);
+      continue;
+    }
+    if (c.subtopic) {
+      const topic = tmap.get(c.topic);
+      if (!topic.subtopics.has(c.subtopic)) {
+        // Entry-derived subtopic: synthesize a tree node for it. The display
+        // name is a best-effort humanisation of the slug; the founder can
+        // override via "+ Subtopic" with the same slug + their preferred name.
+        topic.subtopics.set(c.subtopic, {
+          country: c.country,
+          topic_slug: c.topic,
+          subtopic_slug: c.subtopic,
+          display_name: c.subtopic.replace(/_/g, ' ').replace(/\b\w/g, x => x.toUpperCase()),
+          description: null,
+          parent_id: null,
+          display_order: 999,
+          enabled: true,
+          _entry_derived: true,                  // marker · UI can hint that this isn't formally registered yet
+        });
+      }
+    }
+  }
+
+  // Materialize the output
   const out = [];
   for (const [cnt, tmap] of byCountry.entries()) {
     const topics = [];
     for (const top of tmap.values()) {
+      const subArr = Array.from(top.subtopics.values())
+        .map(s => ({ ...s, entry_count: countLookup(cnt, s.topic_slug, s.subtopic_slug) }))
+        .sort((a, b) => (a.display_order || 999) - (b.display_order || 999) || String(a.display_name || '').localeCompare(String(b.display_name || '')));
       topics.push({
         ...top,
+        subtopics: subArr,
         entry_count: countLookup(cnt, top.topic_slug, null),
-        subtopics: (top.subtopics || []).map(s => ({ ...s, entry_count: countLookup(cnt, s.topic_slug, s.subtopic_slug) })),
       });
     }
-    out.push({ country: cnt, topics, orphan_topics: orphanRows.filter(o => o.country === cnt) });
+    out.push({ country: cnt, topics, orphan_topics: orphans.filter(o => o.country === cnt) });
   }
   return out;
 }
