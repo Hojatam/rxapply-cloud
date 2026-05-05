@@ -8,6 +8,7 @@
 // =====================================================================
 
 const { query, queryValue, queryReturning, q, qJson } = require('./db');
+const embeddings = require('./embeddings');                   // M106 · semantic recall
 
 // Module-local array literal helper (legacy used `_qArr`; kept inline to
 // not collide with the shared db.js qArr if signatures diverge later).
@@ -40,6 +41,136 @@ const VALID_STATUS = new Set(['active','draft','stale','superseded','rejected'])
 const VALID_SOURCE_TYPE = new Set(['manual','parsed','web','inherited']);
 
 // ── CRUD ────────────────────────────────────────────────────────────
+
+// M106 · Compute & persist an embedding for a single row. Fire-and-forget
+// from the caller's perspective (background promise). Failures are persisted
+// to embedding_status='failed' with the error message so the dashboard can
+// surface them and the founder can retry. Never throws.
+async function embedRowAsync(id) {
+  try {
+    if (!embeddings.hasKey()) {
+      await query(`UPDATE knowledge_base SET embedding_status='skipped',
+                   embedding_error='OPENAI_API_KEY not set', embedded_at=now()
+                   WHERE id=${q(id)};`);
+      return;
+    }
+    const row = await getOne(id);
+    if (!row) return;
+    const text = embeddings.buildEmbedText(row);
+    if (!text) {
+      await query(`UPDATE knowledge_base SET embedding_status='skipped',
+                   embedding_error='empty content', embedded_at=now()
+                   WHERE id=${q(id)};`);
+      return;
+    }
+    const r = await embeddings.embed(text);
+    if (!r.ok) {
+      const errSafe = String(r.error || r.code || 'unknown').replace(/'/g, "''").slice(0, 300);
+      await query(`UPDATE knowledge_base SET embedding_status='failed',
+                   embedding_error='${errSafe}', embedded_at=now()
+                   WHERE id=${q(id)};`);
+      return;
+    }
+    const vec = embeddings.toPgVectorLiteral(r.vector);
+    await query(`UPDATE knowledge_base
+                    SET embedding=${vec},
+                        embedding_status='ready',
+                        embedding_error=NULL,
+                        embedding_model=${q(r.model || embeddings.modelId())},
+                        embedded_at=now()
+                  WHERE id=${q(id)};`);
+  } catch (e) {
+    try {
+      const errSafe = String(e.message || 'unknown').replace(/'/g, "''").slice(0, 300);
+      await query(`UPDATE knowledge_base SET embedding_status='failed',
+                   embedding_error='${errSafe}', embedded_at=now()
+                   WHERE id=${q(id)};`);
+    } catch (_) {}
+  }
+}
+
+// M106 · Backfill: process up to `limit` pending rows in one batch call.
+// Returns counts so the dashboard can show progress.
+async function backfillEmbeddings({ limit = 50 } = {}) {
+  if (!embeddings.hasKey()) {
+    return { ok: false, error: 'OPENAI_API_KEY not set; cannot embed' };
+  }
+  limit = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
+  // Pick up `pending` rows; oldest-pending first so the backlog drains FIFO.
+  const json = await queryValue(`
+    SELECT COALESCE(json_agg(row_to_json(r) ORDER BY created_at ASC), '[]'::json) FROM (
+      SELECT id::text, country, category, topic, subtopic, title, content, facts, tags
+        FROM knowledge_base
+       WHERE embedding_status = 'pending'
+       ORDER BY created_at ASC
+       LIMIT ${limit}
+    ) r;`);
+  const rows = JSON.parse(json || '[]');
+  if (!rows.length) return { ok: true, processed: 0, succeeded: 0, failed: 0, cost_usd: 0, remaining: 0 };
+
+  const texts = rows.map(r => embeddings.buildEmbedText(r));
+  const r = await embeddings.embedBatch(texts);
+  if (!r.ok) {
+    // Mark these rows as failed so they don't block the queue forever.
+    // The founder can retry by clicking Backfill again (the row goes back
+    // to 'pending' on the next /update).
+    const ids = rows.map(x => `'${x.id}'::uuid`).join(',');
+    const errSafe = String(r.error || r.code || 'embed batch failed').replace(/'/g, "''").slice(0, 300);
+    await query(`UPDATE knowledge_base SET embedding_status='failed',
+                 embedding_error='${errSafe}', embedded_at=now()
+                 WHERE id IN (${ids});`);
+    return { ok: false, error: r.error, failed: rows.length };
+  }
+
+  // Persist each vector individually — pgvector literals are large so a
+  // multi-row UPDATE would balloon the SQL.
+  let succeeded = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const id = rows[i].id;
+    const vec = embeddings.toPgVectorLiteral(r.vectors[i]);
+    try {
+      await query(`UPDATE knowledge_base
+                      SET embedding=${vec},
+                          embedding_status='ready',
+                          embedding_error=NULL,
+                          embedding_model=${q(r.model || embeddings.modelId())},
+                          embedded_at=now()
+                    WHERE id=${q(id)};`);
+      succeeded++;
+    } catch (_) { /* per-row failure stays as 'pending'; will retry next run */ }
+  }
+
+  const remaining = await queryValue(`SELECT COUNT(*)::int FROM knowledge_base WHERE embedding_status='pending';`);
+  return {
+    ok: true,
+    processed: rows.length,
+    succeeded,
+    failed: rows.length - succeeded,
+    cost_usd: r.cost_usd,
+    tokens: r.tokens,
+    model: r.model,
+    remaining: parseInt(remaining, 10) || 0,
+  };
+}
+
+async function embeddingsStatus() {
+  const json = await queryValue(`
+    SELECT json_build_object(
+      'total',   COUNT(*)::int,
+      'ready',   COUNT(*) FILTER (WHERE embedding_status = 'ready')::int,
+      'pending', COUNT(*) FILTER (WHERE embedding_status = 'pending')::int,
+      'failed',  COUNT(*) FILTER (WHERE embedding_status = 'failed')::int,
+      'skipped', COUNT(*) FILTER (WHERE embedding_status = 'skipped')::int
+    ) FROM knowledge_base;`);
+  let stats; try { stats = JSON.parse(json || '{}'); } catch (_) { stats = {}; }
+  return {
+    ok: true,
+    has_key: embeddings.hasKey(),
+    model: embeddings.modelId(),
+    dim: embeddings.dim(),
+    ...stats,
+  };
+}
 
 async function add({ country, category = null, topic = null, subtopic = null,
                      title, content, facts = {}, source = null,
@@ -80,6 +211,10 @@ async function add({ country, category = null, topic = null, subtopic = null,
          ${updatedBy ? q(updatedBy) : 'NULL'})
       RETURNING id::text;`;
     const id = await queryReturning(sql);
+    // M106 · Fire-and-forget embed in the background — the new row is
+    // immediately readable; semantic recall picks it up as soon as the
+    // vector lands. Failures are persisted to embedding_status='failed'.
+    embedRowAsync(id);
     return { ok: true, id };
   } catch (e) {
     return { ok: false, error: e.message.slice(0, 300) };
@@ -105,8 +240,15 @@ async function update(id, patch = {}) {
   if ('updated_by' in patch) sets.push(`updated_by=${patch.updated_by == null ? 'NULL' : q(patch.updated_by)}`);
   if (sets.length === 0) return { ok: false, error: 'no fields to update' };
   sets.push('updated_at=NOW()');
+  // M106 · If the patch touches anything that affects semantic content, mark
+  // the row pending so the next backfill (or an immediate background embed)
+  // refreshes the vector. We DON'T re-embed inline because the founder is
+  // often updating in rapid succession (e.g. fixing a typo).
+  const affectsEmbedding = ['title','content','facts','tags'].some(k => k in patch);
+  if (affectsEmbedding) sets.push(`embedding_status='pending'`, `embedding_error=NULL`);
   try {
     await query(`UPDATE knowledge_base SET ${sets.join(', ')} WHERE id=${q(id)};`);
+    if (affectsEmbedding) embedRowAsync(id);
     return { ok: true, entry: await getOne(id) };
   } catch (e) {
     return { ok: false, error: e.message.slice(0, 300) };
@@ -154,6 +296,7 @@ async function getOne(id) {
              title, content, facts, source, source_type,
              status, verified_at::text, verified_by, superseded_by::text, tags,
              importance, updated_by,
+             embedding_status, embedding_error, embedded_at::text, embedding_model,
              created_at::text, updated_at::text, last_used_at::text, use_count
         FROM knowledge_base WHERE id = ${q(id)}
     ) k;`;
@@ -178,6 +321,7 @@ async function list({ country = null, category = null, topic = null, subtopic = 
     FROM (SELECT id::text, country, category, topic, subtopic, parent_id::text,
                  title, content, facts, source, source_type,
                  status, verified_at::text, verified_by, tags, importance, updated_by,
+                 embedding_status, embedded_at::text,
                  created_at::text, updated_at::text, use_count
             FROM knowledge_base ${w}
            ORDER BY importance DESC, updated_at DESC LIMIT ${limit}) k;`;
@@ -343,9 +487,29 @@ async function subtopicSuggestions({ country = null, topic = null } = {}) {
 // keyword-match bonus when query is supplied. GLOBAL country always
 // included as fallback context.
 async function recall({ country = null, category = null, topic = null, subtopic = null,
-                        query: searchQuery = null, limit = 8 } = {}) {
+                        query: searchQuery = null, limit = 8,
+                        semantic = 'auto' } = {}) {
   limit = Math.min(Math.max(parseInt(limit, 10) || 8, 1), 30);
   const where = [`status IN ('active','draft')`];
+
+  // M106 · Hybrid recall. When OPENAI_API_KEY is present AND a query is
+  // supplied AND semantic !== 'off', embed the query and add a cosine
+  // similarity score term. The keyword/importance/recency scoring still
+  // applies — vector is additive, not exclusive. So tag exact-matches and
+  // recently-touched rows still win when they should.
+  let vectorTerm = '';
+  if (searchQuery && semantic !== 'off' && embeddings.hasKey()) {
+    try {
+      const er = await embeddings.embed(searchQuery);
+      if (er.ok && er.vector) {
+        const vlit = embeddings.toPgVectorLiteral(er.vector);
+        // 1 - cosine_distance ∈ [-1, 1]; multiply by 8 so a perfect semantic
+        // hit contributes ~8 score points, comparable to a tag bonus (3) +
+        // title contains (5).
+        vectorTerm = ` + (CASE WHEN embedding IS NOT NULL THEN 8.0 * (1 - (embedding <=> ${vlit})) ELSE 0 END)`;
+      }
+    } catch (_) { /* non-fatal — fall through to keyword-only scoring */ }
+  }
   if (country) {
     const c = _normCountry(country);
     where.push(`(country = ${q(c)} OR country = 'GLOBAL')`);
@@ -371,6 +535,7 @@ async function recall({ country = null, category = null, topic = null, subtopic 
       scoreExpr += ` + CASE WHEN tags && ${qArr(kws)} THEN 3 ELSE 0 END`;
     }
   }
+  scoreExpr += vectorTerm;   // M106 · semantic similarity boost (no-op when key missing)
   const sql = `
     WITH ranked AS (
       SELECT id, country, category, topic, subtopic, title, content, facts, source, status,
@@ -448,6 +613,8 @@ module.exports = {
   getOne, list, recall, renderAsBlock, detectCountry,
   // M105 · tree + taxonomy
   tree, topicsList, topicsAdd, topicsUpdate, topicsRemove, subtopicSuggestions,
+  // M106 · embeddings
+  embedRowAsync, backfillEmbeddings, embeddingsStatus,
   VALID_CATEGORIES: Array.from(VALID_CATEGORIES),
   VALID_STATUS: Array.from(VALID_STATUS),
 };

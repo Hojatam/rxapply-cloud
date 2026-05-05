@@ -2008,6 +2008,33 @@ app.get('/knowledge/subtopic-suggest', async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ── M106 · Embeddings — status + manual backfill ─────────────────────
+app.get('/knowledge/embeddings/status', async (_req, res) => {
+  try {
+    const r = await KB.embeddingsStatus();
+    res.json(r);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.post('/knowledge/embeddings/backfill', auth.middleware, async (req, res) => {
+  try {
+    const limit = (req.body && req.body.limit) || 50;
+    const r = await KB.backfillEmbeddings({ limit });
+    if (!r.ok) return res.status(400).json(r);
+    log(`kb.backfill processed=${r.processed} ok=${r.succeeded} fail=${r.failed} cost=$${(r.cost_usd||0).toFixed(5)} remaining=${r.remaining}`);
+    res.json(r);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Re-embed one row on demand (e.g. after a manual edit before the
+// background job runs, or to retry a 'failed' row).
+app.post('/kb/:id/reembed', auth.middleware, async (req, res) => {
+  try {
+    KB.embedRowAsync(req.params.id);
+    res.json({ ok: true, queued: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ── K6 · Daneshyar agent endpoints ────────────────────────────────────
 // /parse        → preview entries; do not save
 // /parse-and-save → parse then INSERT each entry as draft

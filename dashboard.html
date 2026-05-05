@@ -12209,6 +12209,12 @@ async function renderKnowledge() {
       <div id="kb-paste-result" class="mt-3 text-sm"></div>
     </div>
 
+    <!-- M106 · Embeddings status strip. Shows how many rows have a vector,
+         pending count, and a Backfill button. Lazily loaded. -->
+    <div id="kb-embed-status" class="card mb-3" style="background:linear-gradient(90deg,#f0f9ff,#fff);border-color:#bae6fd;">
+      <div class="text-xs" style="color:#64748b;">Embeddings status…</div>
+    </div>
+
     <!-- M105 · Tree-view layout. Left rail: country/topic/subtopic tree
          (with founder-managed taxonomy + per-node entry counts).
          Right pane: entries scoped to the selected node + filter inputs. -->
@@ -12254,6 +12260,63 @@ async function renderKnowledge() {
   `;
   kbTreeReload();
   loadKB();
+  kbEmbedReload();
+}
+
+// M106 · Embeddings status card + Backfill action
+async function kbEmbedReload() {
+  const el = $('kb-embed-status');
+  if (!el) return;
+  try {
+    const j = await fetch(`${PROXY}/knowledge/embeddings/status`).then(r => r.json());
+    if (!j.ok) { el.innerHTML = `<span style="color:#dc2626;">Status fetch failed: ${escapeHtml(j.error || '?')}</span>`; return; }
+    const total = j.total || 0;
+    const ready = j.ready || 0;
+    const pending = j.pending || 0;
+    const failed = j.failed || 0;
+    const skipped = j.skipped || 0;
+    const pct = total ? Math.round((ready / total) * 100) : 0;
+    const keyPill = j.has_key
+      ? '<span class="pill ok" style="font-size:10px;">✓ OPENAI_API_KEY</span>'
+      : '<span class="pill err" style="font-size:10px;">✕ OPENAI_API_KEY missing</span>';
+    el.innerHTML = `
+      <div class="flex items-center gap-3 flex-wrap">
+        <div style="font-weight:600;font-size:13px;color:#0c4a6e;">🧠 Semantic embeddings</div>
+        ${keyPill}
+        <span class="text-xs" style="color:#475569;">model: <code class="mono">${escapeHtml(j.model || '?')}</code> · ${j.dim || '?'} dims</span>
+        <div style="flex:1;min-width:120px;background:#e0f2fe;border-radius:4px;height:8px;overflow:hidden;">
+          <div style="background:#0284c7;height:100%;width:${pct}%;"></div>
+        </div>
+        <span class="text-xs mono" style="color:#0c4a6e;">${ready}/${total} ready</span>
+        ${pending ? `<span class="text-xs" style="color:#854d0e;">⏳ ${pending} pending</span>` : ''}
+        ${failed  ? `<span class="text-xs" style="color:#991b1b;">✕ ${failed} failed</span>` : ''}
+        ${skipped ? `<span class="text-xs" style="color:#64748b;">↪ ${skipped} skipped</span>` : ''}
+        <button class="btn btn-primary btn-xs" onclick="kbEmbedBackfill()" ${(!j.has_key || pending === 0) ? 'disabled style="opacity:0.5;"' : ''}>
+          ${pending ? `▶ Backfill ${Math.min(pending, 50)}` : '✓ All ready'}
+        </button>
+        <button class="btn btn-ghost btn-xs" onclick="kbEmbedReload()">↻</button>
+      </div>
+      <div class="text-xs mt-2" style="color:#64748b;">
+        New entries embed in the background automatically. Backfill processes up to 50 pending rows per click — about $0.0001 per click. Click repeatedly until "All ready".
+      </div>`;
+  } catch (e) {
+    el.innerHTML = `<span style="color:#dc2626;">Status error: ${escapeHtml(e.message)}</span>`;
+  }
+}
+
+async function kbEmbedBackfill() {
+  const el = $('kb-embed-status');
+  if (el) el.innerHTML = `<div class="text-xs" style="color:#64748b;">Embedding batch in flight… (~5–10 seconds)</div>`;
+  try {
+    const r = await authFetch(`${PROXY}/knowledge/embeddings/backfill`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ limit: 50 }),
+    });
+    const j = await r.json();
+    if (!j.ok) { alert('Backfill failed: ' + (j.error || 'unknown')); }
+  } catch (e) { alert('Error: ' + e.message); }
+  await kbEmbedReload();
+  await loadKB();   // refresh entry list (so per-row status flips visibly)
 }
 
 // M105 · Tree state — selected node drives the right pane.
@@ -12404,6 +12467,16 @@ function kbToggleFlatView() {
   loadKB();
 }
 
+// M106 · Re-embed a single row (after edit, or to retry a failed embed).
+async function kbReembed(id) {
+  try {
+    const r = await authFetch(`${PROXY}/kb/${id}/reembed`, { method: 'POST' });
+    if (!r.ok) { alert('Re-embed failed: ' + (await r.text())); return; }
+    // Give the background job a moment, then refresh the row's display.
+    setTimeout(() => { kbEmbedReload(); loadKB(); }, 800);
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
 async function loadKB() {
   try {
     const params = new URLSearchParams();
@@ -12482,6 +12555,21 @@ function _kbCard(e) {
           <span class="pill ${statusKind}"><span class="dot"></span>${escapeHtml(e.status)}</span>
           <span class="pill" title="topic / subtopic — click to filter">${escapeHtml(e.country)} · ${escapeHtml(e.topic || e.category || '?')}${e.subtopic ? ' · ' + escapeHtml(e.subtopic) : ''}</span>
           ${stars}
+          ${(() => {
+            // M106 · Embedding status indicator
+            const es = e.embedding_status || 'pending';
+            const map = {
+              ready:   { c:'#0284c7', t:'🧠 vector', tip:'semantic embedding ready · auto-included in agent recall' },
+              pending: { c:'#d97706', t:'⏳ pending', tip:'queued for embedding' },
+              failed:  { c:'#dc2626', t:'⚠ failed',  tip:'embedding failed; click 🔄 to retry' },
+              skipped: { c:'#64748b', t:'↪ skipped', tip:'embedding skipped' },
+            };
+            const m = map[es] || map.pending;
+            return `<span title="${m.tip}" style="font-size:10px;color:${m.c};font-weight:600;cursor:help;">${m.t}</span>`;
+          })()}
+          ${(e.embedding_status === 'failed' || e.embedding_status === 'pending')
+            ? `<button class="btn btn-ghost btn-xs" title="Re-embed this row" onclick="kbReembed('${e.id}')" style="font-size:10px;padding:1px 6px;">🔄</button>`
+            : ''}
         </div>
         <div style="font-size:13.5px;color:var(--text-muted);margin-top:6px;line-height:1.55;">${escapeHtml(e.content)}</div>
         ${facts}
