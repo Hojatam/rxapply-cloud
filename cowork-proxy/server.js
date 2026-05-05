@@ -2285,6 +2285,7 @@ app.post('/knowledge/upload-json', auth.middleware, async (req, res) => {
     const defaultCountry = body.default_country || null;
     const defaultStatus  = body.default_status  || 'draft';
     const defaultImp     = parseInt(body.default_importance, 10) || 3;
+    const filename       = body.filename        || null;
 
     const created = [], failed = [];
     for (let i = 0; i < entries.length; i++) {
@@ -2312,14 +2313,109 @@ app.post('/knowledge/upload-json', auth.middleware, async (req, res) => {
         failed.push({ index: i, title: e.title || '(no title)', error: ex.message });
       }
     }
-    log(`kb.upload-json created=${created.length} failed=${failed.length}`);
+
+    // M112 · Persist an import row so the founder can review history + undo.
+    let importId = null;
+    try {
+      const idsArr  = created.map(c => `'${c.id}'::uuid`).join(',');
+      const idsLit  = idsArr ? `ARRAY[${idsArr}]` : `'{}'::uuid[]`;
+      const failedJsonStr = JSON.stringify(failed).replace(/'/g, "''");
+      importId = await db.queryReturning(`
+        INSERT INTO kb_imports
+          (created_by, filename, default_country, default_status, default_importance,
+           total_count, created_count, failed_count, entry_ids, failed_entries)
+        VALUES (
+          'founder',
+          ${filename ? db.q(filename) : 'NULL'},
+          ${defaultCountry ? db.q(defaultCountry) : 'NULL'},
+          ${defaultStatus  ? db.q(defaultStatus)  : 'NULL'},
+          ${defaultImp},
+          ${entries.length}, ${created.length}, ${failed.length},
+          ${idsLit},
+          '${failedJsonStr}'::jsonb
+        )
+        RETURNING id::text;`);
+    } catch (e) {
+      // Non-fatal — entries already inserted; we just couldn't write the audit row.
+      console.warn('kb.upload-json · failed to persist import row:', e.message);
+    }
+
+    log(`kb.upload-json import=${importId ? importId.slice(0,8) : '?'} created=${created.length} failed=${failed.length}`);
     res.json({
       ok: true,
+      import_id: importId,
       total: entries.length,
       created_count: created.length,
       failed_count: failed.length,
       created, failed,
     });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// M112 · KB import history + undo
+app.get('/knowledge/imports', auth.middleware, async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+    const json = await db.queryValue(`
+      SELECT COALESCE(json_agg(row_to_json(i) ORDER BY i.created_at DESC), '[]'::json) FROM (
+        SELECT id::text, created_at::text, created_by, filename, default_country, default_status,
+               default_importance, total_count, created_count, failed_count,
+               array_length(entry_ids, 1) AS entry_count,
+               status, undone_at::text, undone_by, undone_method
+          FROM kb_imports
+         ORDER BY created_at DESC
+         LIMIT ${limit}
+      ) i;`);
+    res.json({ ok: true, imports: JSON.parse(json || '[]') });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.get('/knowledge/imports/:id', auth.middleware, async (req, res) => {
+  try {
+    const json = await db.queryValue(`
+      SELECT row_to_json(i) FROM (
+        SELECT id::text, created_at::text, created_by, filename, default_country, default_status,
+               default_importance, total_count, created_count, failed_count,
+               entry_ids::text[], failed_entries,
+               status, undone_at::text, undone_by, undone_method, notes
+          FROM kb_imports WHERE id = ${db.q(req.params.id)}
+      ) i;`);
+    if (!json) return res.status(404).json({ ok: false, error: 'import not found' });
+    res.json({ ok: true, import: JSON.parse(json) });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Undo body: { method: 'soft' | 'hard' }  (default 'soft')
+app.post('/knowledge/imports/:id/undo', auth.middleware, async (req, res) => {
+  try {
+    const method = (req.body && req.body.method) === 'hard' ? 'hard' : 'soft';
+    const row = await db.queryOne(`
+      SELECT id::text, status, entry_ids::text[]
+        FROM kb_imports WHERE id = ${db.q(req.params.id)};`);
+    if (!row) return res.status(404).json({ ok: false, error: 'import not found' });
+    if (row.status !== 'active') return res.status(400).json({ ok: false, error: `import already ${row.status}` });
+    const ids = row.entry_ids || [];
+    if (!ids.length) {
+      // No entries to undo (everything failed at insert time)
+      await db.query(`UPDATE kb_imports SET status='undone', undone_at=NOW(), undone_by='founder', undone_method=${db.q(method)} WHERE id=${db.q(req.params.id)};`);
+      return res.json({ ok: true, undone: 0, method, note: 'no entries existed to undo' });
+    }
+    const idsSql = ids.map(x => `'${x}'::uuid`).join(',');
+    let affected = 0;
+    if (method === 'hard') {
+      // HARD: delete the rows entirely. Cannot be reversed.
+      const r = await db.query(`DELETE FROM knowledge_base WHERE id IN (${idsSql});`);
+      affected = (r && r.rowCount) || ids.length;
+      await db.query(`UPDATE kb_imports SET status='undone_hard', undone_at=NOW(), undone_by='founder', undone_method='hard' WHERE id=${db.q(req.params.id)};`);
+    } else {
+      // SOFT: flip every entry to status='rejected' (excluded from recall;
+      // preserved for audit). Reversible via the existing edit modal.
+      const r = await db.query(`UPDATE knowledge_base SET status='rejected', updated_at=NOW(), updated_by='founder' WHERE id IN (${idsSql});`);
+      affected = (r && r.rowCount) || ids.length;
+      await db.query(`UPDATE kb_imports SET status='undone', undone_at=NOW(), undone_by='founder', undone_method='soft' WHERE id=${db.q(req.params.id)};`);
+    }
+    log(`kb.imports.undo id=${req.params.id.slice(0,8)} method=${method} affected=${affected}`);
+    res.json({ ok: true, method, undone: affected });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 

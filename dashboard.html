@@ -12203,6 +12203,7 @@ async function renderKnowledge() {
           <div class="flex gap-2 mb-3 flex-wrap">
             <a class="btn btn-ghost btn-xs" href="${typeof PROXY === 'string' ? PROXY : ''}/knowledge/json-template" download="rxapply-kb-template.json">📄 Download template JSON</a>
             <a class="btn btn-ghost btn-xs" href="${typeof PROXY === 'string' ? PROXY : ''}/knowledge/json-prompt-guide" download="rxapply-kb-ai-extraction-guide.md">🤖 Download AI prompt guide</a>
+            <button class="btn btn-ghost btn-xs" onclick="kbImportsHistoryModal()" title="View past JSON imports + undo">📚 Import history</button>
           </div>
           <div class="text-xs" style="color:#64748b;">
             Workflow: <strong>1)</strong> download both files. <strong>2)</strong> in your AI chat, paste the prompt guide + your source material → AI returns JSON. <strong>3)</strong> save AI's JSON to a file. <strong>4)</strong> upload below.
@@ -12287,7 +12288,7 @@ async function renderKnowledge() {
               <br>• <strong>+ New entry</strong> on the right — manual, fast for one fact. Pre-fills from selected tree node.
               <br>• <strong>Paste &amp; parse</strong> — drop a chunk of regulator text; Daneshyar splits it into drafts.
               <br>• <strong>Upload file</strong> — PDF/DOCX/PPTX/HTML/MD via Daneshyar.
-              <br>• <strong>📦 Upload JSON</strong> (M110) — use ChatGPT/Gemini/Claude.ai to extract facts into JSON, then upload that JSON straight in. Bypasses Daneshyar. Two helper downloads on the green card: <strong>📄 template JSON</strong> (the schema) and <strong>🤖 AI prompt guide</strong> (paste into your AI of choice along with source material).
+              <br>• <strong>📦 Upload JSON</strong> (M110) — use ChatGPT/Gemini/Claude.ai to extract facts into JSON, then upload that JSON straight in. Bypasses Daneshyar. Two helper downloads on the green card: <strong>📄 template JSON</strong> (the schema) and <strong>🤖 AI prompt guide</strong> (paste into your AI of choice along with source material). The <strong>📚 Import history</strong> button lists every past upload with counts and a one-click <strong>↶ Undo</strong> per batch (soft = mark rejected; hard = permanent delete).
             </div>
           </div>
 
@@ -12696,6 +12697,116 @@ async function kbAddSubtopic(country, topic) {
 function kbToggleFlatView() {
   _KBTREE.flat = !_KBTREE.flat;
   loadKB();
+}
+
+// ════════════════════════════════════════════════════════════════════
+// M112 · JSON-import history modal — list every past upload, show
+// counts + status, support soft (status→rejected) and hard (DELETE)
+// undo per import. Captured filenames are best-effort metadata.
+// ════════════════════════════════════════════════════════════════════
+async function kbImportsHistoryModal() {
+  let r;
+  try {
+    r = await authFetch(`${PROXY}/knowledge/imports?limit=100`).then(x => x.json());
+  } catch (e) { alert('Imports fetch failed: ' + e.message); return; }
+  if (!r.ok) { alert('Failed: ' + (r.error || '?')); return; }
+  const imports = r.imports || [];
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-backdrop';
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.id = 'kbi-overlay';
+  overlay.innerHTML = `
+    <div class="modal-card" style="max-width:920px;width:95vw;">
+      <div class="modal-head">
+        <div>
+          <h3>📚 JSON Import history</h3>
+          <div class="modal-sub">${imports.length} ${imports.length === 1 ? 'import' : 'imports'} on record. Click ↶ Undo to reverse a batch.</div>
+        </div>
+        <button class="modal-close" id="kbi-close" aria-label="Close">${ICONS.x}</button>
+      </div>
+      <div class="modal-body" style="max-height:65vh;overflow-y:auto;">
+        ${imports.length === 0
+          ? `<div class="empty" style="padding:30px;text-align:center;color:#64748b;">No imports yet. Upload a JSON file via the green "📦 Upload JSON" card on the Knowledge tab.</div>`
+          : `<div style="overflow-x:auto;">
+              <table class="text-xs w-full" style="border-collapse:collapse;">
+                <thead>
+                  <tr style="background:#f8fafc;color:#475569;text-align:left;">
+                    <th class="p-2 border-b">When</th>
+                    <th class="p-2 border-b">Filename</th>
+                    <th class="p-2 border-b">Defaults</th>
+                    <th class="p-2 border-b">Counts</th>
+                    <th class="p-2 border-b">Status</th>
+                    <th class="p-2 border-b"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${imports.map(_kbImportRowHtml).join('')}
+                </tbody>
+              </table>
+            </div>`}
+      </div>
+      <div class="modal-foot">
+        <button class="btn" id="kbi-cancel">Close</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#kbi-close').onclick  = () => overlay.remove();
+  overlay.querySelector('#kbi-cancel').onclick = () => overlay.remove();
+}
+
+function _kbImportRowHtml(imp) {
+  const date = (imp.created_at || '').slice(0, 16).replace('T', ' ');
+  const fname = imp.filename || '<span style="color:#94a3b8;font-style:italic;">(no filename)</span>';
+  const defaults = `${imp.default_country || '—'} · ${imp.default_status || 'draft'} · ★${imp.default_importance || 3}`;
+  const counts = `<span title="created">✓ ${imp.created_count}</span>` +
+    (imp.failed_count ? ` · <span style="color:#991b1b;" title="failed">⚠ ${imp.failed_count}</span>` : '') +
+    ` <span style="color:#64748b;">/ ${imp.total_count}</span>`;
+  const statusPill = ({
+    active:      '<span class="pill ok" style="font-size:10px;">● active</span>',
+    undone:      '<span class="pill" style="font-size:10px;background:#fef3c7;color:#854d0e;">↶ undone (soft)</span>',
+    undone_hard: '<span class="pill err" style="font-size:10px;">⚠ undone (hard delete)</span>',
+  })[imp.status] || `<span class="pill">${escapeHtml(imp.status)}</span>`;
+  const actions = imp.status === 'active' && imp.created_count > 0
+    ? `<button class="btn btn-ghost btn-xs" onclick="kbImportUndo('${imp.id}', 'soft')" title="Mark all entries from this import as 'rejected' (excluded from agent recall, preserved for audit)">↶ Soft undo</button>
+       <button class="btn btn-danger btn-xs" onclick="kbImportUndo('${imp.id}', 'hard')" title="DELETE all entries from this import permanently">🗑 Hard delete</button>`
+    : imp.status === 'undone'
+      ? `<span class="text-xs" style="color:#64748b;">undone ${(imp.undone_at || '').slice(0, 16).replace('T', ' ')}</span>`
+      : `<span class="text-xs" style="color:#991b1b;">deleted ${(imp.undone_at || '').slice(0, 16).replace('T', ' ')}</span>`;
+  return `
+    <tr style="border-bottom:1px solid #e2e8f0;">
+      <td class="p-2 mono" style="white-space:nowrap;color:#64748b;">${escapeHtml(date)}</td>
+      <td class="p-2"><span style="font-size:11px;">${typeof imp.filename === 'string' ? escapeHtml(imp.filename) : fname}</span></td>
+      <td class="p-2"><span class="text-xs" style="color:#475569;">${escapeHtml(defaults)}</span></td>
+      <td class="p-2 mono">${counts}</td>
+      <td class="p-2">${statusPill}</td>
+      <td class="p-2"><div class="flex gap-1">${actions}</div></td>
+    </tr>`;
+}
+
+async function kbImportUndo(importId, method) {
+  const isHard = method === 'hard';
+  const msg = isHard
+    ? 'HARD DELETE every entry from this import? This is PERMANENT — no audit trail, no restore. Type "DELETE" to confirm:'
+    : 'Soft-undo this import? Every entry from it will be marked as "rejected" (excluded from agent recall but preserved). Reversible by editing the entries.';
+  if (isHard) {
+    const v = prompt(msg);
+    if (v !== 'DELETE') return;
+  } else {
+    if (!confirm(msg)) return;
+  }
+  try {
+    const r = await authFetch(`${PROXY}/knowledge/imports/${importId}/undo`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ method }),
+    });
+    const j = await r.json();
+    if (!j.ok) { alert('Undo failed: ' + (j.error || 'unknown')); return; }
+    alert(`Undone (${j.method}). ${j.undone} ${j.undone === 1 ? 'entry affected' : 'entries affected'}.`);
+    // Close modal and refresh
+    document.getElementById('kbi-overlay')?.remove();
+    await Promise.all([loadKB(), kbTreeReload(), kbEmbedReload()]);
+  } catch (e) { alert('Error: ' + e.message); }
 }
 
 // M106 · Re-embed a single row (after edit, or to retry a failed embed).
@@ -13170,6 +13281,7 @@ async function kbHandleJsonFiles(fileList) {
           default_country:    country,
           default_status:     status,
           default_importance: parsed.default_importance || 3,
+          filename:           f.name,                          // M112 · captured for import history
         }),
       });
       const j = await r.json();
