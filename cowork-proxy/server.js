@@ -2455,10 +2455,11 @@ app.post('/kb/bulk-update', auth.middleware, async (req, res) => {
   try {
     const b = req.body || {};
     const r = await KB.bulkUpdate({
-      filter:    b.filter || {},
-      patch:     b.patch  || {},
-      dryRun:    b.dry_run !== false,         // default to dry-run for safety
-      updatedBy: 'founder',
+      filter:     b.filter || {},
+      patch:      b.patch  || {},
+      dryRun:     b.dry_run !== false,         // default to dry-run for safety
+      hardDelete: b.hard_delete === true,      // M113 · destructive bulk DELETE
+      updatedBy:  'founder',
     });
     if (!r.ok) return res.status(400).json(r);
     if (!r.dry_run && r.applied) {

@@ -165,7 +165,8 @@ async function backfillEmbeddings({ limit = 50 } = {}) {
 //   tags_add:    [array]   — append to existing tags (deduped)
 //   tags_remove: [array]   — remove specific tags
 //   tags:        [array]   — replace tags entirely
-async function bulkUpdate({ filter = {}, patch = {}, dryRun = true, updatedBy = null } = {}) {
+async function bulkUpdate({ filter = {}, patch = {}, dryRun = true, updatedBy = null,
+                            hardDelete = false } = {}) {
   const conds = [];
   if (filter.country)  conds.push(`country = ${q(_normCountry(filter.country))}`);
   if (filter.topic)    conds.push(`(topic = ${q(String(filter.topic).toLowerCase())} OR category = ${q(String(filter.topic).toLowerCase())})`);
@@ -179,6 +180,19 @@ async function bulkUpdate({ filter = {}, patch = {}, dryRun = true, updatedBy = 
     const idsSql = filter.ids.map(s => q(s)).join(',');
     conds.push(`id IN (${idsSql})`);
   }
+  // M113 · created_after / created_before — useful for retroactively undoing
+  // an import (or any group of entries) by targeting their creation window.
+  // Accepts ISO timestamp strings; Postgres parses them directly.
+  if (filter.created_after) {
+    const safe = String(filter.created_after).replace(/'/g, "''").slice(0, 30);
+    conds.push(`created_at >= '${safe}'::timestamptz`);
+  }
+  if (filter.created_before) {
+    const safe = String(filter.created_before).replace(/'/g, "''").slice(0, 30);
+    conds.push(`created_at <= '${safe}'::timestamptz`);
+  }
+  if (filter.source_type) conds.push(`source_type = ${q(filter.source_type)}`);
+  if (filter.created_by)  conds.push(`COALESCE(updated_by, verified_by, '') = ${q(filter.created_by)}`);
   if (!conds.length) return { ok: false, error: 'filter required (refusing to bulk-update entire table)' };
   const where = conds.join(' AND ');
 
@@ -191,7 +205,23 @@ async function bulkUpdate({ filter = {}, patch = {}, dryRun = true, updatedBy = 
     ) k;`);
   const matched = JSON.parse(previewJson || '[]');
   if (!matched.length) return { ok: true, dry_run: dryRun, matched_count: 0, preview: [] };
-  if (dryRun) return { ok: true, dry_run: true, matched_count: matched.length, preview: matched };
+  if (dryRun) return { ok: true, dry_run: true, matched_count: matched.length, preview: matched, hard_delete: hardDelete };
+
+  // M113 · Hard-delete branch — destructive, requires explicit hardDelete=true.
+  // Used when the founder wants to permanently remove an old import (e.g. one
+  // that pre-dates M112 and so isn't visible in import-history).
+  if (hardDelete) {
+    if (Object.keys(patch).length) {
+      return { ok: false, error: 'hardDelete cannot be combined with a patch — pick one' };
+    }
+    try {
+      const r = await query(`DELETE FROM knowledge_base WHERE ${where};`);
+      const affected = (r && r.rowCount) || matched.length;
+      return { ok: true, dry_run: false, matched_count: matched.length, applied: true, deleted: affected, method: 'hard' };
+    } catch (e) {
+      return { ok: false, error: e.message.slice(0, 300) };
+    }
+  }
 
   // Build the SET clause from patch
   const sets = [];

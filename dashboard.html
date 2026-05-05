@@ -12962,6 +12962,16 @@ function kbBulkRetagModal() {
               <label class="text-xs text-slate-500 block mb-1">Search (title/content)</label>
               <input id="kbb-f-query" type="text" placeholder="optional substring" class="border border-slate-200 rounded px-2 py-1 text-sm w-full">
             </div>
+            <!-- M113 · Date-window filters · useful for retroactively
+                 cleaning up imports done before M112 deployed -->
+            <div>
+              <label class="text-xs text-slate-500 block mb-1">Created after (ISO)</label>
+              <input id="kbb-f-after" type="datetime-local" class="border border-slate-200 rounded px-2 py-1 text-sm w-full" title="Only entries created on or after this timestamp">
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 block mb-1">Created before (ISO)</label>
+              <input id="kbb-f-before" type="datetime-local" class="border border-slate-200 rounded px-2 py-1 text-sm w-full" title="Only entries created on or before this timestamp">
+            </div>
           </div>
         </div>
 
@@ -13011,14 +13021,16 @@ function kbBulkRetagModal() {
       <div class="modal-foot">
         <button class="btn" id="kbb-cancel">Cancel</button>
         <button class="btn btn-ghost" id="kbb-preview-btn">👁 Preview matches</button>
-        <button class="btn btn-primary" id="kbb-apply" disabled style="opacity:0.5;">↻ Apply (after preview)</button>
+        <button class="btn btn-primary" id="kbb-apply" disabled style="opacity:0.5;">↻ Apply patch (after preview)</button>
+        <button class="btn btn-danger" id="kbb-delete" disabled style="opacity:0.5;" title="Permanently DELETE every matched row">🗑 Hard-delete all matched</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
   overlay.querySelector('#kbb-close').onclick   = () => overlay.remove();
   overlay.querySelector('#kbb-cancel').onclick  = () => overlay.remove();
-  overlay.querySelector('#kbb-preview-btn').onclick = () => _kbBulkRetag(true, overlay);
-  overlay.querySelector('#kbb-apply').onclick   = () => _kbBulkRetag(false, overlay);
+  overlay.querySelector('#kbb-preview-btn').onclick = () => _kbBulkRetag('preview', overlay);
+  overlay.querySelector('#kbb-apply').onclick   = () => _kbBulkRetag('apply', overlay);
+  overlay.querySelector('#kbb-delete').onclick  = () => _kbBulkRetag('delete', overlay);
 }
 
 function _kbBulkBuildPayload() {
@@ -13028,6 +13040,11 @@ function _kbBulkBuildPayload() {
   if ($('kbb-f-subtopic').value) filter.subtopic = $('kbb-f-subtopic').value.trim();
   if ($('kbb-f-status').value)   filter.status   = $('kbb-f-status').value;
   if ($('kbb-f-query').value)    filter.query    = $('kbb-f-query').value.trim();
+  // M113 · datetime-local input → ISO string for Postgres
+  const after  = $('kbb-f-after')  && $('kbb-f-after').value;
+  const before = $('kbb-f-before') && $('kbb-f-before').value;
+  if (after)  filter.created_after  = new Date(after).toISOString();
+  if (before) filter.created_before = new Date(before).toISOString();
 
   const patch = {};
   // Only set keys that were actually filled in (leave blank = keep)
@@ -13049,7 +13066,7 @@ function _kbBulkBuildPayload() {
   return { filter, patch };
 }
 
-async function _kbBulkRetag(dryRun, overlay) {
+async function _kbBulkRetag(mode, overlay) {
   const { filter, patch } = _kbBulkBuildPayload();
   const errEl = overlay.querySelector('#kbb-error');
   const prevEl = overlay.querySelector('#kbb-preview');
@@ -13059,16 +13076,22 @@ async function _kbBulkRetag(dryRun, overlay) {
     errEl.textContent = 'Set at least one WHERE field — refusing to bulk-update the entire table.';
     return;
   }
-  if (!dryRun && !Object.keys(patch).length) {
-    errEl.textContent = 'Set at least one SET field, or click Preview only.';
+  if (mode === 'apply' && !Object.keys(patch).length) {
+    errEl.textContent = 'Set at least one SET field, or click Preview, or use Hard-delete.';
     return;
   }
+  if (mode === 'delete') {
+    const v = prompt('HARD-DELETE every matched row PERMANENTLY? Type "DELETE" to confirm.');
+    if (v !== 'DELETE') return;
+  }
 
+  const dryRun = (mode === 'preview');
+  const hardDelete = (mode === 'delete');
   prevEl.innerHTML = `<div style="color:#64748b;">Working…</div>`;
   try {
     const r = await authFetch(`${PROXY}/kb/bulk-update`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ filter, patch, dry_run: dryRun }),
+      body: JSON.stringify({ filter, patch: hardDelete ? {} : patch, dry_run: dryRun, hard_delete: hardDelete }),
     });
     const j = await r.json();
     if (!j.ok) { errEl.textContent = j.error || 'failed'; prevEl.innerHTML = ''; return; }
@@ -13078,11 +13101,13 @@ async function _kbBulkRetag(dryRun, overlay) {
         prevEl.innerHTML = `<div style="background:#fef3c7;color:#854d0e;padding:8px;border-radius:6px;">No matches for that filter.</div>`;
         overlay.querySelector('#kbb-apply').disabled = true;
         overlay.querySelector('#kbb-apply').style.opacity = '0.5';
+        overlay.querySelector('#kbb-delete').disabled = true;
+        overlay.querySelector('#kbb-delete').style.opacity = '0.5';
         return;
       }
       prevEl.innerHTML = `
         <div style="background:#dbeafe;color:#1e40af;padding:8px;border-radius:6px;margin-bottom:6px;">
-          ↪ ${list.length} ${list.length === 1 ? 'entry matches' : 'entries match'} the filter. Review below; click <strong>Apply</strong> to commit the patch.
+          ↪ ${list.length} ${list.length === 1 ? 'entry matches' : 'entries match'} the filter. Review below; click <strong>Apply patch</strong> to commit changes, or <strong>Hard-delete</strong> to permanently remove them.
         </div>
         <div style="border:1px solid #e2e8f0;border-radius:6px;max-height:240px;overflow-y:auto;">
           ${list.map(e => `
@@ -13094,9 +13119,13 @@ async function _kbBulkRetag(dryRun, overlay) {
         </div>`;
       overlay.querySelector('#kbb-apply').disabled = false;
       overlay.querySelector('#kbb-apply').style.opacity = '1';
+      overlay.querySelector('#kbb-delete').disabled = false;
+      overlay.querySelector('#kbb-delete').style.opacity = '1';
+    } else if (hardDelete) {
+      prevEl.innerHTML = `<div style="background:#fee2e2;color:#991b1b;padding:8px;border-radius:6px;">🗑 Permanently deleted ${j.deleted || j.matched_count} ${(j.deleted || j.matched_count) === 1 ? 'entry' : 'entries'}.</div>`;
+      setTimeout(() => Promise.all([loadKB(), kbTreeReload(), kbEmbedReload()]), 200);
     } else {
       prevEl.innerHTML = `<div style="background:#dcfce7;color:#166534;padding:8px;border-radius:6px;">✓ Applied to ${j.matched_count} ${j.matched_count === 1 ? 'entry' : 'entries'}.${j.embed_queued ? ' Affected rows are queued for re-embedding.' : ''}</div>`;
-      // Refresh tree + entry list under the modal
       setTimeout(() => Promise.all([loadKB(), kbTreeReload(), kbEmbedReload()]), 200);
     }
   } catch (e) { errEl.textContent = e.message; prevEl.innerHTML = ''; }
