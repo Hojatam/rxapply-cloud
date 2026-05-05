@@ -41,27 +41,43 @@ const VALID_SOURCE_TYPE = new Set(['manual','parsed','web','inherited']);
 
 // ── CRUD ────────────────────────────────────────────────────────────
 
-async function add({ country, category, title, content, facts = {}, source = null,
+async function add({ country, category = null, topic = null, subtopic = null,
+                     title, content, facts = {}, source = null,
                      sourceType = 'manual', tags = [], importance = 3,
-                     status = 'active', verifiedBy = null }) {
-  if (!country || !category || !title || !content) {
-    return { ok: false, error: 'country, category, title, content required' };
+                     status = 'active', verifiedBy = null,
+                     parentId = null, updatedBy = null } = {}) {
+  if (!country || !title || !content) {
+    return { ok: false, error: 'country, title, content required' };
   }
+  // M105 · topic is the new primary axis. category stays for back-compat.
+  // If only category was supplied, mirror it into topic. If only topic was
+  // supplied, derive a legacy category for old code paths.
+  if (!topic && category) topic = category;
+  if (!category && topic) category = (VALID_CATEGORIES.has(topic) ? topic : 'other');
+  if (!topic) topic = 'other';
+
   const cnt = _normCountry(country);
   const cat = String(category).toLowerCase();
-  if (!VALID_CATEGORIES.has(cat)) return { ok: false, error: `bad category: ${cat}` };
+  // Allow any topic_slug — taxonomy is editable from the dashboard. We just
+  // enforce a sane string. Legacy `category` column still expects an enum
+  // value, so we coerce when the topic isn't an old enum member.
+  const catSafe = VALID_CATEGORIES.has(cat) ? cat : 'other';
   if (!VALID_STATUS.has(status)) return { ok: false, error: `bad status: ${status}` };
   if (!VALID_SOURCE_TYPE.has(sourceType)) sourceType = 'manual';
   const verifiedAt = verifiedBy ? 'NOW()' : 'NULL';
   try {
     const sql = `
       INSERT INTO knowledge_base
-        (country, category, title, content, facts, source, source_type,
-         status, verified_at, verified_by, tags, importance)
+        (country, category, topic, subtopic, parent_id, title, content, facts, source, source_type,
+         status, verified_at, verified_by, tags, importance, updated_by)
       VALUES
-        (${q(cnt)}, ${q(cat)}, ${q(title)}, ${q(content)}, ${qJsonOrEmpty(facts)},
+        (${q(cnt)}, ${q(catSafe)}, ${q(String(topic).toLowerCase())},
+         ${subtopic ? q(String(subtopic).toLowerCase()) : 'NULL'},
+         ${parentId ? q(parentId) : 'NULL'},
+         ${q(title)}, ${q(content)}, ${qJsonOrEmpty(facts)},
          ${q(source)}, ${q(sourceType)}, ${q(status)}, ${verifiedAt},
-         ${q(verifiedBy)}, ${qArr(tags)}, ${q(importance)})
+         ${q(verifiedBy)}, ${qArr(tags)}, ${q(importance)},
+         ${updatedBy ? q(updatedBy) : 'NULL'})
       RETURNING id::text;`;
     const id = await queryReturning(sql);
     return { ok: true, id };
@@ -82,6 +98,11 @@ async function update(id, patch = {}) {
   if ('source'     in patch) sets.push(`source=${q(patch.source)}`);
   if ('category'   in patch && VALID_CATEGORIES.has(patch.category)) sets.push(`category=${q(patch.category)}`);
   if ('country'    in patch) sets.push(`country=${q(_normCountry(patch.country))}`);
+  // M105 · tree fields
+  if ('topic'      in patch) sets.push(`topic=${patch.topic == null ? 'NULL' : q(String(patch.topic).toLowerCase())}`);
+  if ('subtopic'   in patch) sets.push(`subtopic=${patch.subtopic == null ? 'NULL' : q(String(patch.subtopic).toLowerCase())}`);
+  if ('parent_id'  in patch) sets.push(`parent_id=${patch.parent_id == null ? 'NULL' : q(patch.parent_id)}`);
+  if ('updated_by' in patch) sets.push(`updated_by=${patch.updated_by == null ? 'NULL' : q(patch.updated_by)}`);
   if (sets.length === 0) return { ok: false, error: 'no fields to update' };
   sets.push('updated_at=NOW()');
   try {
@@ -129,38 +150,200 @@ async function getOne(id) {
   if (!id) return null;
   const sql = `
     SELECT row_to_json(k) FROM (
-      SELECT id::text, country, category, title, content, facts, source, source_type,
+      SELECT id::text, country, category, topic, subtopic, parent_id::text,
+             title, content, facts, source, source_type,
              status, verified_at::text, verified_by, superseded_by::text, tags,
-             importance, created_at::text, updated_at::text, last_used_at::text, use_count
+             importance, updated_by,
+             created_at::text, updated_at::text, last_used_at::text, use_count
         FROM knowledge_base WHERE id = ${q(id)}
     ) k;`;
   try { const out = await queryValue(sql); return out ? JSON.parse(out) : null; }
   catch (_) { return null; }
 }
 
-async function list({ country = null, category = null, status = null, query: searchQuery = null, limit = 100 } = {}) {
+async function list({ country = null, category = null, topic = null, subtopic = null,
+                      status = null, query: searchQuery = null, limit = 100 } = {}) {
   limit = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 500);
   const where = [];
   if (country)     where.push(`country = ${q(_normCountry(country))}`);
   if (category)    where.push(`category = ${q(category)}`);
+  // M105 · topic/subtopic — both optional, both narrow
+  if (topic)       where.push(`(topic = ${q(String(topic).toLowerCase())} OR category = ${q(String(topic).toLowerCase())})`);
+  if (subtopic)    where.push(`subtopic = ${q(String(subtopic).toLowerCase())}`);
   if (status)      where.push(`status = ${q(status)}`);
   if (searchQuery) where.push(`(title ILIKE ${q('%'+searchQuery+'%')} OR content ILIKE ${q('%'+searchQuery+'%')})`);
   const w = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const sql = `
     SELECT COALESCE(json_agg(row_to_json(k) ORDER BY importance DESC, updated_at DESC), '[]'::json)
-    FROM (SELECT id::text, country, category, title, content, facts, source, source_type,
-                 status, verified_at::text, verified_by, tags, importance,
+    FROM (SELECT id::text, country, category, topic, subtopic, parent_id::text,
+                 title, content, facts, source, source_type,
+                 status, verified_at::text, verified_by, tags, importance, updated_by,
                  created_at::text, updated_at::text, use_count
             FROM knowledge_base ${w}
            ORDER BY importance DESC, updated_at DESC LIMIT ${limit}) k;`;
   try { return JSON.parse((await queryValue(sql)) || '[]'); } catch (_) { return []; }
 }
 
+// M105 · Tree view: nested taxonomy (kb_topics) + per-node entry counts.
+// Returns:
+//   [
+//     { country, topics: [
+//       { topic_slug, display_name, entry_count,
+//         subtopics: [ { subtopic_slug, display_name, entry_count } ] },
+//       ...
+//     ] },
+//     ...
+//   ]
+async function tree({ country = null } = {}) {
+  const where = country ? `WHERE country = ${q(_normCountry(country))}` : '';
+  // Pull taxonomy + counts in two queries; the JSON join is easier in JS.
+  const taxJson = await queryValue(`
+    SELECT COALESCE(json_agg(row_to_json(t) ORDER BY country, topic_slug, display_order, subtopic_slug NULLS FIRST), '[]'::json)
+      FROM (SELECT id::text, country, topic_slug, subtopic_slug, display_name,
+                   description, parent_id::text, display_order, enabled
+              FROM kb_topics ${where}) t;`);
+  const taxonomy = JSON.parse(taxJson || '[]');
+
+  // Counts per (country, topic, subtopic)
+  const countJson = await queryValue(`
+    SELECT COALESCE(json_agg(row_to_json(c)), '[]'::json) FROM (
+      SELECT country, topic, subtopic, COUNT(*)::int AS n
+        FROM knowledge_base
+       WHERE status IN ('active','draft')
+         ${country ? `AND country = ${q(_normCountry(country))}` : ''}
+       GROUP BY country, topic, subtopic
+    ) c;`);
+  const counts = JSON.parse(countJson || '[]');
+  const countLookup = (cnt, top, sub) => {
+    const row = counts.find(r => r.country === cnt && r.topic === top && (sub == null ? r.subtopic == null : r.subtopic === sub));
+    return row ? row.n : 0;
+  };
+  // Also: orphan entries (have a topic the founder hasn't added to taxonomy yet)
+  const orphanRows = counts.filter(c => !taxonomy.find(t =>
+    t.country === c.country && t.topic_slug === c.topic && (c.subtopic ? t.subtopic_slug === c.subtopic : true)
+  ));
+
+  // Group taxonomy: country → topic → subtopics
+  const byCountry = new Map();
+  for (const t of taxonomy) {
+    if (!byCountry.has(t.country)) byCountry.set(t.country, new Map());
+    const tmap = byCountry.get(t.country);
+    if (!t.subtopic_slug) {
+      // top-level topic
+      if (!tmap.has(t.topic_slug)) tmap.set(t.topic_slug, { ...t, subtopics: [] });
+      else Object.assign(tmap.get(t.topic_slug), t);
+    } else {
+      // subtopic
+      if (!tmap.has(t.topic_slug)) tmap.set(t.topic_slug, { country: t.country, topic_slug: t.topic_slug, display_name: t.topic_slug, subtopics: [] });
+      tmap.get(t.topic_slug).subtopics.push(t);
+    }
+  }
+
+  const out = [];
+  for (const [cnt, tmap] of byCountry.entries()) {
+    const topics = [];
+    for (const top of tmap.values()) {
+      topics.push({
+        ...top,
+        entry_count: countLookup(cnt, top.topic_slug, null),
+        subtopics: (top.subtopics || []).map(s => ({ ...s, entry_count: countLookup(cnt, s.topic_slug, s.subtopic_slug) })),
+      });
+    }
+    out.push({ country: cnt, topics, orphan_topics: orphanRows.filter(o => o.country === cnt) });
+  }
+  return out;
+}
+
+// ── kb_topics CRUD (founder-managed taxonomy) ──────────────────────────
+async function topicsList({ country = null } = {}) {
+  const where = country ? `WHERE country = ${q(_normCountry(country))}` : '';
+  const sql = `
+    SELECT COALESCE(json_agg(row_to_json(t) ORDER BY country, topic_slug, display_order, subtopic_slug NULLS FIRST), '[]'::json)
+      FROM (SELECT id::text, country, topic_slug, subtopic_slug, display_name,
+                   description, parent_id::text, display_order, enabled
+              FROM kb_topics ${where}) t;`;
+  try { return JSON.parse((await queryValue(sql)) || '[]'); } catch (_) { return []; }
+}
+
+async function topicsAdd({ country, topic_slug, subtopic_slug = null, display_name, description = null, display_order = 100, parent_id = null } = {}) {
+  if (!country || !topic_slug || !display_name) return { ok: false, error: 'country, topic_slug, display_name required' };
+  try {
+    const id = await queryReturning(`
+      INSERT INTO kb_topics (country, topic_slug, subtopic_slug, display_name, description, display_order, parent_id, enabled)
+      VALUES (${q(_normCountry(country))}, ${q(String(topic_slug).toLowerCase())},
+              ${subtopic_slug ? q(String(subtopic_slug).toLowerCase()) : 'NULL'},
+              ${q(display_name)},
+              ${description ? q(description) : 'NULL'},
+              ${parseInt(display_order, 10) || 100},
+              ${parent_id ? q(parent_id) : 'NULL'},
+              true)
+      ON CONFLICT (country, topic_slug, subtopic_slug) DO UPDATE
+        SET display_name = EXCLUDED.display_name,
+            description  = COALESCE(EXCLUDED.description, kb_topics.description),
+            enabled      = true,
+            updated_at   = now()
+      RETURNING id::text;`);
+    return { ok: true, id };
+  } catch (e) { return { ok: false, error: e.message.slice(0, 300) }; }
+}
+
+async function topicsUpdate(id, patch = {}) {
+  if (!id) return { ok: false, error: 'id required' };
+  const sets = [];
+  if ('display_name'  in patch) sets.push(`display_name = ${q(patch.display_name)}`);
+  if ('description'   in patch) sets.push(`description = ${patch.description == null ? 'NULL' : q(patch.description)}`);
+  if ('display_order' in patch) sets.push(`display_order = ${parseInt(patch.display_order, 10) || 100}`);
+  if ('topic_slug'    in patch) sets.push(`topic_slug = ${q(String(patch.topic_slug).toLowerCase())}`);
+  if ('subtopic_slug' in patch) sets.push(`subtopic_slug = ${patch.subtopic_slug == null ? 'NULL' : q(String(patch.subtopic_slug).toLowerCase())}`);
+  if ('enabled'       in patch) sets.push(`enabled = ${patch.enabled ? 'true' : 'false'}`);
+  if ('parent_id'     in patch) sets.push(`parent_id = ${patch.parent_id == null ? 'NULL' : q(patch.parent_id)}`);
+  if (!sets.length) return { ok: false, error: 'nothing to update' };
+  sets.push('updated_at = NOW()');
+  try {
+    await query(`UPDATE kb_topics SET ${sets.join(', ')} WHERE id = ${q(id)};`);
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message.slice(0, 300) }; }
+}
+
+async function topicsRemove(id) {
+  try {
+    // Soft-delete (preserves entries that point at this slot via topic/subtopic strings)
+    await query(`UPDATE kb_topics SET enabled = false, updated_at = NOW() WHERE id = ${q(id)};`);
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message.slice(0, 300) }; }
+}
+
+// Subtopic + tag suggestions. Helps the founder pick consistent terms.
+async function subtopicSuggestions({ country = null, topic = null } = {}) {
+  const where = [`status IN ('active','draft')`];
+  if (country) where.push(`country = ${q(_normCountry(country))}`);
+  if (topic)   where.push(`topic = ${q(String(topic).toLowerCase())}`);
+  const sql = `
+    SELECT COALESCE(json_agg(row_to_json(s) ORDER BY n DESC), '[]'::json) FROM (
+      SELECT subtopic, COUNT(*)::int AS n FROM knowledge_base
+       WHERE ${where.join(' AND ')} AND subtopic IS NOT NULL
+       GROUP BY subtopic ORDER BY n DESC LIMIT 50
+    ) s;`;
+  const tagsSql = `
+    SELECT COALESCE(json_agg(row_to_json(t) ORDER BY n DESC), '[]'::json) FROM (
+      SELECT tag, COUNT(*)::int AS n FROM (
+        SELECT UNNEST(tags) AS tag FROM knowledge_base WHERE ${where.join(' AND ')}
+      ) x GROUP BY tag ORDER BY n DESC LIMIT 30
+    ) t;`;
+  try {
+    return {
+      subtopics: JSON.parse((await queryValue(sql)) || '[]'),
+      tags:      JSON.parse((await queryValue(tagsSql)) || '[]'),
+    };
+  } catch (_) { return { subtopics: [], tags: [] }; }
+}
+
 // ── Recall (for prompt grounding) ───────────────────────────────────
 // Active+verified entries first, scored by importance × recency, plus a
 // keyword-match bonus when query is supplied. GLOBAL country always
 // included as fallback context.
-async function recall({ country = null, category = null, query: searchQuery = null, limit = 8 } = {}) {
+async function recall({ country = null, category = null, topic = null, subtopic = null,
+                        query: searchQuery = null, limit = 8 } = {}) {
   limit = Math.min(Math.max(parseInt(limit, 10) || 8, 1), 30);
   const where = [`status IN ('active','draft')`];
   if (country) {
@@ -168,7 +351,18 @@ async function recall({ country = null, category = null, query: searchQuery = nu
     where.push(`(country = ${q(c)} OR country = 'GLOBAL')`);
   }
   if (category) where.push(`category = ${q(category)}`);
+  // M105 · topic/subtopic boost vs hard filter. We DON'T hard-filter on
+  // topic — we score-boost so adjacent facts can still surface (better
+  // recall behaviour). subtopic is a stronger boost.
   let scoreExpr = `importance::float * (1.0 / (1.0 + EXTRACT(EPOCH FROM NOW() - last_used_at) / 2592000.0))`;
+  if (topic) {
+    const tSafe = String(topic).toLowerCase().replace(/'/g, "''");
+    scoreExpr += ` + CASE WHEN topic = '${tSafe}' THEN 4 WHEN category = '${tSafe}' THEN 2 ELSE 0 END`;
+  }
+  if (subtopic) {
+    const sSafe = String(subtopic).toLowerCase().replace(/'/g, "''");
+    scoreExpr += ` + CASE WHEN subtopic = '${sSafe}' THEN 6 ELSE 0 END`;
+  }
   if (searchQuery) {
     const safe = String(searchQuery).replace(/'/g, "''").slice(0, 200);
     scoreExpr += ` + CASE WHEN (title ILIKE '%${safe}%' OR content ILIKE '%${safe}%') THEN 5 ELSE 0 END`;
@@ -179,14 +373,14 @@ async function recall({ country = null, category = null, query: searchQuery = nu
   }
   const sql = `
     WITH ranked AS (
-      SELECT id, country, category, title, content, facts, source, status,
+      SELECT id, country, category, topic, subtopic, title, content, facts, source, status,
              tags, importance, verified_at, last_used_at,
              (${scoreExpr}) AS score
         FROM knowledge_base
        WHERE ${where.join(' AND ')}
     )
     SELECT COALESCE(json_agg(row_to_json(r) ORDER BY score DESC, importance DESC), '[]'::json)
-    FROM (SELECT id::text, country, category, title, content, facts, source, status,
+    FROM (SELECT id::text, country, category, topic, subtopic, title, content, facts, source, status,
                  tags, importance, verified_at::text, score
             FROM ranked ORDER BY score DESC, importance DESC LIMIT ${limit}) r;`;
   try {
@@ -203,12 +397,15 @@ async function recall({ country = null, category = null, query: searchQuery = nu
 }
 
 // ── Prompt-injectable block ─────────────────────────────────────────
-async function renderAsBlock({ country = null, query: searchQuery = null, limit = 6, category = null } = {}) {
-  const rows = await recall({ country, category, query: searchQuery, limit });
+async function renderAsBlock({ country = null, query: searchQuery = null, limit = 6,
+                                category = null, topic = null, subtopic = null } = {}) {
+  const rows = await recall({ country, category, topic, subtopic, query: searchQuery, limit });
   if (!rows.length) return '';
-  const header = country
-    ? `KNOWLEDGE BASE — ${_normCountry(country)} (verified facts; cite when used):`
-    : `KNOWLEDGE BASE (verified facts; cite when used):`;
+  const scope = subtopic ? `${_normCountry(country) || ''} / ${topic || ''} / ${subtopic}`
+              : topic    ? `${_normCountry(country) || ''} / ${topic}`
+              : country  ? `${_normCountry(country)}`
+                         : 'all countries';
+  const header = `KNOWLEDGE BASE — ${scope} (verified facts; cite when used; address shown as [country / topic / subtopic]):`;
   const lines = rows.map(r => {
     const v = r.verified_at ? '✓' : '·';
     const factSummary = (r.facts && Object.keys(r.facts).length)
@@ -216,7 +413,11 @@ async function renderAsBlock({ country = null, query: searchQuery = null, limit 
       : '';
     const src = r.source ? ` (src: ${String(r.source).slice(0,60)})` : '';
     const body = String(r.content || '').slice(0, 280);
-    return `${v} [${r.country}/${r.category}] ${r.title}: ${body}${factSummary}${src}`;
+    // M105 · address: prefer topic/subtopic; fall back to legacy category
+    const addr = r.subtopic ? `${r.country}/${r.topic || r.category}/${r.subtopic}`
+              : r.topic     ? `${r.country}/${r.topic}`
+                            : `${r.country}/${r.category || '?'}`;
+    return `${v} [${addr}] ${r.title}: ${body}${factSummary}${src}`;
   });
   return [header, ...lines].join('\n');
 }
@@ -245,6 +446,8 @@ function detectCountry(text) {
 module.exports = {
   add, update, markVerified, markStale, supersede, remove,
   getOne, list, recall, renderAsBlock, detectCountry,
+  // M105 · tree + taxonomy
+  tree, topicsList, topicsAdd, topicsUpdate, topicsRemove, subtopicSuggestions,
   VALID_CATEGORIES: Array.from(VALID_CATEGORIES),
   VALID_STATUS: Array.from(VALID_STATUS),
 };

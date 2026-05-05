@@ -12209,46 +12209,211 @@ async function renderKnowledge() {
       <div id="kb-paste-result" class="mt-3 text-sm"></div>
     </div>
 
-    <div class="card mb-4">
-      <div class="flex flex-wrap gap-3 items-center text-sm">
-        <label class="text-slate-500">Country</label>
-        <select id="kb-flt-country" class="border border-slate-200 rounded px-2 py-1 text-sm bg-white" onchange="loadKB()">
-          <option value="">All</option>
-          <option>UK</option><option>USA</option><option>DE</option>
-          <option>AU</option><option>CA</option><option>UAE</option>
-          <option>SA</option><option>GLOBAL</option>
-        </select>
-        <label class="text-slate-500 ml-3">Category</label>
-        <select id="kb-flt-cat" class="border border-slate-200 rounded px-2 py-1 text-sm bg-white" onchange="loadKB()">
-          <option value="">All</option>
-          <option>exam</option><option>visa</option><option>milestone</option>
-          <option>regulator</option><option>timeline</option><option>cost</option>
-          <option>document</option><option>other</option>
-        </select>
-        <label class="text-slate-500 ml-3">Status</label>
-        <select id="kb-flt-status" class="border border-slate-200 rounded px-2 py-1 text-sm bg-white" onchange="loadKB()">
-          <option value="">All</option>
-          <option>active</option><option>draft</option>
-          <option>stale</option><option>superseded</option><option>rejected</option>
-        </select>
-        <input id="kb-flt-q" class="border border-slate-200 rounded px-2 py-1 text-sm flex-1 min-w-[200px]"
-               placeholder="search title / content…" oninput="loadKB()" />
-        <button class="btn btn-primary btn-xs" onclick="kbNewModal()">+ New entry</button>
+    <!-- M105 · Tree-view layout. Left rail: country/topic/subtopic tree
+         (with founder-managed taxonomy + per-node entry counts).
+         Right pane: entries scoped to the selected node + filter inputs. -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+      <div class="lg:col-span-4 card" style="max-height:80vh;overflow-y:auto;">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="font-semibold text-sm">Tree</h3>
+          <div class="flex gap-1">
+            <button class="btn btn-ghost btn-xs" onclick="kbTreeReload()" title="Refresh tree">↻</button>
+            <button class="btn btn-ghost btn-xs" onclick="kbToggleFlatView()" title="Toggle flat list view">≡</button>
+          </div>
+        </div>
+        <div class="text-xs mb-2" style="color:#64748b;">Click any node to filter the right pane. Click <strong>+</strong> to add a topic or subtopic.</div>
+        <div id="kb-tree" class="text-sm">Loading tree…</div>
+      </div>
+      <div class="lg:col-span-8">
+        <div class="card mb-4">
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="font-semibold text-sm" id="kb-scope-label">All entries</h3>
+            <div class="flex gap-2">
+              <button class="btn btn-primary btn-xs" onclick="kbNewModal()">+ New entry</button>
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-3 items-center text-sm">
+            <label class="text-slate-500">Status</label>
+            <select id="kb-flt-status" class="border border-slate-200 rounded px-2 py-1 text-sm bg-white" onchange="loadKB()">
+              <option value="">All</option>
+              <option>active</option><option>draft</option>
+              <option>stale</option><option>superseded</option><option>rejected</option>
+            </select>
+            <input id="kb-flt-q" class="border border-slate-200 rounded px-2 py-1 text-sm flex-1 min-w-[200px]"
+                   placeholder="search title / content…" oninput="loadKB()" />
+          </div>
+          <!-- Hidden filter holders (populated by tree clicks) for back-compat with loadKB() -->
+          <input type="hidden" id="kb-flt-country" value="">
+          <input type="hidden" id="kb-flt-cat" value="">
+          <input type="hidden" id="kb-flt-topic" value="">
+          <input type="hidden" id="kb-flt-subtopic" value="">
+        </div>
+        <div id="kb-list"><div class="empty"><div class="empty-icon">📚</div><div class="empty-text">Pick a node from the tree on the left, or click + New entry.</div></div></div>
       </div>
     </div>
-
-    <div id="kb-list"><div class="empty"><div class="empty-icon">📚</div><div class="empty-text">Loading…</div></div></div>
   `;
+  kbTreeReload();
+  loadKB();
+}
+
+// M105 · Tree state — selected node drives the right pane.
+const _KBTREE = { open: new Set(), selected: { country: null, topic: null, subtopic: null }, flat: false, data: [] };
+
+async function kbTreeReload() {
+  try {
+    const j = await fetch(`${PROXY}/knowledge/tree`).then(r => r.json());
+    if (!j.ok) { $('kb-tree').innerHTML = `<div style="color:#dc2626;">Failed: ${escapeHtml(j.error || '?')}</div>`; return; }
+    _KBTREE.data = j.tree || [];
+    _kbRenderTree();
+  } catch (e) { $('kb-tree').innerHTML = `<div style="color:#dc2626;">Failed: ${escapeHtml(e.message)}</div>`; }
+}
+
+function _kbCountTotalForCountry(c) {
+  let n = 0;
+  for (const t of (c.topics || [])) {
+    n += t.entry_count || 0;
+    for (const s of (t.subtopics || [])) n += s.entry_count || 0;
+  }
+  for (const o of (c.orphan_topics || [])) n += o.n || 0;
+  return n;
+}
+
+function _kbRenderTree() {
+  const sel = _KBTREE.selected;
+  const nodeBtn = (label, count, isSelected, onClick, extra = '') => `
+    <div onclick="${onClick}" style="cursor:pointer;padding:3px 6px;border-radius:4px;
+                background:${isSelected ? '#e0e7ff' : 'transparent'};
+                color:${isSelected ? '#3730a3' : '#1e293b'};
+                font-weight:${isSelected ? '600' : '400'};
+                display:flex;align-items:center;justify-content:space-between;gap:6px;">
+      <span style="display:flex;align-items:center;gap:6px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${label}</span>
+      <span style="font-size:10px;color:#64748b;flex-shrink:0;">${count != null ? count : ''}</span>
+      ${extra}
+    </div>`;
+
+  const html = (_KBTREE.data || []).map(c => {
+    const open = _KBTREE.open.has(`c:${c.country}`);
+    const total = _kbCountTotalForCountry(c);
+    const countryRow = `
+      <div style="margin-top:8px;">
+        <div style="display:flex;align-items:center;gap:4px;">
+          <span style="cursor:pointer;width:14px;color:#94a3b8;" onclick="kbTreeToggle('c:${c.country}')">${open ? '▾' : '▸'}</span>
+          <div style="flex:1;cursor:pointer;padding:3px 6px;border-radius:4px;
+                      background:${(sel.country === c.country && !sel.topic) ? '#e0e7ff' : 'transparent'};
+                      color:${(sel.country === c.country && !sel.topic) ? '#3730a3' : '#1e293b'};
+                      font-weight:600;display:flex;align-items:center;justify-content:space-between;"
+               onclick="kbTreeSelect('${c.country}', null, null)">
+            <span>${escapeHtml(c.country)}</span>
+            <span style="font-size:10px;color:#64748b;">${total}</span>
+          </div>
+        </div>`;
+    if (!open) return countryRow + '</div>';
+    const topicsHtml = (c.topics || []).map(t => {
+      const tKey = `c:${c.country}|t:${t.topic_slug}`;
+      const tOpen = _KBTREE.open.has(tKey);
+      const tIsSelected = sel.country === c.country && sel.topic === t.topic_slug && !sel.subtopic;
+      const totalForTopic = (t.entry_count || 0) + (t.subtopics || []).reduce((n, s) => n + (s.entry_count || 0), 0);
+      let row = `
+        <div style="margin-left:18px;display:flex;align-items:center;gap:4px;">
+          <span style="cursor:pointer;width:14px;color:#94a3b8;" onclick="kbTreeToggle('${tKey}')">${(t.subtopics && t.subtopics.length) ? (tOpen ? '▾' : '▸') : '·'}</span>
+          ${nodeBtn(escapeHtml(t.display_name || t.topic_slug), totalForTopic, tIsSelected,
+            `kbTreeSelect('${c.country}', '${t.topic_slug}', null)`,
+            `<button onclick="event.stopPropagation();kbAddSubtopic('${c.country}','${t.topic_slug}')" title="Add subtopic" style="background:#f1f5f9;border:none;border-radius:3px;padding:0 5px;font-size:11px;cursor:pointer;color:#475569;">+</button>`)}
+        </div>`;
+      if (tOpen && t.subtopics && t.subtopics.length) {
+        row += t.subtopics.map(s => {
+          const isSel = sel.country === c.country && sel.topic === t.topic_slug && sel.subtopic === s.subtopic_slug;
+          return `<div style="margin-left:42px;">
+            ${nodeBtn(escapeHtml(s.display_name || s.subtopic_slug), s.entry_count, isSel,
+              `kbTreeSelect('${c.country}', '${t.topic_slug}', '${s.subtopic_slug}')`)}
+          </div>`;
+        }).join('');
+      }
+      return row;
+    }).join('');
+    // Orphan topics (entries whose topic isn't in taxonomy yet)
+    const orphans = (c.orphan_topics || []).map(o => {
+      const lbl = `${o.topic || '(no topic)'}${o.subtopic ? ' / ' + o.subtopic : ''}`;
+      const isSel = sel.country === c.country && sel.topic === o.topic && (sel.subtopic || null) === (o.subtopic || null);
+      return `<div style="margin-left:18px;">
+        ${nodeBtn(`<span style="color:#854d0e;">⚠ ${escapeHtml(lbl)}</span>`, o.n, isSel,
+          `kbTreeSelect('${c.country}', ${o.topic ? `'${o.topic}'` : 'null'}, ${o.subtopic ? `'${o.subtopic}'` : 'null'})`)}
+      </div>`;
+    }).join('');
+    const orphHeader = orphans ? `<div style="margin-left:18px;font-size:10px;color:#854d0e;margin-top:4px;">Untaxonomised entries:</div>` : '';
+    const addTopicBtn = `<div style="margin-left:18px;margin-top:4px;">
+      <button class="btn btn-ghost btn-xs" onclick="kbAddTopic('${c.country}')">+ Topic</button>
+    </div>`;
+    return countryRow + topicsHtml + orphHeader + orphans + addTopicBtn + '</div>';
+  }).join('');
+  $('kb-tree').innerHTML = html || '<div style="color:#64748b;">No countries seeded yet. Run the migration.</div>';
+}
+
+function kbTreeToggle(key) {
+  if (_KBTREE.open.has(key)) _KBTREE.open.delete(key);
+  else _KBTREE.open.add(key);
+  _kbRenderTree();
+}
+
+function kbTreeSelect(country, topic, subtopic) {
+  _KBTREE.selected = { country, topic, subtopic };
+  // Sync hidden filter inputs so loadKB() picks them up
+  if ($('kb-flt-country'))  $('kb-flt-country').value = country || '';
+  if ($('kb-flt-topic'))    $('kb-flt-topic').value   = topic   || '';
+  if ($('kb-flt-subtopic')) $('kb-flt-subtopic').value = subtopic || '';
+  // Update scope label
+  const scope = subtopic ? `${country} / ${topic} / ${subtopic}`
+              : topic    ? `${country} / ${topic}`
+              : country  ? country
+                         : 'All entries';
+  if ($('kb-scope-label')) $('kb-scope-label').textContent = scope;
+  _kbRenderTree();
+  loadKB();
+}
+
+async function kbAddTopic(country) {
+  const slug = prompt(`New topic slug for ${country} (lowercase, e.g. "courses", "tax", "quality_of_life"):`);
+  if (!slug) return;
+  const display = prompt('Display name:', slug.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())) || slug;
+  try {
+    const r = await authFetch(`${PROXY}/knowledge/topics`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ country, topic_slug: slug, display_name: display }),
+    });
+    if (!r.ok) { alert('Failed: ' + (await r.text())); return; }
+    await kbTreeReload();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function kbAddSubtopic(country, topic) {
+  const slug = prompt(`New subtopic for ${country}/${topic} (e.g. "ore_part_1", "tier_2_skilled_worker"):`);
+  if (!slug) return;
+  const display = prompt('Display name:', slug.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())) || slug;
+  try {
+    const r = await authFetch(`${PROXY}/knowledge/topics`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ country, topic_slug: topic, subtopic_slug: slug, display_name: display }),
+    });
+    if (!r.ok) { alert('Failed: ' + (await r.text())); return; }
+    await kbTreeReload();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+function kbToggleFlatView() {
+  _KBTREE.flat = !_KBTREE.flat;
   loadKB();
 }
 
 async function loadKB() {
   try {
     const params = new URLSearchParams();
-    const c = $('kb-flt-country')?.value; if (c) params.set('country', c);
-    const cat = $('kb-flt-cat')?.value;   if (cat) params.set('category', cat);
-    const st = $('kb-flt-status')?.value; if (st) params.set('status', st);
-    const q = $('kb-flt-q')?.value;       if (q) params.set('query', q);
+    const c   = $('kb-flt-country')?.value;  if (c)   params.set('country', c);
+    const cat = $('kb-flt-cat')?.value;      if (cat) params.set('category', cat);
+    // M105 · tree-aware filters
+    const top = $('kb-flt-topic')?.value;    if (top) params.set('topic', top);
+    const sub = $('kb-flt-subtopic')?.value; if (sub) params.set('subtopic', sub);
+    const st  = $('kb-flt-status')?.value;   if (st)  params.set('status', st);
+    const q   = $('kb-flt-q')?.value;        if (q)   params.set('query', q);
     params.set('limit', '200');
     const r = await authFetch(`${PROXY}/kb?${params.toString()}`).then(r => r.json());
     if (!r.ok) { $('kb-list').innerHTML = `<div class="empty"><div class="empty-text">Failed: ${escapeHtml(r.error || '?')}</div></div>`; return; }
@@ -12315,7 +12480,7 @@ function _kbCard(e) {
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
           <span style="font-weight:600;font-size:14px;">${escapeHtml(e.title)}</span>
           <span class="pill ${statusKind}"><span class="dot"></span>${escapeHtml(e.status)}</span>
-          <span class="pill">${escapeHtml(e.category)}</span>
+          <span class="pill" title="topic / subtopic — click to filter">${escapeHtml(e.country)} · ${escapeHtml(e.topic || e.category || '?')}${e.subtopic ? ' · ' + escapeHtml(e.subtopic) : ''}</span>
           ${stars}
         </div>
         <div style="font-size:13.5px;color:var(--text-muted);margin-top:6px;line-height:1.55;">${escapeHtml(e.content)}</div>
@@ -12481,7 +12646,64 @@ async function kbDelete(id) {
   } catch (e) { alert(e.message); }
 }
 
-function kbNewModal() { _kbModal({}); }
+// M105 · Topic + subtopic dropdowns inside the entry modal. Pulls live
+// from /knowledge/topics so the founder sees exactly the taxonomy they
+// (and Daneshyar) maintain. Falls back to free-text on no match.
+async function kbmReloadTopics(preselectTopic = null, preselectSubtopic = null) {
+  const country = $('kbm-country') && $('kbm-country').value;
+  if (!country) return;
+  try {
+    const j = await fetch(`${PROXY}/knowledge/topics?country=${encodeURIComponent(country)}`).then(r => r.json());
+    const items = (j.items || []).filter(t => t.enabled !== false);
+    const topics = items.filter(t => !t.subtopic_slug);
+    const sel = $('kbm-topic');
+    if (!sel) return;
+    const current = preselectTopic || sel.value || _KBTREE.selected.topic || '';
+    sel.innerHTML = `<option value="">— topic —</option>` + topics.map(t =>
+      `<option value="${escapeHtml(t.topic_slug)}" ${t.topic_slug===current?'selected':''}>${escapeHtml(t.display_name || t.topic_slug)}</option>`
+    ).join('');
+    // Also refresh subtopic datalist for the chosen topic
+    kbmReloadSubtopics(preselectSubtopic, items);
+  } catch (_) {}
+}
+
+async function kbmReloadSubtopics(preselectSubtopic = null, taxonomy = null) {
+  const dl = $('kbm-subtopic-list');
+  if (!dl) return;
+  const country = $('kbm-country') && $('kbm-country').value;
+  const topic   = $('kbm-topic')   && $('kbm-topic').value;
+  let subs = [];
+  if (taxonomy && topic) {
+    subs = taxonomy.filter(t => t.topic_slug === topic && t.subtopic_slug).map(t => t.subtopic_slug);
+  } else if (country && topic) {
+    try {
+      const j = await fetch(`${PROXY}/knowledge/topics?country=${encodeURIComponent(country)}`).then(r => r.json());
+      subs = (j.items || []).filter(t => t.topic_slug === topic && t.subtopic_slug && t.enabled !== false)
+                            .map(t => t.subtopic_slug);
+    } catch (_) {}
+  }
+  // Add suggestions from existing entries
+  if (country && topic) {
+    try {
+      const sJ = await fetch(`${PROXY}/knowledge/subtopic-suggest?country=${encodeURIComponent(country)}&topic=${encodeURIComponent(topic)}`).then(r => r.json());
+      for (const s of (sJ.subtopics || [])) {
+        if (s.subtopic && !subs.includes(s.subtopic)) subs.push(s.subtopic);
+      }
+    } catch (_) {}
+  }
+  dl.innerHTML = subs.map(s => `<option value="${escapeHtml(s)}">`).join('');
+  if (preselectSubtopic && $('kbm-subtopic')) $('kbm-subtopic').value = preselectSubtopic;
+}
+
+function kbNewModal() {
+  // Pre-fill from currently selected tree node when opening "New entry"
+  const e = {
+    country:  _KBTREE.selected.country  || null,
+    topic:    _KBTREE.selected.topic    || null,
+    subtopic: _KBTREE.selected.subtopic || null,
+  };
+  _kbModal(e);
+}
 async function kbEditModal(id) {
   const r = await authFetch(`${PROXY}/kb/${id}`).then(r => r.json());
   if (r.ok) _kbModal(r.entry);
@@ -12502,17 +12724,23 @@ function _kbModal(e = {}) {
         <button class="modal-close" id="kbm-close" aria-label="Close">${ICONS.x}</button>
       </div>
       <div class="modal-body">
-        <div class="grid grid-cols-3 gap-2">
-          <select id="kbm-country" class="border border-slate-200 rounded px-3 py-2 text-sm">
-            ${['UK','USA','DE','AU','CA','UAE','SA','GLOBAL'].map(c => `<option ${e.country===c?'selected':''}>${c}</option>`).join('')}
+        <div class="grid grid-cols-4 gap-2">
+          <select id="kbm-country" class="border border-slate-200 rounded px-3 py-2 text-sm" onchange="kbmReloadTopics()">
+            ${['UK','USA','DE','AU','CA','UAE','SA','GLOBAL'].map(c => {
+              const sel = (e.country || _KBTREE.selected.country) === c ? 'selected' : '';
+              return `<option ${sel}>${c}</option>`;
+            }).join('')}
           </select>
-          <select id="kbm-category" class="border border-slate-200 rounded px-3 py-2 text-sm">
-            ${['exam','visa','milestone','regulator','timeline','cost','document','other'].map(c => `<option ${e.category===c?'selected':''}>${c}</option>`).join('')}
+          <select id="kbm-topic" class="border border-slate-200 rounded px-3 py-2 text-sm" onchange="kbmReloadSubtopics()">
+            <option value="">— topic —</option>
           </select>
+          <input id="kbm-subtopic" list="kbm-subtopic-list" class="border border-slate-200 rounded px-3 py-2 text-sm" placeholder="subtopic (optional)" value="${escapeHtml(e.subtopic || _KBTREE.selected.subtopic || '')}" />
+          <datalist id="kbm-subtopic-list"></datalist>
           <select id="kbm-importance" class="border border-slate-200 rounded px-3 py-2 text-sm">
             ${[1,2,3,4,5].map(n => `<option value="${n}" ${(e.importance||3)===n?'selected':''}>★ ${n}</option>`).join('')}
           </select>
         </div>
+        <input id="kbm-category" type="hidden" value="${escapeHtml(e.category || 'other')}" />
         <input id="kbm-title" class="w-full border border-slate-200 rounded px-3 py-2 text-sm" placeholder="Title (short label)" value="${escapeHtml(e.title || '')}" />
         <textarea id="kbm-content" class="w-full border border-slate-200 rounded p-3 text-sm" rows="4" placeholder="Canonical content (prose)">${escapeHtml(e.content || '')}</textarea>
         <textarea id="kbm-facts" class="w-full border border-slate-200 rounded p-3 text-xs" style="font-family:var(--font-mono);" rows="3" placeholder='Structured facts as JSON: {"fee":"£1066","year":2025}'>${escapeHtml(JSON.stringify(e.facts || {}, null, 2))}</textarea>
@@ -12530,6 +12758,8 @@ function _kbModal(e = {}) {
     </div>
   `;
   document.body.appendChild(modal);
+  // M105 · Populate topic dropdown from /knowledge/topics for the chosen country
+  setTimeout(() => kbmReloadTopics(e.topic, e.subtopic), 0);
   modal.querySelector('#kbm-close').onclick = () => modal.remove();
   modal.querySelector('#kbm-cancel').onclick = () => modal.remove();
   modal.querySelector('#kbm-save').onclick = async () => {
@@ -12537,7 +12767,12 @@ function _kbModal(e = {}) {
     try { facts = JSON.parse($('kbm-facts').value || '{}'); }
     catch (err) { $('kbm-error').textContent = 'facts is not valid JSON'; return; }
     const payload = {
-      country: $('kbm-country').value, category: $('kbm-category').value,
+      country: $('kbm-country').value,
+      category: $('kbm-category').value,
+      // M105 · primary axis is topic. category mirrors topic when topic
+      // happens to be one of the legacy enum values; otherwise stays 'other'.
+      topic: ($('kbm-topic').value || '').trim() || null,
+      subtopic: ($('kbm-subtopic').value || '').trim() || null,
       title: $('kbm-title').value.trim(), content: $('kbm-content').value.trim(),
       facts, source: $('kbm-source').value.trim() || null,
       tags: $('kbm-tags').value.split(',').map(s => s.trim()).filter(Boolean),

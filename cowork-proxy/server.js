@@ -1908,8 +1908,8 @@ app.delete('/agents/:name/avatar', auth.middleware, async (req, res) => {
 // Founder-facing CRUD for the KB. All other agents read via injected
 // renderAsBlock(); these routes manage the data.
 app.get('/kb', auth.middleware, async (req, res) => {
-  const { country, category, status, query, limit } = req.query || {};
-  res.json({ ok: true, entries: await KB.list({ country, category, status, query, limit }) });
+  const { country, category, topic, subtopic, status, query, limit } = req.query || {};
+  res.json({ ok: true, entries: await KB.list({ country, category, topic, subtopic, status, query, limit }) });
 });
 app.get('/kb/:id', auth.middleware, async (req, res) => {
   const e = await KB.getOne(req.params.id);
@@ -1945,12 +1945,67 @@ app.delete('/kb/:id', auth.middleware, async (req, res) => {
 });
 // Recall (debug): ad-hoc query of what would be injected
 app.get('/kb/recall/preview', auth.middleware, async (req, res) => {
-  const { country, category, query, limit } = req.query || {};
+  const { country, category, topic, subtopic, query, limit } = req.query || {};
   const [rows, block] = await Promise.all([
-    KB.recall({ country, category, query, limit }),
-    KB.renderAsBlock({ country, category, query, limit }),
+    KB.recall({ country, category, topic, subtopic, query, limit }),
+    KB.renderAsBlock({ country, category, topic, subtopic, query, limit }),
   ]);
   res.json({ ok: true, rows, block });
+});
+
+// ── M105 · Knowledge tree + taxonomy CRUD ────────────────────────────
+// /knowledge/tree              · nested taxonomy + entry counts
+// /knowledge/topics            · GET list / POST add
+// /knowledge/topics/:id        · PATCH / DELETE
+// /knowledge/subtopic-suggest  · existing subtopic_slugs + tags for a topic
+//
+// /kb/* endpoints (above) accept ?topic=&subtopic= already.
+app.get('/knowledge/tree', async (req, res) => {
+  try {
+    const out = await KB.tree({ country: req.query.country || null });
+    res.json({ ok: true, tree: out });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.get('/knowledge/topics', async (req, res) => {
+  try {
+    const items = await KB.topicsList({ country: req.query.country || null });
+    res.json({ ok: true, items });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.post('/knowledge/topics', auth.middleware, async (req, res) => {
+  try {
+    const r = await KB.topicsAdd(req.body || {});
+    if (!r.ok) return res.status(400).json(r);
+    res.json(r);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.patch('/knowledge/topics/:id', auth.middleware, async (req, res) => {
+  try {
+    const r = await KB.topicsUpdate(req.params.id, req.body || {});
+    if (!r.ok) return res.status(400).json(r);
+    res.json(r);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.delete('/knowledge/topics/:id', auth.middleware, async (req, res) => {
+  try {
+    const r = await KB.topicsRemove(req.params.id);
+    if (!r.ok) return res.status(400).json(r);
+    res.json(r);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.get('/knowledge/subtopic-suggest', async (req, res) => {
+  try {
+    const out = await KB.subtopicSuggestions({
+      country: req.query.country || null,
+      topic:   req.query.topic   || null,
+    });
+    res.json({ ok: true, ...out });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 // ── K6 · Daneshyar agent endpoints ────────────────────────────────────
