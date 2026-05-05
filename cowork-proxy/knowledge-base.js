@@ -97,9 +97,14 @@ async function backfillEmbeddings({ limit = 50 } = {}) {
   }
   limit = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
   // Pick up `pending` rows; oldest-pending first so the backlog drains FIFO.
+  // M111c · The json_agg ORDER BY references columns from the inner
+  // subquery's SELECT list — created_at must be exposed there. The inner
+  // ORDER BY/LIMIT picks the FIFO slice; json_agg preserves that order
+  // explicitly so the result is reproducible across Postgres versions.
   const json = await queryValue(`
-    SELECT COALESCE(json_agg(row_to_json(r) ORDER BY created_at ASC), '[]'::json) FROM (
-      SELECT id::text, country, category, topic, subtopic, title, content, facts, tags
+    SELECT COALESCE(json_agg(row_to_json(r) ORDER BY r.created_at ASC), '[]'::json) FROM (
+      SELECT id::text, country, category, topic, subtopic, title, content, facts, tags,
+             created_at::text
         FROM knowledge_base
        WHERE embedding_status = 'pending'
        ORDER BY created_at ASC
