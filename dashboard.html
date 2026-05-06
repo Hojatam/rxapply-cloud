@@ -9822,12 +9822,14 @@ function coRenderRun(run) {
             <button class="cx-btn ghost xs" onclick="coCancel('${run.id}')">Cancel run</button>
           </div>
         ` : ''}
-        ${(isDone && s.lang == null && typeof s.stage_index === 'number') ? `
-          <div style="margin-top:8px;font-size:12px;">
-            <a href="#" onclick="coForkFrom('${run.id}', ${s.stage_index + 1});return false;"
-               style="color:var(--cx-brand-teal);text-decoration:underline;" title="Reuse this stage's output and continue from after it. Tweak agent overrides or options on the new run.">
-              ↳ fork from after this stage
-            </a>
+        ${(showOutput && typeof s.stage_index === 'number') ? `
+          <div style="display:flex;align-items:center;gap:14px;margin-top:10px;font-size:12px;flex-wrap:wrap;">
+            <button class="cx-btn xs ghost" onclick="coSendToDrive('${run.id}', ${s.stage_index}, ${s.lang ? `'${escapeHtml(s.lang)}'` : 'null'}, '${escapeHtml(s.stage_name)}', '${escapeHtml(s.agent || s.model || 'renderer')}')" title="Send this agent's output to Google Drive (requires DRIVE_WEBHOOK_URL configured on the proxy)">📤 Send to Drive</button>
+            ${(isDone && s.lang == null) ? `
+              <a href="#" onclick="coForkFrom('${run.id}', ${s.stage_index + 1});return false;"
+                 style="color:var(--cx-brand-teal);text-decoration:underline;" title="Reuse this stage's output and continue from after it. Tweak agent overrides or options on the new run.">
+                ↳ fork from after this stage
+              </a>` : ''}
           </div>
         ` : ''}
       </div>
@@ -10788,6 +10790,126 @@ async function coApprove(runId) {
 
 // M119 · Reject-with-notes — used by Gate A (verify-kb) + Gate B (design-v2).
 // Notes feed into REFINE NOTES on the next attempt of the upstream stage.
+// M125 · Hand off any agent's output to Google Drive via the proxy's
+// DRIVE_WEBHOOK_URL. Backend formats the stage output as JSON or
+// markdown (auto-picks based on shape), then POSTs to the configured
+// webhook (typically a Google Apps Script web app — see server.js for
+// the template). The webhook saves to Drive and returns the file URL.
+async function coSendToDrive(runId, stageIndex, lang, stageName, agentName) {
+  // Strip any prior modal so multiple clicks can't pile up.
+  const prior = document.getElementById('co-drive-modal'); if (prior) prior.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'co-drive-modal';
+  overlay.className = 'cx-modal-overlay';
+  overlay.innerHTML = `
+    <div class="cx-modal cx-root">
+      <div class="cx-modal-head" style="background:linear-gradient(135deg, #16a34a 0%, #15803d 100%);">
+        <div>
+          <div class="cx-subhead" style="margin:0 0 4px;color:#bbf7d0;">📤 Send to Google Drive</div>
+          <h3 style="margin:0;color:#fff;font-size:18px;">${escapeHtml(stageName)}${lang ? ` · ${escapeHtml(lang)}` : ''}</h3>
+          <div style="font-size:12.5px;color:rgba(255,255,255,0.78);margin-top:4px;">
+            <strong style="color:#fff;">${escapeHtml(agentName)}</strong>'s output will be saved to your configured Drive folder.
+          </div>
+        </div>
+        <button class="cx-btn xs ghost" onclick="coCloseDriveModal()" style="color:#fff;border-color:rgba(255,255,255,0.2);">✕</button>
+      </div>
+      <div class="cx-modal-body">
+        <div class="cx-field">
+          <label>File format</label>
+          <select id="co-drive-format" class="cx-select">
+            <option value="auto" selected>Auto — pick best format for this output</option>
+            <option value="json">JSON — machine-readable, every field preserved</option>
+            <option value="markdown">Markdown — human-readable (caption + hashtags)</option>
+          </select>
+          <div class="cx-help">JSON keeps slides[], facts_checked[], and design plans intact. Markdown is friendlier for caption-style outputs you'll paste elsewhere.</div>
+        </div>
+        <div id="co-drive-result" style="margin-top:14px;"></div>
+        <details style="margin-top:14px;">
+          <summary class="cx-stage-detail-summary">⚙ How to set up the Drive webhook (one-time)</summary>
+          <div style="margin-top:10px;font-size:12.5px;color:var(--cx-text-muted);line-height:1.7;">
+            <ol style="padding-left:20px;">
+              <li><strong>Make a Drive folder</strong> at drive.google.com → New → Folder. Copy its ID from the URL.</li>
+              <li><strong>Open script.google.com</strong> → New project. Paste:
+                <pre style="background:var(--cx-surface-sunken);padding:10px;border-radius:6px;font-size:11px;line-height:1.5;overflow-x:auto;margin-top:6px;">const FOLDER_ID = 'PASTE_FOLDER_ID_HERE';
+function doPost(e) {
+  const d = JSON.parse(e.postData.contents);
+  const folder = DriveApp.getFolderById(FOLDER_ID);
+  const blob = Utilities.newBlob(d.content, d.mime_type, d.file_name);
+  const file = folder.createFile(blob);
+  return ContentService.createTextOutput(JSON.stringify({
+    ok: true, file_id: file.getId(), file_url: file.getUrl()
+  })).setMimeType(ContentService.MimeType.JSON);
+}</pre></li>
+              <li><strong>Deploy</strong> → New deployment → Web app → "Execute as: me" + "Anyone with the link" → copy the deployment URL.</li>
+              <li><strong>Railway</strong> → cowork-proxy → Variables → add <span class="mono" style="background:var(--cx-surface-sunken);padding:1px 5px;border-radius:3px;">DRIVE_WEBHOOK_URL</span> with the copied URL.</li>
+            </ol>
+            Or use n8n / Make.com / Zapier / Pipedream — any webhook that accepts JSON and uploads to Drive will work. The payload includes <span class="mono">file_name</span>, <span class="mono">mime_type</span>, <span class="mono">content</span>, plus run/stage/agent metadata.
+          </div>
+        </details>
+      </div>
+      <div class="cx-modal-foot">
+        <span id="co-drive-status" style="font-size:12px;color:var(--cx-text-faint);"></span>
+        <button class="cx-btn ghost" onclick="coCloseDriveModal()">Cancel</button>
+        <button class="cx-btn primary" id="co-drive-submit"
+          onclick="coSubmitDrive('${runId}', ${stageIndex}, ${lang ? `'${escapeHtml(lang)}'` : 'null'})">📤 Upload to Drive</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+function coCloseDriveModal() {
+  const m = document.getElementById('co-drive-modal');
+  if (m) m.remove();
+}
+
+async function coSubmitDrive(runId, stageIndex, lang) {
+  const submit = document.getElementById('co-drive-submit');
+  const status = document.getElementById('co-drive-status');
+  const result = document.getElementById('co-drive-result');
+  const fmt = (document.getElementById('co-drive-format') || {}).value || 'auto';
+  if (submit) { submit.disabled = true; submit.textContent = 'Uploading…'; }
+  if (status) { status.style.color = 'var(--cx-text-faint)'; status.textContent = 'POSTing to webhook…'; }
+  if (result) result.innerHTML = '';
+  try {
+    const r = await authFetch(`${PROXY}/compose/runs/${runId}/stages/${stageIndex}/to-drive`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ format: fmt, lang: lang || null }),
+    });
+    if (r.status === 401) {
+      if (status) { status.style.color = 'var(--cx-err)'; status.textContent = 'Sign in required.'; }
+      if (submit) { submit.disabled = false; submit.textContent = '📤 Retry upload'; }
+      return;
+    }
+    const j = await r.json();
+    if (!j.ok) {
+      const errBody = `<div style="background:#fee2e2;border:1px solid #fecaca;color:#991b1b;padding:10px 12px;border-radius:8px;font-size:12.5px;line-height:1.55;">
+        <div style="font-weight:600;margin-bottom:4px;">Upload failed</div>
+        <div>${escapeHtml(j.error || 'unknown error')}</div>
+        ${j.hint ? `<div style="margin-top:6px;color:#7f1d1d;font-style:italic;">${escapeHtml(j.hint)}</div>` : ''}
+        ${j.response ? `<details style="margin-top:6px;"><summary style="cursor:pointer;font-size:11px;">webhook response</summary><pre style="font-size:11px;background:#fff;padding:6px;border-radius:4px;margin-top:4px;overflow-x:auto;">${escapeHtml(JSON.stringify(j.response, null, 2))}</pre></details>` : ''}
+      </div>`;
+      if (result) result.innerHTML = errBody;
+      if (status) { status.style.color = 'var(--cx-err)'; status.textContent = 'Upload failed.'; }
+      if (submit) { submit.disabled = false; submit.textContent = '📤 Try again'; }
+      return;
+    }
+    const fileUrl = j.file_url || (j.response && j.response.file_url);
+    const fileName = j.file_name || 'uploaded';
+    if (result) {
+      result.innerHTML = `<div style="background:var(--cx-brand-teal-50);border:1px solid var(--cx-brand-teal);color:var(--cx-brand-teal-700);padding:12px;border-radius:8px;font-size:12.5px;line-height:1.55;">
+        <div style="font-weight:600;margin-bottom:4px;">✓ Uploaded to Drive</div>
+        <div class="mono" style="font-size:11px;color:var(--cx-text-muted);word-break:break-all;">${escapeHtml(fileName)}</div>
+        ${fileUrl ? `<a href="${escapeHtml(fileUrl)}" target="_blank" rel="noopener" style="display:inline-block;margin-top:8px;color:var(--cx-brand-teal);text-decoration:underline;font-weight:500;">→ Open in Drive</a>` : '<div style="margin-top:6px;color:var(--cx-text-faint);font-size:11px;font-style:italic;">(Webhook didn\\'t return a file URL — check your script returns {file_url: ...})</div>'}
+      </div>`;
+    }
+    if (status) { status.style.color = 'var(--cx-ok)'; status.textContent = '✓ Done'; }
+    if (submit) { submit.textContent = '✓ Uploaded'; submit.disabled = true; }
+  } catch (e) {
+    if (status) { status.style.color = 'var(--cx-err)'; status.textContent = 'Error: ' + e.message; }
+    if (submit) { submit.disabled = false; submit.textContent = '📤 Try again'; }
+  }
+}
+
 // M124 stage 7 · Reject-with-notes flow. The founder needs a real
 // textarea (window.prompt is single-line, no markdown, often suppressed
 // by the browser, and gives no signal which agent will receive the

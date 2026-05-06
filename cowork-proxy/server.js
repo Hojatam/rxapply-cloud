@@ -3249,6 +3249,149 @@ app.post('/compose/runs/:id/fork-from', auth.middleware, async (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
+// M125 · Hand off a single stage's output to Google Drive via a
+// founder-configured webhook.
+//
+// Why a webhook (not direct Drive API)? Solo-founder ops: needing to
+// keep service-account JSON keys + drive scopes + token refresh in the
+// proxy is overkill for "save the agent's caption to Drive." A webhook
+// (Google Apps Script web app, n8n, Make.com, Zapier, Pipedream — any
+// of them) keeps OAuth out of our codebase and lets the founder change
+// the destination folder / rename rules / sharing model in one place
+// without redeploys.
+//
+// Setup (Google Apps Script — easiest, no third-party):
+//   1. drive.google.com → New → Folder → name it (e.g. "RxApply runs")
+//   2. script.google.com → New project → paste this:
+//        const FOLDER_ID = 'YOUR_FOLDER_ID';
+//        function doPost(e) {
+//          const d = JSON.parse(e.postData.contents);
+//          const folder = DriveApp.getFolderById(FOLDER_ID);
+//          const blob = Utilities.newBlob(d.content, d.mime_type, d.file_name);
+//          const file = folder.createFile(blob);
+//          return ContentService.createTextOutput(JSON.stringify({
+//            ok: true, file_id: file.getId(), file_url: file.getUrl()
+//          })).setMimeType(ContentService.MimeType.JSON);
+//        }
+//   3. Deploy → New deployment → Web app → Anyone with the link → copy URL
+//   4. Railway → cowork-proxy → Variables → DRIVE_WEBHOOK_URL = <copied URL>
+//
+// Request: POST /compose/runs/:id/stages/:stageIndex/to-drive
+//   Body: { lang?: string, format?: 'json'|'markdown'|'auto' }
+// Response: { ok, file_url?, file_id?, file_name } passthrough from webhook
+app.post('/compose/runs/:id/stages/:stageIndex/to-drive', auth.middleware, async (req, res) => {
+  try {
+    const url = process.env.DRIVE_WEBHOOK_URL;
+    if (!url) {
+      return res.status(400).json({
+        ok: false, error: 'DRIVE_WEBHOOK_URL env var not set',
+        hint: 'In Railway → cowork-proxy → Variables, add DRIVE_WEBHOOK_URL pointing at a Google Apps Script web app (or n8n / Make / Zapier webhook). See server.js comments above this endpoint for the Apps Script template.',
+      });
+    }
+    const run = await composeOrchestrator.getRun(req.params.id);
+    if (!run) return res.status(404).json({ ok: false, error: 'run not found' });
+    const stageIndex = parseInt(req.params.stageIndex, 10);
+    const lang = (req.body && req.body.lang) || null;
+    const stage = (run.stages || []).find(s =>
+      s.stage_index === stageIndex && (lang ? s.lang === lang : s.lang == null));
+    if (!stage) return res.status(404).json({ ok: false, error: `no stage at index=${stageIndex} lang=${lang || 'master'}` });
+    if (!stage.output) return res.status(400).json({ ok: false, error: `stage "${stage.stage_name}" has no output yet (status=${stage.status})` });
+
+    // Choose file format. JSON is the safest default — preserves every
+    // field. Markdown is human-friendly when the stage produces text.
+    const requested = (req.body && req.body.format) || 'auto';
+    const out = stage.output;
+    let format = requested;
+    if (format === 'auto') {
+      // Caption-shaped outputs render nicely as markdown; structured
+      // outputs (slides[], facts_checked[]) belong as JSON.
+      const looksLikeText = (typeof out === 'string') ||
+        (out && typeof out.body_html === 'string') ||
+        (out && typeof out.body_plain === 'string') ||
+        (out && typeof out.caption === 'string' && !Array.isArray(out.slides));
+      format = looksLikeText ? 'markdown' : 'json';
+    }
+    let content, mime, ext;
+    if (format === 'markdown') {
+      const lines = [
+        `# ${stage.stage_name}${stage.lang ? ` · ${stage.lang}` : ''}`,
+        ``,
+        `**Run:** \`${run.id}\``,
+        `**Recipe:** ${run.recipe_id}`,
+        `**Topic:** ${run.topic || '—'}`,
+        `**Agent:** ${stage.agent || stage.model || 'renderer'}`,
+        `**Cost:** $${Number(stage.cost_usd || 0).toFixed(4)}`,
+        `**Completed:** ${stage.completed_at || '—'}`,
+        ``,
+        `---`,
+        ``,
+      ];
+      if (typeof out === 'string') lines.push(out);
+      else if (out.caption) {
+        lines.push(`## Caption`, ``, out.caption, ``);
+        if (Array.isArray(out.hashtags) && out.hashtags.length) {
+          lines.push(`## Hashtags`, ``, out.hashtags.map(h => h.startsWith('#') ? h : `#${h}`).join(' '), ``);
+        }
+      } else if (out.body_html || out.body_plain) {
+        lines.push(out.body_plain || out.body_html);
+      } else {
+        lines.push('```json', JSON.stringify(out, null, 2), '```');
+      }
+      content = lines.join('\n');
+      mime = 'text/markdown';
+      ext = 'md';
+    } else {
+      content = JSON.stringify({
+        run_id: run.id,
+        recipe_id: run.recipe_id,
+        topic: run.topic,
+        stage: stage.stage_name,
+        stage_index: stage.stage_index,
+        lang: stage.lang || null,
+        agent: stage.agent || null,
+        model: stage.model || null,
+        cost_usd: stage.cost_usd || 0,
+        completed_at: stage.completed_at || null,
+        output: out,
+      }, null, 2);
+      mime = 'application/json';
+      ext = 'json';
+    }
+    const safeTopic = (run.topic || run.recipe_id).replace(/[^\w\s-]/g, '').trim().slice(0, 50).replace(/\s+/g, '_');
+    const fileName = `${run.id.slice(0, 8)}__${stage.stage_name}${stage.lang ? '_' + stage.lang : ''}__${safeTopic}.${ext}`;
+
+    const payload = {
+      run_id: run.id,
+      recipe_id: run.recipe_id,
+      topic: run.topic,
+      stage_name: stage.stage_name,
+      stage_index: stage.stage_index,
+      lang: stage.lang || null,
+      agent: stage.agent || null,
+      file_name: fileName,
+      file_format: format,
+      mime_type: mime,
+      content,
+      sent_at: new Date().toISOString(),
+    };
+
+    const fetchFn = (typeof fetch === 'function') ? fetch : require('node-fetch');
+    const r = await fetchFn(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      redirect: 'follow',
+    });
+    const text = await r.text();
+    let parsed = {}; try { parsed = JSON.parse(text); } catch (_) { parsed = { raw: text.slice(0, 500) }; }
+    if (!r.ok) {
+      return res.status(502).json({ ok: false, error: `Drive webhook returned ${r.status}`, response: parsed });
+    }
+    log(`compose.to-drive id=${run.id} stage=${stage.stage_name} lang=${stage.lang || 'master'} format=${format} bytes=${content.length}`);
+    res.json({ ok: true, file_name: fileName, format, ...parsed });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // M30 · Publish a finished render to the n8n publish webhook.
 //   Body: { lang }
 //   Env:  N8N_PUBLISH_WEBHOOK  — full URL to n8n's webhook node
