@@ -8810,6 +8810,187 @@ function coRenderStageOutput(stage, expandedByDefault) {
         const summary = (out.subject || out.title || out.body_md || out.body_plain || out.caption || '').toString().slice(0, 160);
         return `<div class="mt-2 text-sm">${escapeHtml(summary)}${summary.length === 160 ? '…' : ''}</div>`;
       }
+      // ── M122 · IG-v2 stage renderers ─────────────────────────────────
+      // Each stage gets a typography-first, readable card so the founder
+      // can quickly scan the run history (or review at a non-gated stage)
+      // without falling through to raw-JSON mode.
+      case 'kb-dossier': {
+        const facts    = Array.isArray(out.key_facts) ? out.key_facts : [];
+        const avoid    = Array.isArray(out.must_avoid) ? out.must_avoid : [];
+        const sources  = Array.isArray(out.named_sources_used) ? out.named_sources_used : [];
+        const ids      = Array.isArray(out.kb_entry_ids_used) ? out.kb_entry_ids_used : [];
+        return `
+          <div class="mt-3" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;" data-auto-rtl>
+            <div>
+              <div class="text-xs uppercase tracking-wider mb-2" style="color:#0c4a6e;font-weight:600;">📚 ${facts.length} Key facts</div>
+              ${facts.length ? `<ul class="text-sm" style="line-height:1.55;list-style-type:disc;padding-left:20px;color:#1e293b;">${facts.map(f => `<li style="margin-bottom:4px;">${escapeHtml(f)}</li>`).join('')}</ul>` : '<div class="text-xs text-slate-400 italic">none</div>'}
+            </div>
+            <div>
+              <div class="text-xs uppercase tracking-wider mb-2" style="color:#991b1b;font-weight:600;">⚠ ${avoid.length} Must avoid</div>
+              ${avoid.length ? `<ul class="text-sm" style="line-height:1.55;list-style-type:disc;padding-left:20px;color:#7f1d1d;">${avoid.map(f => `<li style="margin-bottom:4px;">${escapeHtml(f)}</li>`).join('')}</ul>` : '<div class="text-xs text-slate-400 italic">none</div>'}
+            </div>
+          </div>
+          ${out.regulatory_context ? `
+            <div class="mt-3">
+              <div class="text-xs uppercase tracking-wider mb-1" style="color:#475569;font-weight:600;">⚖ Regulatory context</div>
+              <div class="text-sm" style="color:#334155;line-height:1.55;">${escapeHtml(out.regulatory_context)}</div>
+            </div>` : ''}
+          ${sources.length ? `
+            <div class="mt-3 flex items-center gap-2 flex-wrap">
+              <span class="text-xs uppercase tracking-wider" style="color:#475569;font-weight:600;">🏛 Sources:</span>
+              ${sources.map(s => `<span class="pill" style="background:#dbeafe;color:#1e40af;font-size:11px;">${escapeHtml(s)}</span>`).join('')}
+            </div>` : ''}
+          ${ids.length ? `
+            <div class="text-xs mt-2" style="color:#94a3b8;">
+              ${ids.length} KB entries used · <span class="mono">${ids.slice(0, 3).map(x => x.slice(0, 8)).join(', ')}${ids.length > 3 ? `, +${ids.length - 3} more` : ''}</span>
+            </div>` : ''}
+        `;
+      }
+      case 'post-plan': {
+        const slides = Array.isArray(out.slides) ? out.slides : [];
+        const tags   = Array.isArray(out.hashtags) ? out.hashtags : [];
+        const emojis = Array.isArray(out.emojis_used) ? out.emojis_used : [];
+        const wc = (out.caption || '').split(/\s+/).filter(Boolean).length;
+        return `
+          ${out.caption ? `
+            <div class="mt-3" style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:12px;" data-auto-rtl>
+              <div class="text-xs uppercase tracking-wider mb-2 flex items-center gap-2 flex-wrap" style="color:#475569;font-weight:600;">
+                📝 Caption
+                <span class="text-xs" style="color:#94a3b8;font-weight:400;">${wc} words${wc < 38 ? ' · ✗ under target' : wc > 75 ? ' · ⚠ over target' : ' · ✓ in target'}</span>
+                ${emojis.length ? `<span style="font-size:14px;letter-spacing:2px;">${emojis.map(e => escapeHtml(e)).join('')}</span>` : ''}
+              </div>
+              <div class="text-sm" style="color:#0f172a;line-height:1.65;white-space:pre-wrap;">${escapeHtml(out.caption)}</div>
+            </div>` : ''}
+          ${tags.length ? `
+            <div class="mt-2" style="display:flex;flex-wrap:wrap;gap:4px;">
+              ${tags.map(t => `<span class="pill" style="background:#0c4a6e;color:#fff;font-size:11px;">${escapeHtml(t)}</span>`).join('')}
+            </div>` : ''}
+          ${slides.length ? `
+            <div class="text-xs uppercase tracking-wider mt-3 mb-2" style="color:#475569;font-weight:600;">🎬 ${slides.length} slides</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;" data-auto-rtl>
+              ${slides.map((sl, i) => `
+                <div style="background:#f8fafc;border:1px solid #e2e8f0;padding:10px;border-radius:6px;">
+                  <div class="flex items-center gap-2 flex-wrap mb-2">
+                    <strong style="font-size:12px;color:#0c4a6e;">${sl.n || i+1}</strong>
+                    ${sl.role ? `<span class="pill" style="background:#dbeafe;color:#1e40af;font-size:10px;">${escapeHtml(sl.role)}</span>` : ''}
+                    ${sl.country_pill ? `<span class="pill" style="background:#dcfce7;color:#166534;font-size:10px;">${escapeHtml(sl.country_pill)}</span>` : ''}
+                  </div>
+                  ${sl.headline ? `<div style="font-weight:600;font-size:13px;line-height:1.35;color:#0f172a;">${escapeHtml(sl.headline)}</div>` : ''}
+                  ${sl.subheading ? `<div style="font-size:12px;color:#475569;margin-top:3px;">${escapeHtml(sl.subheading)}</div>` : ''}
+                  ${Array.isArray(sl.bullets) && sl.bullets.length ? `
+                    <ul class="text-xs mt-2" style="color:#1e293b;list-style-type:disc;padding-left:14px;">${sl.bullets.map(b => `<li>${escapeHtml(b)}</li>`).join('')}</ul>` : ''}
+                  ${sl.key_number ? `<div style="margin-top:6px;"><span class="mono" style="background:#0c4a6e;color:#f8fafc;padding:2px 8px;border-radius:4px;font-weight:600;font-size:13px;">${escapeHtml(sl.key_number)}</span></div>` : ''}
+                </div>
+              `).join('')}
+            </div>` : ''}
+          ${out.partition_compliance ? `<div class="text-xs mt-3 italic" style="color:#64748b;">📐 ${escapeHtml(out.partition_compliance)}</div>` : ''}
+        `;
+      }
+      case 'verify-kb': {
+        const facts = Array.isArray(out.facts_checked) ? out.facts_checked : [];
+        const corrections = Array.isArray(out.corrections) ? out.corrections : [];
+        const supported    = facts.filter(f => f.verdict === 'supported').length;
+        const unsupported  = facts.filter(f => f.verdict === 'unsupported').length;
+        const contradicted = facts.filter(f => f.verdict === 'contradicted').length;
+        const verdictColor = out.passed ? '#15803d' : '#dc2626';
+        const verdictBg    = out.passed ? '#dcfce7' : '#fee2e2';
+        return `
+          <div class="mt-3 flex items-center gap-3 flex-wrap">
+            <span style="background:${verdictBg};color:${verdictColor};padding:4px 12px;border-radius:6px;font-weight:600;font-size:13px;letter-spacing:0.04em;">
+              ${out.passed ? '✓ PASSED' : '✗ NOT PASSED'}
+            </span>
+            <span class="text-sm" style="color:#15803d;">${supported} supported</span>
+            ${unsupported  ? `<span class="text-sm" style="color:#854d0e;">${unsupported} unsupported</span>` : ''}
+            ${contradicted ? `<span class="text-sm" style="color:#991b1b;">${contradicted} contradicted</span>` : ''}
+            ${typeof out.overall_confidence === 'number' ? `<span class="text-xs" style="color:#64748b;">confidence ${(out.overall_confidence*100).toFixed(0)}%</span>` : ''}
+          </div>
+          ${corrections.length ? `
+            <div class="mt-3" style="background:#fef3c7;border:1px solid #fde68a;border-radius:6px;padding:10px;">
+              <div class="text-xs uppercase tracking-wider mb-2" style="color:#854d0e;font-weight:600;">🔧 ${corrections.length} corrections</div>
+              ${corrections.slice(0, 8).map(c => `
+                <div class="text-xs mb-2" style="border-bottom:1px dashed #fde68a;padding-bottom:6px;">
+                  <strong style="color:#451a03;">${escapeHtml(c.location || '?')}</strong>
+                  <div style="color:#7f1d1d;margin-top:2px;">${escapeHtml(c.problem || '')}</div>
+                  <div style="color:#15803d;margin-top:2px;"><strong>Fix:</strong> ${escapeHtml(c.suggested_fix || '')}</div>
+                </div>
+              `).join('')}
+            </div>` : ''}
+          ${facts.length ? `
+            <details class="mt-3">
+              <summary class="text-xs cursor-pointer" style="color:#475569;">📋 Show all ${facts.length} fact-checks</summary>
+              <div class="mt-2" style="max-height:300px;overflow-y:auto;background:#f8fafc;border:1px solid #e2e8f0;padding:8px;border-radius:6px;">
+                ${facts.map(f => {
+                  const vc = f.verdict === 'supported' ? '#dcfce7,#166534' : f.verdict === 'contradicted' ? '#fee2e2,#991b1b' : '#fef3c7,#854d0e';
+                  const [bg, fg] = vc.split(',');
+                  return `
+                    <div class="text-xs mb-2" style="padding-bottom:4px;border-bottom:1px dashed #e2e8f0;">
+                      <span class="pill" style="background:${bg};color:${fg};font-size:9px;">${escapeHtml(f.verdict || '?')}</span>
+                      <strong style="margin-left:4px;color:#0f172a;">${escapeHtml(f.location || '?')}</strong>
+                      <div style="margin-top:2px;color:#475569;">"${escapeHtml((f.claim || '').slice(0, 200))}"</div>
+                      ${f.evidence ? `<div style="color:#94a3b8;margin-top:2px;font-size:11px;">↳ ${escapeHtml(f.evidence.slice(0, 200))}</div>` : ''}
+                    </div>`;
+                }).join('')}
+              </div>
+            </details>` : ''}
+        `;
+      }
+      case 'design-v2': {
+        const slides = Array.isArray(out.slides) ? out.slides : [];
+        const templateColor = (t) => ({
+          'type-led':'#0c4a6e','data-card':'#00a69c','photo-hero':'#7c2d12',
+          'quote-card':'#854d0e','split-frame':'#7c3aed','document-mock':'#475569',
+          'flag-overlay':'#dc2626','cta-card':'#15803d',
+        })[t] || '#64748b';
+        return `
+          ${out.narrative_arc ? `
+            <div class="mt-3" style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:10px;" data-auto-rtl>
+              <div class="text-xs uppercase tracking-wider mb-1" style="color:#854d0e;font-weight:600;">📚 Narrative arc</div>
+              <div class="text-sm" style="color:#451a03;line-height:1.55;">${escapeHtml(out.narrative_arc)}</div>
+            </div>` : ''}
+          ${slides.length ? `
+            <div class="text-xs uppercase tracking-wider mt-3 mb-2" style="color:#475569;font-weight:600;">🎨 ${slides.length} slide design${slides.length === 1 ? '' : 's'}</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px;">
+              ${slides.map((sl, i) => `
+                <div style="background:#fff;border:1px solid #e2e8f0;padding:10px;border-radius:6px;">
+                  <div class="flex items-center gap-2 flex-wrap mb-2">
+                    <strong style="font-size:12px;">Slide ${sl.n || i+1}</strong>
+                    <span class="pill" style="background:${templateColor(sl.template)};color:#fff;font-size:10px;">${escapeHtml(sl.template || '?')}</span>
+                    <span class="pill" style="background:${sl.image_source === 'unsplash' ? '#dbeafe' : sl.image_source === 'mixed' ? '#fef3c7' : '#ede9fe'};color:${sl.image_source === 'unsplash' ? '#1e40af' : sl.image_source === 'mixed' ? '#854d0e' : '#5b21b6'};font-size:10px;">${escapeHtml(sl.image_source || 'generated')}</span>
+                  </div>
+                  ${sl.typography ? `
+                    <div class="text-xs mb-1" style="color:#475569;">
+                      <strong>Type:</strong> ${escapeHtml(sl.typography.heading_font || '')} ${escapeHtml(sl.typography.heading_size || '')} / ${escapeHtml(sl.typography.body_font || '')} ${escapeHtml(sl.typography.body_size || '')}
+                    </div>` : ''}
+                  ${sl.palette ? `
+                    <div class="text-xs mb-1" style="color:#475569;">
+                      <strong>Palette:</strong> ${Object.entries(sl.palette).map(([k, hex]) => `<span title="${escapeHtml(k)}: ${escapeHtml(hex)}" style="display:inline-block;width:14px;height:14px;border-radius:2px;background:${escapeHtml(hex)};border:1px solid rgba(0,0,0,0.1);vertical-align:middle;margin-right:2px;"></span>`).join('')}
+                    </div>` : ''}
+                  ${sl.unsplash_query ? `
+                    <div class="text-xs" style="color:#1e40af;">📷 <em>${escapeHtml(sl.unsplash_query)}</em></div>` : ''}
+                </div>
+              `).join('')}
+            </div>` : ''}
+        `;
+      }
+      // M122 · IG-v2 image renderer (image-design-v2) — its output has
+      // _carousel:true and slides[]. Already covered by the broader image
+      // preview component (_coRenderImageState), so here we just print
+      // a one-line summary.
+      case 'image': {
+        const slides = Array.isArray(out.slides) ? out.slides : [];
+        const ok = slides.filter(s => s.url).length;
+        const fail = slides.filter(s => s.error).length;
+        const cost = Number(out.cost_usd || 0).toFixed(2);
+        return `
+          <div class="mt-2 flex items-center gap-3 flex-wrap text-sm">
+            <span style="color:#15803d;">✓ ${ok} rendered</span>
+            ${fail ? `<span style="color:#dc2626;">✗ ${fail} failed</span>` : ''}
+            <span style="color:#64748b;">total $${cost}</span>
+            ${out._carousel ? `<span class="pill" style="background:#ede9fe;color:#5b21b6;font-size:11px;">CAROUSEL</span>` : ''}
+          </div>
+          <div class="text-xs mt-1" style="color:#94a3b8;">Per-slide previews shown in the carousel grid below.</div>
+        `;
+      }
       default:
         return `<pre class="text-xs mono mt-2 p-2 rounded" style="background:#f8fafc;max-height:200px;overflow:auto;white-space:pre-wrap;">${escapeHtml(JSON.stringify(out, null, 2))}</pre>`;
     }
@@ -9206,10 +9387,10 @@ function _coRenderImageState(stage) {
 // what the post will look like on the actual platform — phone screen for
 // mobile-first apps (Telegram/IG), desktop card for FB/X, inbox for Email,
 // browser preview for SEO.
-function _coRenderPlatformMockup({ run, recipeId, lang, out, coverUrl }) {
+function _coRenderPlatformMockup({ run, recipeId, lang, out, coverUrl, carouselSlides = [] }) {
   switch (recipeId) {
     case 'telegram':   return _mockupTelegram(out, coverUrl, run);
-    case 'ig':         return _mockupInstagram(out, coverUrl, run);
+    case 'ig':         return _mockupInstagram(out, coverUrl, run, carouselSlides);
     case 'facebook':   return _mockupFacebook(out, coverUrl, run);
     case 'x-thread':   return _mockupXThread(out, coverUrl, run);
     case 'email':      return _mockupEmail(out, coverUrl, run, lang);
@@ -9243,8 +9424,47 @@ function _mockupTelegram(out, coverUrl, run) {
   `;
 }
 
-function _mockupInstagram(out, coverUrl, run) {
+function _mockupInstagram(out, coverUrl, run, carouselSlides) {
   const handle = 'rxapply_official';
+  // M122 · IG-style carousel preview when multiple slides exist. Real IG
+  // posts allow swiping through up to 10 images; we show a working
+  // swipeable preview with: 1/N counter top-right · arrow buttons · dot
+  // indicators below the photo · single shared caption + hashtags below.
+  const slides = Array.isArray(carouselSlides) ? carouselSlides : [];
+  const isCarousel = slides.length > 1;
+  const captionText = out.caption || (out.fields && out.fields.caption) || '';
+  const tags = out.hashtags || (out.fields && out.fields.hashtags) || [];
+
+  // Unique id so multiple mockups on the same page don't collide.
+  const id = 'igcar-' + Math.random().toString(36).slice(2, 8);
+
+  let photoBlock;
+  if (isCarousel) {
+    photoBlock = `
+      <div class="co-mock-ig-carousel" id="${id}-track" style="position:relative;width:100%;aspect-ratio:1/1;background:#000;overflow:hidden;">
+        ${slides.map((sl, i) => `
+          <img src="${escapeHtml(sl.url)}" alt="slide ${i+1}"
+               data-idx="${i}"
+               style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
+                      opacity:${i === 0 ? '1' : '0'};transition:opacity 200ms ease;
+                      ${i === 0 ? '' : 'pointer-events:none;'}" />
+        `).join('')}
+        <!-- Slide counter top-right (real IG convention) -->
+        <div id="${id}-count" style="position:absolute;top:10px;right:10px;background:rgba(0,0,0,0.55);color:#fff;font-size:12px;font-weight:600;padding:4px 10px;border-radius:14px;backdrop-filter:blur(4px);">1/${slides.length}</div>
+        <!-- Prev / next arrow buttons -->
+        <button onclick="igCarouselNav('${id}', -1)" style="position:absolute;left:6px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.85);border:none;width:28px;height:28px;border-radius:50%;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#0f172a;">‹</button>
+        <button onclick="igCarouselNav('${id}',  1)" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.85);border:none;width:28px;height:28px;border-radius:50%;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#0f172a;">›</button>
+      </div>
+      <!-- Dot indicators below photo (also real IG convention) -->
+      <div id="${id}-dots" style="display:flex;justify-content:center;gap:5px;padding:7px 0 3px;">
+        ${slides.map((_, i) => `<span data-dot="${i}" style="width:6px;height:6px;border-radius:50%;background:${i === 0 ? '#0095f6' : '#c7c7c7'};transition:background 150ms ease;"></span>`).join('')}
+      </div>`;
+  } else {
+    photoBlock = coverUrl
+      ? `<img src="${escapeHtml(coverUrl)}" alt="" class="co-mock-ig-photo" />`
+      : `<div class="co-mock-ig-photo" style="background:#e2e8f0;display:grid;place-items:center;color:#64748b;font-size:11px;">no cover yet</div>`;
+  }
+
   return `
     <div class="co-mockup-wrap">
       <div class="co-mock-phone">
@@ -9253,19 +9473,43 @@ function _mockupInstagram(out, coverUrl, run) {
           <div style="flex:1;font-weight:600;font-size:13px;">${escapeHtml(handle)}</div>
           <div style="color:#888;font-size:18px;">⋯</div>
         </div>
-        ${coverUrl
-          ? `<img src="${escapeHtml(coverUrl)}" alt="" class="co-mock-ig-photo" />`
-          : `<div class="co-mock-ig-photo" style="background:#e2e8f0;display:grid;place-items:center;color:#64748b;font-size:11px;">no cover yet</div>`}
+        ${photoBlock}
         <div class="co-mock-ig-actions"><span>♡</span><span>💬</span><span>↗</span><span style="margin-left:auto;">🔖</span></div>
         <div class="co-mock-ig-likes">2,148 likes</div>
-        <div class="co-mock-ig-caption">
-          <span style="font-weight:600;">${escapeHtml(handle)}</span> ${escapeHtml(out.caption || '')}
+        <div class="co-mock-ig-caption" data-auto-rtl>
+          <span style="font-weight:600;">${escapeHtml(handle)}</span> ${escapeHtml(captionText)}
         </div>
-        <div class="co-mock-ig-hashtags">${(out.hashtags || []).join(' ')}</div>
+        <div class="co-mock-ig-hashtags">${(tags || []).map(t => escapeHtml(t)).join(' ')}</div>
         <div class="co-mock-ig-time">2 minutes ago</div>
       </div>
     </div>
   `;
+}
+
+// M122 · Carousel navigation. Reads current index from the dot indicator
+// strip, applies bounds, and fades the active slide while updating the
+// counter pill + dot states.
+function igCarouselNav(id, dir) {
+  const track = document.getElementById(id + '-track');
+  if (!track) return;
+  const imgs = track.querySelectorAll('img[data-idx]');
+  if (!imgs.length) return;
+  const dots = document.querySelectorAll(`#${id}-dots [data-dot]`);
+  let current = 0;
+  imgs.forEach((img, i) => { if (img.style.opacity === '1') current = i; });
+  let next = current + dir;
+  if (next < 0) next = 0;
+  if (next >= imgs.length) next = imgs.length - 1;
+  if (next === current) return;
+  imgs.forEach((img, i) => {
+    img.style.opacity = (i === next) ? '1' : '0';
+    img.style.pointerEvents = (i === next) ? 'auto' : 'none';
+  });
+  dots.forEach((d, i) => {
+    d.style.background = (i === next) ? '#0095f6' : '#c7c7c7';
+  });
+  const counter = document.getElementById(id + '-count');
+  if (counter) counter.textContent = `${next + 1}/${imgs.length}`;
 }
 
 function _mockupFacebook(out, coverUrl, run) {
@@ -9388,11 +9632,16 @@ function coShowPreviewLang(lang, btn) {
   // can carry the visual artifact. Prefer canva-render when both exist.
   const imageStage = (run.stages || []).find(s => s.stage_name === 'canva-render')
                   || (run.stages || []).find(s => s.stage_name === 'image');
-  const coverUrl = imageStage && imageStage.output && imageStage.output.url;
+  const coverUrl = imageStage && imageStage.output && (imageStage.output.url || imageStage.output.first_url);
+  // M122 · Pass through the per-slide image URLs for carousels so the IG
+  // mockup can render the actual swipeable preview instead of just the cover.
+  const carouselSlides = imageStage && imageStage.output && imageStage.output._carousel && Array.isArray(imageStage.output.slides)
+    ? imageStage.output.slides.filter(s => s && s.url)
+    : [];
   const imageDebug = _coRenderImageState(imageStage);
 
   // Build the platform mockup (M34) — realistic shell per format.
-  const mockupHtml = _coRenderPlatformMockup({ run, recipeId, lang, out, coverUrl });
+  const mockupHtml = _coRenderPlatformMockup({ run, recipeId, lang, out, coverUrl, carouselSlides });
 
   // The "raw" preview (existing format-specific HTML) stays available
   // collapsed, so the founder can still inspect the unstyled output.
