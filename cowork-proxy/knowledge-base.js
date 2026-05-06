@@ -267,6 +267,203 @@ async function bulkUpdate({ filter = {}, patch = {}, dryRun = true, updatedBy = 
   }
 }
 
+// ════════════════════════════════════════════════════════════════════
+// M118 · Export — partial or full, filtered, in multiple formats.
+// Mirror of bulkUpdate's filter shape + a couple of extras (importance
+// threshold, updated-window). Formats: 'json' (round-trip with the
+// upload-json shape), 'csv' (spreadsheet), 'md' (hierarchical doc).
+// Hard limit 10000 rows per export.
+// ════════════════════════════════════════════════════════════════════
+async function exportEntries({ filter = {}, format = 'json', limit = 10000 } = {}) {
+  limit = Math.min(Math.max(parseInt(limit, 10) || 10000, 1), 10000);
+  const conds = [];
+  if (filter.country)  conds.push(`country = ${q(_normCountry(filter.country))}`);
+  if (filter.topic)    conds.push(`(topic = ${q(String(filter.topic).toLowerCase())} OR category = ${q(String(filter.topic).toLowerCase())})`);
+  if (filter.subtopic) conds.push(`subtopic = ${q(String(filter.subtopic).toLowerCase())}`);
+  // status: accepts a single value or comma-separated list
+  if (filter.status) {
+    const arr = String(filter.status).split(',').map(s => s.trim()).filter(s => VALID_STATUS.has(s));
+    if (arr.length === 1) conds.push(`status = ${q(arr[0])}`);
+    else if (arr.length > 1) conds.push(`status IN (${arr.map(s => q(s)).join(',')})`);
+  } else {
+    // sensible default: don't export superseded/rejected unless caller asks
+    conds.push(`status IN ('active','draft','stale')`);
+  }
+  if (filter.query) {
+    const safe = String(filter.query).replace(/'/g, "''").slice(0, 200);
+    conds.push(`(title ILIKE '%${safe}%' OR content ILIKE '%${safe}%')`);
+  }
+  if (filter.min_importance) {
+    conds.push(`importance >= ${parseInt(filter.min_importance, 10) || 1}`);
+  }
+  if (filter.created_after)  conds.push(`created_at >= '${String(filter.created_after).replace(/'/g, "''").slice(0, 30)}'::timestamptz`);
+  if (filter.created_before) conds.push(`created_at <= '${String(filter.created_before).replace(/'/g, "''").slice(0, 30)}'::timestamptz`);
+  if (filter.updated_after)  conds.push(`updated_at >= '${String(filter.updated_after).replace(/'/g, "''").slice(0, 30)}'::timestamptz`);
+  if (filter.updated_before) conds.push(`updated_at <= '${String(filter.updated_before).replace(/'/g, "''").slice(0, 30)}'::timestamptz`);
+  if (Array.isArray(filter.ids) && filter.ids.length) {
+    conds.push(`id IN (${filter.ids.map(s => q(s)).join(',')})`);
+  }
+  const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+
+  const sql = `
+    SELECT COALESCE(json_agg(row_to_json(k) ORDER BY k.country, k.topic, k.subtopic NULLS FIRST, k.importance DESC, k.title), '[]'::json) FROM (
+      SELECT id::text, country, category, topic, subtopic, title, content, facts, source, source_type,
+             status, verified_at::text, verified_by, tags, importance,
+             created_at::text, updated_at::text
+        FROM knowledge_base ${where}
+       ORDER BY country, topic, subtopic NULLS FIRST, importance DESC, title
+       LIMIT ${limit}
+    ) k;`;
+  let rows;
+  try { rows = JSON.parse((await queryValue(sql)) || '[]'); }
+  catch (e) { return { ok: false, error: e.message.slice(0, 300) }; }
+
+  const fmt = String(format || 'json').toLowerCase();
+  let body, contentType, ext;
+  if (fmt === 'csv') {
+    body = _serializeCsv(rows);
+    contentType = 'text/csv; charset=utf-8';
+    ext = 'csv';
+  } else if (fmt === 'md' || fmt === 'markdown') {
+    body = _serializeMarkdown(rows, filter);
+    contentType = 'text/markdown; charset=utf-8';
+    ext = 'md';
+  } else {
+    body = _serializeJson(rows, filter);
+    contentType = 'application/json; charset=utf-8';
+    ext = 'json';
+  }
+  return {
+    ok: true,
+    count: rows.length,
+    truncated: rows.length === limit,
+    body, contentType, ext,
+  };
+}
+
+// JSON: round-trip shape compatible with /knowledge/upload-json. Keeps
+// id + provenance fields so an export → external edit → re-import
+// workflow can match rows back if needed.
+function _serializeJson(rows, filter) {
+  return JSON.stringify({
+    rxapply_kb_format_version: 1,
+    exported_at: new Date().toISOString(),
+    filter_used: filter,
+    count: rows.length,
+    entries: rows.map(r => ({
+      id:           r.id,
+      country:      r.country,
+      topic:        r.topic,
+      subtopic:     r.subtopic,
+      category:     r.category,
+      title:        r.title,
+      content:      r.content,
+      facts:        r.facts || {},
+      source:       r.source,
+      source_type:  r.source_type,
+      tags:         r.tags || [],
+      importance:   r.importance,
+      status:       r.status,
+      verified_at:  r.verified_at,
+      verified_by:  r.verified_by,
+      created_at:   r.created_at,
+      updated_at:   r.updated_at,
+    })),
+  }, null, 2);
+}
+
+// CSV: RFC 4180-ish. Quotes when needed, doubles internal quotes.
+function _serializeCsv(rows) {
+  const cols = ['id','country','topic','subtopic','title','content','facts','tags','source','source_type','status','importance','verified_at','verified_by','created_at','updated_at'];
+  const escape = (v) => {
+    if (v == null) return '';
+    let s = (typeof v === 'object') ? JSON.stringify(v) : String(v);
+    // Always quote — simpler + safer for content with commas/newlines.
+    return '"' + s.replace(/"/g, '""') + '"';
+  };
+  const lines = [cols.join(',')];
+  for (const r of rows) {
+    lines.push([
+      escape(r.id), escape(r.country), escape(r.topic), escape(r.subtopic),
+      escape(r.title), escape(r.content),
+      escape(r.facts || {}),
+      escape(Array.isArray(r.tags) ? r.tags.join(';') : ''),
+      escape(r.source), escape(r.source_type),
+      escape(r.status), escape(r.importance),
+      escape(r.verified_at), escape(r.verified_by),
+      escape(r.created_at), escape(r.updated_at),
+    ].join(','));
+  }
+  return lines.join('\n');
+}
+
+// Markdown: human-readable, hierarchical. Grouped country → topic →
+// subtopic. Each entry as a sub-heading + prose + facts table + tags.
+function _serializeMarkdown(rows, filter) {
+  const out = [];
+  out.push(`# RxApply Knowledge Base Export`);
+  out.push('');
+  out.push(`> Exported ${new Date().toISOString().replace('T', ' ').slice(0, 16)} UTC · ${rows.length} ${rows.length === 1 ? 'entry' : 'entries'}`);
+  if (filter && Object.keys(filter).length) {
+    const summ = Object.entries(filter).filter(([_, v]) => v != null && v !== '').map(([k, v]) =>
+      `\`${k}=${Array.isArray(v) ? v.length + ' ids' : String(v).slice(0, 60)}\``).join(' · ');
+    if (summ) out.push(`> Filter: ${summ}`);
+  }
+  out.push('');
+
+  // Group: country → topic → subtopic → entries
+  const grouped = {};
+  for (const r of rows) {
+    const c = r.country || 'GLOBAL';
+    const t = r.topic   || r.category || 'other';
+    const s = r.subtopic || '(no subtopic)';
+    grouped[c] = grouped[c] || {};
+    grouped[c][t] = grouped[c][t] || {};
+    grouped[c][t][s] = grouped[c][t][s] || [];
+    grouped[c][t][s].push(r);
+  }
+  const countries = Object.keys(grouped).sort();
+  for (const cnt of countries) {
+    out.push(`## ${cnt}`);
+    out.push('');
+    const topics = Object.keys(grouped[cnt]).sort();
+    for (const top of topics) {
+      out.push(`### ${top}`);
+      out.push('');
+      const subs = Object.keys(grouped[cnt][top]).sort();
+      for (const sub of subs) {
+        if (sub !== '(no subtopic)') {
+          out.push(`#### ${sub}`);
+          out.push('');
+        }
+        for (const r of grouped[cnt][top][sub]) {
+          out.push(`**${r.title}**` + (r.importance >= 4 ? ` ★${r.importance}` : ''));
+          out.push('');
+          out.push(r.content || '');
+          out.push('');
+          if (r.facts && Object.keys(r.facts).length) {
+            const factLines = Object.entries(r.facts).map(([k, v]) => `- \`${k}\`: ${typeof v === 'object' ? JSON.stringify(v) : v}`);
+            out.push(factLines.join('\n'));
+            out.push('');
+          }
+          const meta = [];
+          if (r.tags && r.tags.length)  meta.push(`tags: ${r.tags.map(x => `\`${x}\``).join(' ')}`);
+          if (r.source)                 meta.push(`source: ${r.source}`);
+          if (r.status && r.status !== 'active') meta.push(`status: \`${r.status}\``);
+          if (r.verified_at)            meta.push(`verified: ${r.verified_at.slice(0, 10)} by ${r.verified_by || '?'}`);
+          if (meta.length) {
+            out.push('*' + meta.join(' · ') + '*');
+            out.push('');
+          }
+          out.push('---');
+          out.push('');
+        }
+      }
+    }
+  }
+  return out.join('\n');
+}
+
 async function embeddingsStatus() {
   const json = await queryValue(`
     SELECT json_build_object(
@@ -862,8 +1059,8 @@ module.exports = {
   tree, topicsList, topicsAdd, topicsUpdate, topicsRemove, subtopicSuggestions,
   // M106 · embeddings
   embedRowAsync, backfillEmbeddings, embeddingsStatus,
-  // M107 · versioning · M108 · bulk re-tag
-  history, restore, bulkUpdate,
+  // M107 · versioning · M108 · bulk re-tag · M118 · export
+  history, restore, bulkUpdate, exportEntries,
   VALID_CATEGORIES: Array.from(VALID_CATEGORIES),
   VALID_STATUS: Array.from(VALID_STATUS),
 };

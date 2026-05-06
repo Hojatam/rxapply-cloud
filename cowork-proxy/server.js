@@ -2275,6 +2275,50 @@ app.get('/kb-export/json-prompt-guide', (req, res) => {
   res.redirect(307, '/knowledge/json-prompt-guide');
 });
 
+// ── M118 · KB export ──────────────────────────────────────────────────
+// GET /knowledge/export?format=json|csv|md
+//   &country=&topic=&subtopic=&status=&query=&min_importance=
+//   &created_after=&created_before=&updated_after=&updated_before=&ids=
+// Returns the export as a downloadable file. Always auth-gated.
+app.get('/knowledge/export', auth.middleware, async (req, res) => {
+  try {
+    const q = req.query || {};
+    const filter = {};
+    if (q.country)         filter.country         = q.country;
+    if (q.topic)           filter.topic           = q.topic;
+    if (q.subtopic)        filter.subtopic        = q.subtopic;
+    if (q.status)          filter.status          = q.status;
+    if (q.query)           filter.query           = q.query;
+    if (q.min_importance)  filter.min_importance  = q.min_importance;
+    if (q.created_after)   filter.created_after   = q.created_after;
+    if (q.created_before)  filter.created_before  = q.created_before;
+    if (q.updated_after)   filter.updated_after   = q.updated_after;
+    if (q.updated_before)  filter.updated_before  = q.updated_before;
+    if (q.ids) filter.ids = String(q.ids).split(',').map(s => s.trim()).filter(Boolean);
+
+    const r = await KB.exportEntries({
+      filter,
+      format: q.format || 'json',
+      limit:  parseInt(q.limit, 10) || 10000,
+    });
+    if (!r.ok) return res.status(400).json(r);
+
+    // Compose a descriptive filename so multiple exports stay distinct.
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const filterTag = [
+      filter.country, filter.topic, filter.subtopic,
+    ].filter(Boolean).join('-') || 'all';
+    const filename = `rxapply-kb-${filterTag}-${ts}.${r.ext}`;
+
+    res.setHeader('Content-Type', r.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('X-RxApply-Export-Count', String(r.count));
+    if (r.truncated) res.setHeader('X-RxApply-Export-Truncated', 'true');
+    log(`kb.export format=${r.ext} count=${r.count}${r.truncated ? ' [TRUNCATED]' : ''} filter=${JSON.stringify(filter)}`);
+    return res.end(r.body);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 app.post('/knowledge/upload-json', auth.middleware, async (req, res) => {
   try {
     const body = req.body || {};

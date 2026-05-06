@@ -12419,6 +12419,7 @@ async function renderKnowledge() {
               <br>• <strong>Paste &amp; parse</strong> — drop a chunk of regulator text; Daneshyar splits it into drafts.
               <br>• <strong>Upload file</strong> — PDF/DOCX/PPTX/HTML/MD via Daneshyar.
               <br>• <strong>📦 Upload JSON</strong> (M110) — use ChatGPT/Gemini/Claude.ai to extract facts into JSON, then upload that JSON straight in. Bypasses Daneshyar. Two helper downloads on the green card: <strong>📄 template JSON</strong> (the schema) and <strong>🤖 AI prompt guide</strong> (paste into your AI of choice along with source material). The <strong>📚 Import history</strong> button lists every past upload with counts and a one-click <strong>↶ Undo</strong> per batch (soft = mark rejected; hard = permanent delete).
+              <br>• <strong>📤 Export</strong> (M118) — download a filtered slice of the KB as JSON / CSV / Markdown. Filters: country / topic / subtopic / status / min importance / search / date windows (created OR updated). JSON round-trips through <strong>📦 Upload JSON</strong> so export → external edit → re-import works as a workflow. Hard cap 10,000 entries per export.
             </div>
           </div>
 
@@ -12596,6 +12597,7 @@ async function renderKnowledge() {
           <div class="flex items-center justify-between mb-2">
             <h3 class="font-semibold text-sm" id="kb-scope-label">All entries</h3>
             <div class="flex gap-2">
+              <button class="btn btn-ghost btn-xs" title="Export entries matching a filter (JSON / CSV / Markdown)" onclick="kbExportModal()">📤 Export</button>
               <button class="btn btn-ghost btn-xs" title="Bulk move/re-tag entries matching the current scope" onclick="kbBulkRetagModal()">🏷 Bulk re-tag</button>
               <button class="btn btn-primary btn-xs" onclick="kbNewModal()">+ New entry</button>
             </div>
@@ -13052,6 +13054,162 @@ async function kbRestore(currentId, versionId) {
     document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
     await Promise.all([loadKB(), kbTreeReload(), kbEmbedReload()]);
   } catch (e) { alert('Error: ' + e.message); }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// M118 · Export modal — partial or full KB export in JSON / CSV /
+// Markdown. Pre-fills filter from the currently selected tree node.
+// Auth-gated server endpoint, so we fetch via authFetch and trigger
+// a blob download (can't use plain <a download> with auth headers).
+// ════════════════════════════════════════════════════════════════════
+function kbExportModal() {
+  const sel = _KBTREE.selected || {};
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-backdrop';
+  overlay.id = 'kbe-overlay';
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="modal-card" style="max-width:760px;width:95vw;">
+      <div class="modal-head">
+        <div>
+          <h3>📤 Export Knowledge Base</h3>
+          <div class="modal-sub">Filter what you want, pick a format, and download. Auth-gated. Hard cap 10,000 entries per export.</div>
+        </div>
+        <button class="modal-close" id="kbe-close" aria-label="Close">${ICONS.x}</button>
+      </div>
+      <div class="modal-body">
+        <div style="background:#f8fafc;padding:12px;border-radius:8px;border:1px solid #e2e8f0;">
+          <h4 style="font-weight:600;font-size:13px;margin-bottom:8px;color:#475569;">FILTER — leave blank for "all"</h4>
+          <div class="grid grid-cols-2 gap-2 text-sm">
+            <div>
+              <label class="text-xs text-slate-500 block mb-1">Country</label>
+              <input id="kbe-country" type="text" placeholder="UK / USA / CA / ..." value="${escapeHtml(sel.country || '')}" class="border border-slate-200 rounded px-2 py-1 text-sm w-full">
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 block mb-1">Topic</label>
+              <input id="kbe-topic" type="text" placeholder="visa / exam / fees / ..." value="${escapeHtml(sel.topic || '')}" class="border border-slate-200 rounded px-2 py-1 text-sm w-full">
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 block mb-1">Subtopic</label>
+              <input id="kbe-subtopic" type="text" placeholder="ore_part_1 / ..." value="${escapeHtml(sel.subtopic || '')}" class="border border-slate-200 rounded px-2 py-1 text-sm w-full">
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 block mb-1">Status (comma-separated)</label>
+              <input id="kbe-status" type="text" placeholder="active,draft  (default: not superseded/rejected)" class="border border-slate-200 rounded px-2 py-1 text-sm w-full">
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 block mb-1">Min importance</label>
+              <select id="kbe-imp" class="border border-slate-200 rounded px-2 py-1 text-sm w-full">
+                <option value="">— any —</option>
+                ${[1,2,3,4,5].map(n => `<option value="${n}">★ ${n}+</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 block mb-1">Search (title/content)</label>
+              <input id="kbe-query" type="text" placeholder="optional substring" class="border border-slate-200 rounded px-2 py-1 text-sm w-full">
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 block mb-1">Created after</label>
+              <input id="kbe-cafter" type="datetime-local" class="border border-slate-200 rounded px-2 py-1 text-sm w-full">
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 block mb-1">Created before</label>
+              <input id="kbe-cbefore" type="datetime-local" class="border border-slate-200 rounded px-2 py-1 text-sm w-full">
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 block mb-1">Updated after</label>
+              <input id="kbe-uafter" type="datetime-local" class="border border-slate-200 rounded px-2 py-1 text-sm w-full">
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 block mb-1">Updated before</label>
+              <input id="kbe-ubefore" type="datetime-local" class="border border-slate-200 rounded px-2 py-1 text-sm w-full">
+            </div>
+          </div>
+        </div>
+
+        <div style="background:#f0fdf4;padding:12px;border-radius:8px;border:1px solid #86efac;margin-top:12px;">
+          <h4 style="font-weight:600;font-size:13px;margin-bottom:8px;color:#166534;">FORMAT</h4>
+          <div class="grid grid-cols-3 gap-2">
+            <label class="flex items-center gap-2 text-sm" style="background:#fff;padding:8px;border-radius:6px;border:1px solid #e2e8f0;cursor:pointer;">
+              <input type="radio" name="kbe-format" value="json" checked>
+              <span><strong>JSON</strong><br><span class="text-xs" style="color:#64748b;">round-trip with /knowledge/upload-json · best for re-import or feeding to other AIs</span></span>
+            </label>
+            <label class="flex items-center gap-2 text-sm" style="background:#fff;padding:8px;border-radius:6px;border:1px solid #e2e8f0;cursor:pointer;">
+              <input type="radio" name="kbe-format" value="csv">
+              <span><strong>CSV</strong><br><span class="text-xs" style="color:#64748b;">spreadsheet-friendly · facts as JSON in a cell, tags as <code>;</code> joined</span></span>
+            </label>
+            <label class="flex items-center gap-2 text-sm" style="background:#fff;padding:8px;border-radius:6px;border:1px solid #e2e8f0;cursor:pointer;">
+              <input type="radio" name="kbe-format" value="md">
+              <span><strong>Markdown</strong><br><span class="text-xs" style="color:#64748b;">human-readable · grouped country → topic → subtopic · good for sharing or print</span></span>
+            </label>
+          </div>
+        </div>
+
+        <div id="kbe-status-line" class="mt-3 text-xs" style="color:#64748b;"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" id="kbe-cancel">Cancel</button>
+        <button class="btn btn-primary" id="kbe-go">↓ Download</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#kbe-close').onclick  = () => overlay.remove();
+  overlay.querySelector('#kbe-cancel').onclick = () => overlay.remove();
+  overlay.querySelector('#kbe-go').onclick     = () => _kbExportRun(overlay);
+}
+
+async function _kbExportRun(overlay) {
+  const params = new URLSearchParams();
+  const get = id => (overlay.querySelector('#' + id) || {}).value || '';
+  if (get('kbe-country'))  params.set('country', get('kbe-country').trim());
+  if (get('kbe-topic'))    params.set('topic', get('kbe-topic').trim());
+  if (get('kbe-subtopic')) params.set('subtopic', get('kbe-subtopic').trim());
+  if (get('kbe-status'))   params.set('status', get('kbe-status').trim());
+  if (get('kbe-imp'))      params.set('min_importance', get('kbe-imp'));
+  if (get('kbe-query'))    params.set('query', get('kbe-query').trim());
+  const isoIfFilled = (id) => {
+    const v = get(id);
+    return v ? new Date(v).toISOString() : '';
+  };
+  const ca = isoIfFilled('kbe-cafter');  if (ca) params.set('created_after', ca);
+  const cb = isoIfFilled('kbe-cbefore'); if (cb) params.set('created_before', cb);
+  const ua = isoIfFilled('kbe-uafter');  if (ua) params.set('updated_after', ua);
+  const ub = isoIfFilled('kbe-ubefore'); if (ub) params.set('updated_before', ub);
+  const fmt = (overlay.querySelector('input[name="kbe-format"]:checked') || {}).value || 'json';
+  params.set('format', fmt);
+
+  const statusLine = overlay.querySelector('#kbe-status-line');
+  statusLine.innerHTML = `<span style="color:#64748b;">Building export…</span>`;
+  const goBtn = overlay.querySelector('#kbe-go');
+  goBtn.disabled = true; goBtn.style.opacity = '0.5';
+
+  try {
+    const r = await authFetch(`${PROXY}/knowledge/export?${params.toString()}`);
+    if (!r.ok) {
+      const t = await r.text().catch(() => r.statusText);
+      statusLine.innerHTML = `<span style="color:#dc2626;">Export failed: ${escapeHtml(t)}</span>`;
+      goBtn.disabled = false; goBtn.style.opacity = '1';
+      return;
+    }
+    const count = parseInt(r.headers.get('X-RxApply-Export-Count') || '0', 10);
+    const truncated = r.headers.get('X-RxApply-Export-Truncated') === 'true';
+    const blob = await r.blob();
+    // Filename comes from Content-Disposition; reconstruct here for the link
+    const disposition = r.headers.get('Content-Disposition') || '';
+    const m = /filename="([^"]+)"/.exec(disposition);
+    const filename = (m && m[1]) || `rxapply-kb-export.${fmt}`;
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(() => { URL.revokeObjectURL(link.href); link.remove(); }, 0);
+    statusLine.innerHTML = `<span style="color:#15803d;">✓ Downloaded ${count} ${count === 1 ? 'entry' : 'entries'} · ${escapeHtml(filename)}${truncated ? ' · <span style="color:#854d0e;">⚠ TRUNCATED at 10000</span>' : ''}</span>`;
+    goBtn.disabled = false; goBtn.style.opacity = '1';
+  } catch (e) {
+    statusLine.innerHTML = `<span style="color:#dc2626;">Error: ${escapeHtml(e.message)}</span>`;
+    goBtn.disabled = false; goBtn.style.opacity = '1';
+  }
 }
 
 // ════════════════════════════════════════════════════════════════════
