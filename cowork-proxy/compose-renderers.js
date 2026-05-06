@@ -1278,9 +1278,34 @@ async function imageDesignV2({ source, run, recipe, lang }) {
   let totalCost = 0;
   let firstError = null;
 
+  // M126 · Fix 2 · Backport the M102 founder override into IG-v2.
+  // The legacy renderCarousel() honored run.options.force_image_source
+  // ("the founder override that wins over BOTH planner and executor"),
+  // but imageDesignV2() — added in M119 for IG-v2 — silently dropped it,
+  // so when run 180d4b13 set force_image_source: "mixed" and Afshin
+  // returned image_source: "generated" for every slide (a reasonable
+  // call for an editorial source-hygiene post but contrary to the
+  // founder's explicit override), the override was ignored and no
+  // Unsplash fetch was attempted. Restore parity here.
+  const _forced = run && run.options && run.options.force_image_source;
+  const _validForced = ['mixed', 'unsplash', 'generated'].includes(_forced) ? _forced : null;
+  // Telemetry: track per-slide overrides so the run output can show what
+  // happened in the process log (founder picked X, Afshin chose Y, we
+  // used Z because of override / Unsplash key missing / etc).
+  const _overrideTelemetry = [];
+
   for (const slide of slides) {
     const slideN = slide.n || (renderedSlides.length + 1);
-    const imageSource = slide.image_source || 'generated';
+    const _afshinSource = slide.image_source || 'generated';
+    const imageSource = _validForced || _afshinSource;
+    if (_validForced && _validForced !== _afshinSource) {
+      _overrideTelemetry.push({
+        slide: slideN,
+        afshin_chose: _afshinSource,
+        founder_forced: _validForced,
+        applied: imageSource,
+      });
+    }
     let unsplashHeroUrl = null;
     let unsplashAttribution = null;
     let unsplashPhotographer = null;
@@ -1304,13 +1329,44 @@ async function imageDesignV2({ source, run, recipe, lang }) {
         // (we'll fall through to gpt-image-2 with no Unsplash hero; final_prompt stays the same,
         // but the visual will lack the photo backbone Afshin assumed)
       } else {
-        // Try main query, then candidates
+        // Try main query, then candidates. M126 · Fix 2 · when the
+        // founder forced 'mixed' or 'unsplash' but Afshin returned
+        // unsplash_query: null (because Afshin's per-slide judgment
+        // was 'generated'), we still need SOMETHING to search for —
+        // build candidate queries from headline + topic + country pill
+        // so the founder override actually pulls a photo instead of
+        // silently degrading to AI-only.
         const queries = [];
         if (slide.unsplash_query) queries.push(slide.unsplash_query);
         if (Array.isArray(slide.unsplash_candidates)) {
           for (const q of slide.unsplash_candidates) {
             if (q && !queries.includes(q)) queries.push(q);
           }
+        }
+        if (!queries.length && _validForced && _validForced !== _afshinSource) {
+          // Founder override path: Afshin had no Unsplash queries because
+          // they chose 'generated'. Synthesize sensible queries from the
+          // slide's own context. headline + topic + country pill, in that
+          // priority order — most specific to most generic.
+          const synth = [];
+          if (slide.headline) {
+            // Strip Persian/Arabic — Unsplash doesn't index non-Latin.
+            const h = String(slide.headline).replace(/[^\x00-\x7F]/g, ' ').replace(/\s+/g, ' ').trim();
+            if (h && h.length >= 4) synth.push(h.slice(0, 80));
+          }
+          if (run.topic) synth.push(run.topic);
+          // Country context for IG: "australia clinic interior" style
+          if (slide.country_pill && run.topic) {
+            synth.push(`${slide.country_pill} ${run.topic}`);
+          }
+          for (const q of synth) {
+            if (q && !queries.includes(q)) queries.push(q);
+          }
+          _overrideTelemetry.push({
+            slide: slideN,
+            note: 'unsplash_query was null; synthesized from headline/topic/country',
+            synthesized: synth,
+          });
         }
         if (!queries.length && run.topic) queries.push(run.topic);
 
@@ -1446,6 +1502,13 @@ async function imageDesignV2({ source, run, recipe, lang }) {
     slide_count: slides.length,
     slides_rendered: successes,
     partial_failure: firstError,
+    // M126 · Fix 2 · Founder override telemetry. Surfaces in the process
+    // log so the founder can see whether their force_image_source
+    // setting actually changed anything per slide.
+    ...(_validForced ? {
+      _force_image_source: _validForced,
+      _override_telemetry: _overrideTelemetry,
+    } : {}),
   };
 }
 
