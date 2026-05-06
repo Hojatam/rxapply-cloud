@@ -8278,7 +8278,25 @@ let _coState = {
   currentRun: null,      // run object from /compose/runs/:id
   pollTimer: null,
   pollInFlight: false,
+  // M126 · Fix 3 · Unsplash health · cached once when Compose mounts so
+  // the form can warn at submit time when a recipe needs Unsplash but
+  // UNSPLASH_ACCESS_KEY is missing on the proxy. null = not yet checked.
+  unsplashKeySet: null,
 };
+
+// M126 · Fix 3 · Probe /unsplash/status once per page load. Cached in
+// _coState so the form can render synchronous warnings without waiting
+// on a network round-trip for every keystroke.
+async function coCheckUnsplashHealth() {
+  if (_coState.unsplashKeySet !== null) return _coState.unsplashKeySet;
+  try {
+    const j = await fetch(`${PROXY}/unsplash/status`).then(r => r.json());
+    _coState.unsplashKeySet = !!(j && j.has_key);
+  } catch (_) {
+    _coState.unsplashKeySet = false;   // treat network/error as missing
+  }
+  return _coState.unsplashKeySet;
+}
 
 const _CO_LANGS = [
   { code: 'en', label: 'English' },
@@ -8360,6 +8378,9 @@ function renderCompose() {
   `;
   coLoadRecipes();
   coLoadRecent();
+  // M126 · Fix 3 · Probe Unsplash health in the background so the form
+  // renders synchronously when a recipe is selected.
+  coCheckUnsplashHealth();
 }
 
 async function coLoadRecipes() {
@@ -8596,6 +8617,64 @@ function coRenderForm() {
   document.querySelectorAll('#co-target-langs input[type=checkbox]').forEach(cb => {
     cb.addEventListener('change', coUpdateSummaryRail);
   });
+  // M126 · Fix 3 · After health probe resolves, render an inline warning
+  // banner next to the image-source select when the recipe needs Unsplash
+  // (IG flow with image_source mixed/unsplash) but the key is missing.
+  coRefreshUnsplashWarning();
+  ['co-opt-force_image_source','co-opt-with_image'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', coRefreshUnsplashWarning);
+  });
+}
+
+// M126 · Fix 3 · Render / clear the Unsplash health warning. Called on
+// form load and whenever force_image_source / with_image change.
+async function coRefreshUnsplashWarning() {
+  const r = _coState.selected; if (!r) return;
+  const slot = document.getElementById('co-unsplash-warn-slot');
+  // Build the slot lazily next to the force_image_source field if it
+  // doesn't exist yet (legacy recipes don't have the field at all).
+  let host = slot;
+  if (!host) {
+    const ref = document.getElementById('co-opt-force_image_source')
+              || document.getElementById('co-opt-with_image');
+    if (!ref) return;
+    host = document.createElement('div');
+    host.id = 'co-unsplash-warn-slot';
+    host.style.gridColumn = '1 / -1';   // span full options grid row
+    host.style.marginTop = '4px';
+    // Insert after the field's wrapper so it sits below the row visually.
+    const wrap = ref.closest('.cx-field') || ref.parentElement;
+    if (wrap && wrap.parentElement) wrap.parentElement.insertBefore(host, wrap.nextSibling);
+    else ref.parentElement.appendChild(host);
+  }
+  const forced = (document.getElementById('co-opt-force_image_source') || {}).value || '';
+  const withImage = (() => { const wi = document.getElementById('co-opt-with_image'); return wi ? !!wi.checked : true; })();
+  const wantsUnsplash = withImage && (forced === 'mixed' || forced === 'unsplash');
+  const isIgRecipe = (r.id === 'ig' || r.id === 'ig-canva');
+  // For IG recipes without an explicit force value, Afshin MAY still
+  // pick mixed/unsplash per slide — surface the warning there too as a
+  // softer "for awareness" line.
+  const afshinMight = isIgRecipe && withImage && !forced;
+  const keySet = await coCheckUnsplashHealth();
+  if (keySet || (!wantsUnsplash && !afshinMight)) {
+    host.innerHTML = '';
+    return;
+  }
+  if (wantsUnsplash) {
+    host.innerHTML = `
+      <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px 12px;font-size:12.5px;line-height:1.55;color:#78350f;">
+        <strong>⚠ Unsplash key not configured.</strong>
+        Your <span class="mono" style="background:#fff;padding:1px 5px;border-radius:3px;">${escapeHtml(forced)}</span> selection will silently degrade to AI-only — no real photos will be fetched.
+        Set <span class="mono" style="background:#fff;padding:1px 5px;border-radius:3px;">UNSPLASH_ACCESS_KEY</span> on the proxy (free at <a href="https://unsplash.com/developers" target="_blank" rel="noopener" style="color:#92400e;text-decoration:underline;">unsplash.com/developers</a>) to enable mixed/unsplash slides. Submit anyway and you'll get pure gpt-image-2 output.
+      </div>`;
+  } else {
+    host.innerHTML = `
+      <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px 12px;font-size:11.5px;line-height:1.5;color:#9a3412;">
+        <strong>ℹ Unsplash unavailable.</strong>
+        Afshin may still pick "mixed" or "unsplash" per slide; those will quietly fall back to AI-only. Set <span class="mono" style="background:#fff;padding:1px 5px;border-radius:3px;">UNSPLASH_ACCESS_KEY</span> to enable real photos.
+      </div>`;
+  }
 }
 
 // M124 stage 4 · "Preview state" tab bar in the section header. The
@@ -8855,6 +8934,25 @@ async function coStart() {
   // M40 · founder complexity override
   const complexityEl = document.querySelector('input[name="co-complexity"]:checked');
   if (complexityEl && complexityEl.value) options.complexity = complexityEl.value;
+
+  // M126 · Fix 3 · Submit-time pre-flight: if the founder explicitly
+  // forced mixed/unsplash but the proxy has no Unsplash key, confirm
+  // before burning model time on a run that will silently degrade to
+  // AI-only. The inline form warning has already explained the issue;
+  // this is the last hard gate before submit.
+  const forcedSrc = options && options.force_image_source;
+  if ((forcedSrc === 'mixed' || forcedSrc === 'unsplash') && options.with_image !== false) {
+    const keySet = await coCheckUnsplashHealth();
+    if (!keySet) {
+      const ok = confirm(
+        `Heads up: you set image_source = "${forcedSrc}" but the proxy has no UNSPLASH_ACCESS_KEY.\n\n` +
+        `All slides will silently degrade to pure gpt-image-2 (no real photos).\n\n` +
+        `OK = submit anyway and ship AI-only.\n` +
+        `Cancel = stop, set UNSPLASH_ACCESS_KEY on the proxy first.`
+      );
+      if (!ok) return;
+    }
+  }
 
   try {
     const resp = await authFetch(`${PROXY}/compose/runs`, {
