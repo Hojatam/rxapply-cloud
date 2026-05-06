@@ -3153,6 +3153,23 @@
   }
   .cx-modal-foot > span:first-child { flex: 1; }
 
+  /* M124 stage 8 · Completed-stages list — collapsible per-stage outputs */
+  .cx-root .cx-completed-list { display: flex; flex-direction: column; gap: 8px; }
+  .cx-root .cx-completed-list .cx-stage-card { background: var(--cx-surface-2); }
+  .cx-root .cx-completed-list .cx-stage-card:hover { background: var(--cx-surface); border-color: var(--cx-brand-teal); }
+  .cx-root .cx-stage-detail-collapsible { margin-top: 10px; }
+  .cx-root .cx-stage-detail-summary {
+    display: inline-flex; align-items: center; gap: 6px;
+    cursor: pointer; user-select: none;
+    color: var(--cx-brand-teal); font-size: 12px; font-weight: 500;
+    padding: 4px 10px; border-radius: 6px;
+    background: var(--cx-brand-teal-50); border: 1px solid transparent;
+    list-style: none;
+  }
+  .cx-root .cx-stage-detail-summary:hover { background: var(--cx-brand-teal-100, #d2f1ee); border-color: var(--cx-brand-teal); }
+  .cx-root .cx-stage-detail-summary::-webkit-details-marker { display: none; }
+  .cx-root details[open] > .cx-stage-detail-summary::after { content: ''; }
+
   /* Pending downstream list — shown under an active gate panel */
   .cx-root .cx-pending-list { background: var(--cx-surface-2); border: 1px solid var(--cx-border); border-radius: 10px; padding: 10px 14px; margin-top: 12px; }
   .cx-root .cx-pending-row { display: flex; align-items: center; gap: 10px; padding: 4px 0; font-size: 12.5px; }
@@ -9791,7 +9808,11 @@ function coRenderRun(run) {
           </div>
         </div>
         ${s.status === 'failed' && s.error ? `<div style="font-size:12px;margin-top:8px;color:var(--cx-err);">${escapeHtml(s.error.slice(0, 300))}</div>` : ''}
-        ${showOutput && s.output ? `<div class="cx-stage-detail">${coRenderStageOutput(s, isGated)}</div>` : ''}
+        ${showOutput && s.output ? (
+          opts.collapsed
+            ? `<details class="cx-stage-detail-collapsible"><summary class="cx-stage-detail-summary">view ${escapeHtml(agent)}'s output ↓</summary><div class="cx-stage-detail">${coRenderStageOutput(s, isGated)}</div></details>`
+            : `<div class="cx-stage-detail">${coRenderStageOutput(s, isGated)}</div>`
+        ) : ''}
         ${(isGated && skipGate) ? '' :
           isGated && s.stage_name === 'verify-kb' ? coRenderGateA(s, run) :
           isGated && s.stage_name === 'design-v2' ? coRenderGateB(s, run) :
@@ -9940,28 +9961,74 @@ function coRenderRun(run) {
       `).join('')}
     </div>` : '';
 
-  // M124 stage 5 · When the active stage is gated, render the stage card
-  // (compact summary) THEN the full-width gate panel as a sibling. This
-  // gives the gate the full focus-column width instead of squeezing it
-  // inside the card's padding.
-  let focusHtml;
-  if (!activeStage) {
-    focusHtml = '<div style="color:var(--cx-text-faint);font-size:13px;">No active stage. Pick a recipe and submit a run.</div>';
-  } else if (activeStage.status === 'gated') {
-    const gateHtml = activeStage.stage_name === 'verify-kb' ? coRenderGateA(activeStage, run)
-                   : activeStage.stage_name === 'design-v2' ? coRenderGateB(activeStage, run)
-                   : `<div class="cx-card" style="margin-top:12px;">
-                        <div class="cx-card-head">
-                          <div><h3>Awaiting approval</h3><div class="cx-meta">${escapeHtml(activeStage.stage_name)}</div></div>
-                        </div>
-                        <div style="display:flex;gap:8px;">
-                          <button class="cx-btn primary" onclick="coApprove('${run.id}')">✓ Approve & continue</button>
-                          <button class="cx-btn ghost" onclick="coCancel('${run.id}')">Cancel run</button>
-                        </div>
-                      </div>`;
-    focusHtml = decorate(activeStage, renderRow(activeStage, { skipGate: true })) + gateHtml + pendingList;
+  // M124 stage 8 · Founder reported: "I can't see each agent's output
+  // during and after the composition." Stage 4 collapsed everything but
+  // the active stage out of focus, hiding the agent outputs. The design
+  // PDF shows a "COMPLETED STAGES · CLICK TO EXPAND" section. We now
+  // render every stage in the focus column with its full card +
+  // collapsible output. Active stage stays expanded; done stages are
+  // expandable on click; gated stage's full gate panel renders as a
+  // sibling with the pending-downstream list below.
+  const doneStages = stages.filter(s => s.status === 'done');
+  const failedStages = stages.filter(s => s.status === 'failed');
+
+  let focusHtml = '';
+  if (!activeStage && doneStages.length === 0) {
+    focusHtml = '<div style="color:var(--cx-text-faint);font-size:13px;padding:20px 0;">No stages yet. Pick a recipe and submit a run.</div>';
   } else {
-    focusHtml = decorate(activeStage, renderRow(activeStage)) + pendingList;
+    // 1) Currently-active stage (gated / running / failed / most-recent-done)
+    if (activeStage && activeStage.status === 'gated') {
+      const gateHtml = activeStage.stage_name === 'verify-kb' ? coRenderGateA(activeStage, run)
+                     : activeStage.stage_name === 'design-v2' ? coRenderGateB(activeStage, run)
+                     : `<div class="cx-card" style="margin-top:12px;">
+                          <div class="cx-card-head">
+                            <div><h3>Awaiting approval</h3><div class="cx-meta">${escapeHtml(activeStage.stage_name)}</div></div>
+                          </div>
+                          <div style="display:flex;gap:8px;">
+                            <button class="cx-btn primary" onclick="coApprove('${run.id}')">✓ Approve & continue</button>
+                            <button class="cx-btn ghost" onclick="coCancel('${run.id}')">Cancel run</button>
+                          </div>
+                        </div>`;
+      focusHtml += decorate(activeStage, renderRow(activeStage, { skipGate: true })) + gateHtml + pendingList;
+    } else if (activeStage && activeStage.status !== 'done') {
+      // running or failed — show full card + pending list
+      focusHtml += decorate(activeStage, renderRow(activeStage)) + pendingList;
+    } else if (pendingStages.length) {
+      focusHtml += pendingList;
+    }
+
+    // 2) Failed stages (always expanded so the error is visible)
+    if (failedStages.length && (!activeStage || activeStage.status !== 'failed')) {
+      focusHtml += `
+        <div class="cx-subhead" style="margin:18px 0 8px;color:var(--cx-err);">Failed · ${failedStages.length}</div>
+        ${failedStages.map(s => decorate(s, renderRow(s))).join('')}
+      `;
+    }
+
+    // 3) Completed stages — collapsed by default, click to expand the
+    //    output. The cx-stage-card body holds a <details> wrapping the
+    //    full output so the founder can audit each agent's work.
+    if (doneStages.length) {
+      const filteredDone = activeStage && activeStage.status === 'done'
+        ? doneStages.slice(0, -1)  // already shown above
+        : doneStages;
+      if (filteredDone.length) {
+        focusHtml += `
+          <div class="cx-subhead" style="margin:18px 0 8px;">Completed stages · ${filteredDone.length} · click to expand</div>
+          <div class="cx-completed-list">
+            ${filteredDone.map(s => decorate(s, renderRow(s, { collapsed: true }))).join('')}
+          </div>
+        `;
+      }
+      // The most-recent done is also kept expanded as the "current focus"
+      // when nothing else is active.
+      if (!activeStage || activeStage.status === 'done') {
+        const last = doneStages[doneStages.length - 1];
+        if (last) {
+          focusHtml = decorate(last, renderRow(last)) + focusHtml;
+        }
+      }
+    }
   }
 
   $('co-preview').innerHTML = `
@@ -10259,7 +10326,7 @@ function _mockupInstagram(out, coverUrl, run, carouselSlides) {
   let photoBlock;
   if (isCarousel) {
     photoBlock = `
-      <div class="cx-ig-photo co-mock-ig-carousel" id="${id}-track">
+      <div class="cx-ig-photo" id="${id}-track">
         ${slides.map((sl, i) => `
           <img src="${escapeHtml(sl.url)}" alt="slide ${i+1}"
                data-idx="${i}"
@@ -10287,9 +10354,13 @@ function _mockupInstagram(out, coverUrl, run, carouselSlides) {
   // M124 stage 3 · IG card with conic-gradient avatar ring (authentic IG
   // story-ring colors: orange → pink → magenta → purple), 380px width
   // per the Claude Design handoff bundle.
+  // M124 stage 8 · Removed legacy co-mockup-wrap + co-mock-phone classes
+  // — they applied a competing 8px dark phone bezel + 32px radius that
+  // conflicted with cx-ig's soft 24px-radius card shadow, making the
+  // mockup look messy. cx-ig owns the entire visual now.
   return `
-    <div class="co-mockup-wrap" style="display:flex;justify-content:center;">
-      <div class="cx-ig co-mock-phone" data-auto-rtl>
+    <div style="display:flex;justify-content:center;padding:4px 0 16px;">
+      <div class="cx-ig" data-auto-rtl>
         <div class="cx-ig-header">
           <div class="cx-ig-avatar-ring">
             <div class="cx-ig-avatar-inner">R</div>
