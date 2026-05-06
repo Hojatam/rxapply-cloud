@@ -1698,7 +1698,11 @@ const _RENDERER_AGENT = {
   'telegram':         'payvand',
   'facebook':         'payvand',
   'x-thread':         'payvand',
-  'ig':               'payvand',
+  // M121 · IG final-shape assembly attributed to Afshin — she owns the
+  // entire Instagram visual+content arc end-to-end (design-v2 → image →
+  // render). Other channels stay with Payvand because their renderers are
+  // text-only formatting work that doesn't intersect with image production.
+  'ig':               'afshin',
 };
 
 async function _executeRenderer({ runId, run, recipe, stage, stageIndex, lang }) {
@@ -1746,6 +1750,25 @@ async function _executeRenderer({ runId, run, recipe, stage, stageIndex, lang })
       const adaptRow = masterDone.find(s => s.stage_name === 'adapt');
       const draftRow = masterDone.find(s => s.stage_name === 'draft');
       sourceForRender = (adaptRow || draftRow || {}).output;
+      // M121 · IG-v2 doesn't have adapt/draft — the post-plan stage IS the
+      // channel-ready output. When the recipe uses post-plan instead of
+      // draft+adapt (i.e. the IG-v2 flow), feed the renderer the post-plan
+      // output merged with image stage output (so caption + hashtags + slides
+      // all land in the final shape together).
+      if (!sourceForRender || !Object.keys(sourceForRender).length) {
+        const postPlanRow = masterDone.find(s => s.stage_name === 'post-plan');
+        const designV2Row = masterDone.find(s => s.stage_name === 'design-v2');
+        const imageRow    = masterDone.find(s => s.stage_name === 'image');
+        if (postPlanRow && postPlanRow.output) {
+          sourceForRender = {
+            ...postPlanRow.output,
+            // Carry through Afshin's design plan + actual generated slides
+            // so the IG mockup can show the carousel images alongside caption.
+            ...(designV2Row && designV2Row.output ? { design_plan: designV2Row.output } : {}),
+            ...(imageRow && imageRow.output ? { _image_render: imageRow.output } : {}),
+          };
+        }
+      }
     }
   }
 
