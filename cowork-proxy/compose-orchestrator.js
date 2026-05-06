@@ -231,6 +231,24 @@ async function _buildSystemPrompt({ agent, stageName, recipe, run, masterDraft, 
     } catch (_) { /* non-fatal */ }
   }
 
+  // M119 · IG-v2 KB grounding — kb-dossier needs WIDE recall (k=20) so it
+  // can synthesize a representative topic pack. verify-kb / post-plan /
+  // design-v2 also benefit from KB context but at the standard limit.
+  if (['kb-dossier'].includes(stageName)) {
+    try {
+      const country = KB.detectCountry(run.topic);
+      const kb = KB.renderAsBlock({ country, query: run.topic, limit: 20 });
+      if (kb) blocks.push(kb);
+    } catch (_) { /* non-fatal */ }
+  }
+  if (['verify-kb', 'post-plan', 'design-v2'].includes(stageName)) {
+    try {
+      const country = KB.detectCountry(run.topic);
+      const kb = KB.renderAsBlock({ country, query: run.topic, limit: 8 });
+      if (kb) blocks.push(kb);
+    } catch (_) { /* non-fatal */ }
+  }
+
   // M41 · Protected terms glossary — auto-derived from KB, never seeded.
   // Injected for verify-translation (where it matters most) and translate (so the translator
   // sees the protected list before it's checked against). Empty on first run; grows as KB grows.
@@ -943,6 +961,10 @@ const _DEFAULT_RETRY_CAPS = {
   audit: 0,                     // block immediately on uncited claims
   'voice-critic': 1,
   'verify-translation': 1,
+  // M119 · IG-v2 verify-kb refines back to post-plan with structured corrections.
+  // Cap=3 because per-claim feedback gives the planner specific, applicable fixes
+  // (vs the looser draft refines that need 1–2 attempts max).
+  'verify-kb': 3,
 };
 
 // Map: failing stage → which prior stage to re-run.
@@ -954,6 +976,8 @@ const _REFINE_TARGETS = {
   audit:                 ['draft'],
   'voice-critic':        ['draft'],
   'verify-translation':  ['translate'],
+  // M119 · IG-v2 verify-kb fails → re-run post-plan with corrections injected.
+  'verify-kb':           ['post-plan'],
 };
 
 // Inspect a stage output to decide whether it triggers a refine.
@@ -982,6 +1006,17 @@ function _detectRefineTrigger(stageName, output) {
       ? output.issues.map(i => `${i.fix || 'review'} (was: "${(i.claim || '').slice(0, 120)}")`).slice(0, 6)
       : [];
     return { trigger: true, reason: 'verify_failed', fixes: issuesAsFixes };
+  }
+  // M119 · IG-v2 verify-kb has structured corrections[] with location +
+  // problem + suggested_fix. Format each as a single applicable instruction
+  // string so the post-plan refine round sees exactly what to change where.
+  if (stageName === 'verify-kb' && output.passed === false) {
+    const correctionsAsFixes = Array.isArray(output.corrections)
+      ? output.corrections.map(c =>
+          `[${c.location || '?'}] ${c.problem || 'review'} — ${c.suggested_fix || 'remove or revise'}`
+        ).slice(0, 8)
+      : [];
+    return { trigger: true, reason: 'verify_kb_failed', fixes: correctionsAsFixes };
   }
   if (stageName === 'verify-translation' && output.passed === false) {
     const issuesAsFixes = Array.isArray(output.issues)
@@ -1480,10 +1515,16 @@ async function _executeLlmStage({ runId, run, recipe, stage, stageIndex, lang, p
   // Same for verify when passed=false. Red-team output is a hard stop unless
   // the founder explicitly approves to override.
   // M50 · voice-critic verdict=block also forces a gate.
+  // M119 · IG-v2 has TWO mandatory founder approval gates that fire on
+  // SUCCESS (not failure) — verify-kb passing means "facts are good, founder
+  // please confirm caption + slides" (Gate A); design-v2 producing means
+  // "design plan ready, founder please confirm before image gen" (Gate B).
   let forceGate = false;
   if (stageName === 'audit' && parsed && parsed.verdict === 'block') forceGate = true;
   if (stageName === 'verify' && parsed && parsed.passed === false) forceGate = true;
   if (stageName === 'voice-critic' && parsed && parsed.verdict === 'block') forceGate = true;
+  if (stageName === 'verify-kb'  && parsed && parsed.passed === true) forceGate = true;   // Gate A
+  if (stageName === 'design-v2'  && parsed && Array.isArray(parsed.slides)) forceGate = true; // Gate B
   const gateHere = forceGate || _shouldGate(stageName, recipe, run.gate_strategy);
   const finalStatus = gateHere ? 'gated' : 'done';
 
@@ -1650,13 +1691,14 @@ async function _executeLlmStage({ runId, run, recipe, stage, stageIndex, lang, p
 // territory; format renderers are Payvand's. Used for compose_stages.agent
 // + an agent_runs row so renderers show up in the relevant Train tab.
 const _RENDERER_AGENT = {
-  'image-cover': 'afshin',
-  'email-html':  'payvand',
-  'seo-article': 'payvand',
-  'telegram':    'payvand',
-  'facebook':    'payvand',
-  'x-thread':    'payvand',
-  'ig':          'payvand',
+  'image-cover':      'afshin',
+  'image-design-v2':  'afshin',     // M119 · IG-v2 image renderer (design-v2 → gpt-image-2)
+  'email-html':       'payvand',
+  'seo-article':      'payvand',
+  'telegram':         'payvand',
+  'facebook':         'payvand',
+  'x-thread':         'payvand',
+  'ig':               'payvand',
 };
 
 async function _executeRenderer({ runId, run, recipe, stage, stageIndex, lang }) {
@@ -1691,6 +1733,13 @@ async function _executeRenderer({ runId, run, recipe, stage, stageIndex, lang })
       const carouselRow = masterDone.find(s => s.stage_name === 'carousel-plan');
       if (carouselRow && carouselRow.output) {
         sourceForRender = { ...(sourceForRender || {}), _carousel_spec: carouselRow.output };
+      }
+    } else if (rendererName === 'image-design-v2') {
+      // M119 · IG-v2 image renderer reads the design-v2 stage output
+      // directly. Each slide already has final_prompt + Unsplash queries.
+      const designV2Row = masterDone.find(s => s.stage_name === 'design-v2');
+      if (designV2Row && designV2Row.output) {
+        sourceForRender = { _design_v2_spec: designV2Row.output };
       }
     } else {
       // Non-image renderers (telegram/email/etc) use adapt > draft.
@@ -1800,6 +1849,74 @@ async function approve(runId, note = null, decidedBy = 'founder') {
            approval_note = ${q(note)}
      WHERE id = ${q(gated.id)};
   `);
+  await query(`UPDATE compose_runs SET status = 'running' WHERE id = ${q(runId)};`);
+  return await getRun(runId);
+}
+
+// M119 · Reject a gated stage with founder notes — re-runs the upstream
+// LLM stage with the notes injected as REFINE NOTES.
+//
+// Two flavors based on which gate fails:
+//   verify-kb   (Gate A) → re-runs post-plan  with notes (cap=2)
+//   design-v2   (Gate B) → re-runs design-v2  with notes (cap=2)
+//   any other gated LLM  → re-runs THAT stage with notes (cap=2)
+//
+// The notes feed into the existing _buildSystemPrompt REFINE NOTES block
+// (line 176) — the upstream agent sees structured fix instructions before
+// regenerating.
+async function rejectGate(runId, { stageName, notes, decidedBy = 'founder' } = {}) {
+  if (!stageName) throw new Error('stageName required');
+  if (!notes || !String(notes).trim()) throw new Error('notes required');
+
+  const run = await getRun(runId);
+  if (!run) throw new Error(`Run not found: ${runId}`);
+  if (run.status !== 'awaiting_approval') {
+    throw new Error(`Run is not awaiting approval (status=${run.status})`);
+  }
+  const gated = (run.stages || []).find(s =>
+    s.status === 'gated' && s.lang == null && s.stage_name === stageName);
+  if (!gated) throw new Error(`No gated stage "${stageName}" found on run`);
+
+  const recipe = getRecipe(run.recipe_id);
+  const REJECT_TARGETS = {
+    'verify-kb': 'post-plan',          // Gate A reject → redo the planner
+    'design-v2': 'design-v2',          // Gate B reject → redo the designer
+  };
+  const targetStageName = REJECT_TARGETS[stageName] || stageName;
+  const REJECT_CAP = 2;
+  const already = _countRefinesFor(run, targetStageName);
+  if (already >= REJECT_CAP) {
+    // Cap hit on rejections too — stay paused, founder must manually edit
+    // or fork to recover.
+    return { ok: false, error: `Rejection cap (${REJECT_CAP}) reached for ${stageName}. Edit manually or fork the run.` };
+  }
+
+  // Find the target stage's index in the recipe so _enqueueRefine can DELETE it.
+  const targetStageIndex = (recipe.stages || []).findIndex(s => s.name === targetStageName);
+  if (targetStageIndex < 0) {
+    throw new Error(`Cannot find target stage "${targetStageName}" in recipe`);
+  }
+
+  // Mark the gated stage as 'rejected' (preserving its output for audit) and
+  // clear awaiting_approval so the next tick picks up the queued refine.
+  await query(`
+    UPDATE compose_stages
+       SET status = 'rejected', approval_required = false,
+           approved_at = NOW(), approved_by = ${q(decidedBy)},
+           approval_note = ${q('REJECTED: ' + String(notes).slice(0, 500))}
+     WHERE id = ${q(gated.id)};`);
+
+  // Enqueue the refine (re-runs the target stage with notes as REFINE NOTES).
+  await _enqueueRefine({
+    runId, run,
+    fromStage: stageName + '-gate-reject',
+    toStage:   targetStageName,
+    reason:    'gate_rejected',
+    fixes:     [String(notes).slice(0, 1000)],
+    attempt:   already + 1,
+    targetStageIndex,
+    lang:      null,
+  });
   await query(`UPDATE compose_runs SET status = 'running' WHERE id = ${q(runId)};`);
   return await getRun(runId);
 }
@@ -1917,6 +2034,8 @@ module.exports = {
   listRecipes, getRecipe,
   // run lifecycle
   start, getRun, listRuns, tick, runToBlock, approve, cancel,
+  // M119 · IG-v2 founder reject-with-notes (Gate A or Gate B)
+  rejectGate,
   // M44 · checkpointed state
   forkFromStage,
   // M68 · stage-prompt loader + cache invalidation hook

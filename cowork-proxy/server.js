@@ -3181,6 +3181,23 @@ app.post('/compose/runs/:id/approve', auth.middleware, async (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
+// M119 · Reject a gated stage with founder notes — re-runs the upstream
+// stage with notes injected as REFINE NOTES (cap=2 per gate). Used by
+// the IG-v2 Gate A (post-plan) and Gate B (design-v2) preview components.
+//   Body: { stage_name: 'verify-kb' | 'design-v2', notes: 'string' }
+app.post('/compose/runs/:id/reject', auth.middleware, async (req, res) => {
+  try {
+    const { stage_name, notes } = req.body || {};
+    const r = await composeOrchestrator.rejectGate(
+      req.params.id,
+      { stageName: stage_name, notes, decidedBy: (req.user && req.user.username) || 'founder' },
+    );
+    if (r && r.ok === false) return res.status(400).json(r);
+    log(`compose.reject id=${req.params.id} stage=${stage_name} notes_len=${(notes||'').length}`);
+    res.json({ ok: true, run: r });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 app.post('/compose/runs/:id/cancel', auth.middleware, async (req, res) => {
   try {
     const run = await composeOrchestrator.cancel(req.params.id, (req.body || {}).note || null);

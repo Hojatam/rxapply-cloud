@@ -53,6 +53,18 @@ const DEFAULT_PROFILE = {
   founder_name: 'Dr. Hojat',
   audience: 'Internationally-trained dentists',
   example_captions: [],
+  // M119 · IG-v2 emoji palette. Post-planner picks 2–4 emojis from this
+  // palette per caption to fit the brand's professional + warm tone.
+  // Founder editable from Brand tab. Keep it small + on-brand; resist
+  // adding random emoji that would dilute the voice.
+  emoji_palette: ['🦷', '🌍', '✈️', '📋', '✓', '🏥', '⚕️', '📍', '📌', '💼'],
+  // M119 · IG-v2 design templates Afshin can choose from. Founder can
+  // disable any template by removing its slug from this array — Afshin
+  // will skip it during template selection.
+  design_templates_enabled: [
+    'type-led', 'data-card', 'photo-hero', 'quote-card',
+    'split-frame', 'document-mock', 'flag-overlay', 'cta-card',
+  ],
 };
 
 let _cache = null;
@@ -84,7 +96,11 @@ async function set(profile) {
     return { ok: false, error: 'profile must be an object' };
   }
   const KEYS = Object.keys(DEFAULT_PROFILE);
-  const ARRAY_KEYS = new Set(['secondary_colors','voice_rules','always_include','never_include','visual_rules','example_captions']);
+  // M119 · Add the new array keys so set() preserves them on save.
+  const ARRAY_KEYS = new Set([
+    'secondary_colors','voice_rules','always_include','never_include','visual_rules','example_captions',
+    'emoji_palette','design_templates_enabled',
+  ]);
   const clean = {};
   for (const k of KEYS) {
     if (profile[k] === undefined) continue;
@@ -151,6 +167,19 @@ function renderAsPromptBlock() {
       lines.push(`  [${i + 1}]`);
       String(c).split('\n').forEach(l => lines.push(`      ${l}`));
     });
+    lines.push('');
+  }
+  // M119 · Emoji palette is surfaced so the post-plan agent picks from a
+  // brand-curated set instead of generic emoji noise.
+  if (p.emoji_palette && p.emoji_palette.length) {
+    lines.push(`Brand emoji palette (pick 2–4 per caption from this set; never others): ${p.emoji_palette.join(' ')}`);
+    lines.push('');
+  }
+  // Design templates list — surfaced for design-v2 so Afshin knows which
+  // templates the founder has enabled. Listed inline; the full visual
+  // recipes for each live in agents/afshin/SKILL.md.
+  if (p.design_templates_enabled && p.design_templates_enabled.length) {
+    lines.push(`Enabled design templates (Afshin must pick from this set): ${p.design_templates_enabled.join(', ')}`);
     lines.push('');
   }
   lines.push('=== END BRAND CONTEXT ===');

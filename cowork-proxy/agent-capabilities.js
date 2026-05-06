@@ -19,17 +19,26 @@
 
 const CAPABILITY_REGISTRY = {
   // Plan / strategy / outline
-  pooya:     ['plan', 'research'],
+  // M119 · Pooya gains 'kb-dossier' — a cheap-LLM synthesis pass that turns
+  // 20 raw KB.recall hits into a structured topic pack { key_facts, must_avoid,
+  // named_sources_used, regulatory_context, kb_entry_ids_used }. Replaces the
+  // legacy 'research' role for the IG-v2 pipeline.
+  pooya:     ['plan', 'research', 'kb-dossier'],
   paya:      ['plan'],
 
   // KB-grounded fact verification + multilingual back-translation QA (M41).
   // 'verify' runs in master phase (post-critique). 'verify-translation' runs
   // in target-lang phase (post-translate, pre-render-target) and cross-checks
   // each translation against the master + the KB-derived protected-terms glossary.
-  daneshyar: ['verify', 'verify-translation', 'research'],
+  // M119 · Adds 'verify-kb' — KB-only structured per-claim fact check used by
+  // the IG-v2 pipeline. Premium model only (NEVER_AUTO_PICK in cost router).
+  daneshyar: ['verify', 'verify-translation', 'research', 'verify-kb'],
 
   // Drafting (long-form, master voice)
-  sepehr:    ['draft'],
+  // M119 · Sepehr gains 'post-plan' — a cheap-LLM, channel-ready combined
+  // draft+adapt+structure step for IG-v2 ({caption, hashtags, emojis_used,
+  // slides[]}). Voice/format rules baked into the stage prompt.
+  sepehr:    ['draft', 'post-plan'],
 
   // Critique / scoring — kherad is SOLE owner (M98 dedup).
   // Bidar previously declared 'critique' as backup; removed because
@@ -70,7 +79,11 @@ const CAPABILITY_REGISTRY = {
   // then returns an art-directed prompt with style/composition/palette/
   // mood/brand-visual refs. The 'image' capability is bookkeeping for
   // the renderer that hands his prompt to gpt-image-1.
-  afshin:    ['design', 'image'],
+  // M119 · 'design-v2' restores Afshin's creative authority for IG-v2:
+  // chooses one of 8 named templates per slide, generates 1-3 Unsplash
+  // candidate queries when a real photo helps, composes the FULL gpt-image-2
+  // prompt with text/font/size/color codes/logo placement/pattern. Premium model.
+  afshin:    ['design', 'design-v2', 'image'],
 
   // Channel-shaped final formatting (HTML email, Telegram-HTML, X tweet
   // split, Gmail payload, etc.). Render stages don't call an LLM but we

@@ -2,27 +2,21 @@
   "id": "ig",
   "label": "Instagram",
   "icon": "instagram",
-  "description": "Instagram feed post: caption + hashtags + cover image OR multi-slide carousel (Tarrah plans the slides, Afshin renders).",
-  "version": "6",
+  "description": "Instagram carousel post (M119 · IG-v2 lean pipeline). KB.recall(20) → Pooya dossier (cheap) → Sepehr post-plan (cheap, caption + hashtags + emojis + slides) → Daneshyar verify-kb (premium, KB-only fact check, loops to post-plan cap=3) → 🚦 Gate A (founder approves caption + slides) → Afshin design-v2 (premium, picks 1 of 8 templates per slide, generates Unsplash queries, composes full per-slide gpt-image-2 prompt with text/font/colors/logo/pattern) → 🚦 Gate B (founder approves design plan) → image generation. Two human-in-the-loop gates before any image is created.",
+  "version": "7",
   "length_target_words": "38–75 (mean 60, p95 119 — never exceed 119)",
 
   "stages": [
-    { "name": "plan",     "capability": "plan" },
-    { "name": "research", "capability": "research", "if_complexity_at_least": "standard" },
-    { "name": "draft",    "capability": "draft", "params": { "length_words": [38, 75], "hard_max_words": 119 } },
-    { "name": "critique", "capability": "critique" },
-    { "name": "verify",   "capability": "verify" },
-    { "name": "voice-critic", "capability": "voice-critic" },
-    { "name": "audit",    "capability": "audit", "if_complexity_at_least": "deep" },
-    { "name": "adapt",    "capability": "adapt",
-      "params": { "produce": ["caption", "hashtags", "design_plan", "design_brief"] } },
-    { "name": "render",   "renderer": "ig" },
-    { "name": "carousel-plan", "capability": "carousel-plan", "if_option": "as_carousel" },
-    { "name": "design",   "capability": "design", "if_option": "with_image" },
-    { "name": "image",    "renderer": "image-cover", "if_option": "with_image" }
+    { "name": "kb-dossier",   "capability": "kb-dossier" },
+    { "name": "post-plan",    "capability": "post-plan",
+      "params": { "length_words": [38, 75], "hard_max_words": 119 } },
+    { "name": "verify-kb",    "capability": "verify-kb" },
+    { "name": "design-v2",    "capability": "design-v2", "if_option": "with_image" },
+    { "name": "image",        "renderer": "image-design-v2", "if_option": "with_image" },
+    { "name": "render",       "renderer": "ig" }
   ],
 
-  "gateable_stages": ["critique", "verify", "voice-critic", "audit", "adapt", "carousel-plan", "design"],
+  "gateable_stages": ["verify-kb", "design-v2"],
 
   "translate": {
     "capability": "translate",
@@ -31,14 +25,13 @@
 
   "options_schema": [
     { "key": "primary_cta",     "label": "CTA URL (link in bio)", "type": "text", "placeholder": "https://rxapply.com" },
-    { "key": "max_hashtags",    "label": "Max hashtags",          "type": "number", "default": 12, "min": 3, "max": 30 },
-    { "key": "with_image",      "label": "Generate cover image (~$0.19)", "type": "checkbox", "default": true },
-    { "key": "as_carousel",     "label": "Plan as multi-slide carousel (Tarrah → Afshin)", "type": "checkbox", "default": false },
-    { "key": "carousel_slides", "label": "Slide count (when carousel)", "type": "number", "default": 6, "min": 4, "max": 8 },
-    { "key": "force_image_source", "label": "Force every slide's image source (override Tarrah)", "type": "select",
+    { "key": "max_hashtags",    "label": "Max hashtags",          "type": "number", "default": 8, "min": 3, "max": 30 },
+    { "key": "with_image",      "label": "Generate carousel slide images (~$0.19 per slide)", "type": "checkbox", "default": true },
+    { "key": "carousel_slides", "label": "Slide count",           "type": "number", "default": 4, "min": 1, "max": 12 },
+    { "key": "force_image_source", "label": "Force every slide's image source (override Afshin)", "type": "select",
       "default": "",
       "options": [
-        { "value": "",          "label": "— Trust Tarrah (per-slide) —" },
+        { "value": "",          "label": "— Trust Afshin (per-slide) —" },
         { "value": "mixed",     "label": "All slides: mixed (Unsplash hero + AI overlay)" },
         { "value": "unsplash",  "label": "All slides: pure Unsplash photo (no AI)" },
         { "value": "generated", "label": "All slides: pure gpt-image-2 (no Unsplash)" }

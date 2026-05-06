@@ -182,6 +182,60 @@ const SCHEMAS = {
       language: { type: 'string', required: true },
     },
   },
+
+  // ── M119 · IG-v2 pipeline contracts ─────────────────────────────────
+  // Cheap-LLM topic-pack synthesis. Replaces 'research' for the IG-v2
+  // chain. Inputs (KB.recall results) come from the orchestrator's
+  // deterministic pre-stage; the LLM only synthesizes.
+  'kb-dossier': {
+    type: 'object',
+    properties: {
+      key_facts:           { type: 'array',  required: true, items: { type: 'string' } },
+      must_avoid:          { type: 'array',  required: true, items: { type: 'string' } },
+      named_sources_used:  { type: 'array',  required: true, items: { type: 'string' } },
+      regulatory_context:  { type: 'string' },
+      kb_entry_ids_used:   { type: 'array',  items: { type: 'string' } },
+    },
+  },
+
+  // Cheap-LLM caption + hashtags + emojis + slide structure. Replaces
+  // draft + adapt + carousel-plan for IG-v2 in one shot.
+  'post-plan': {
+    type: 'object',
+    properties: {
+      caption:     { type: 'string', required: true, minLength: 30 },
+      hashtags:    { type: 'array',  required: true, items: { type: 'string' } },
+      emojis_used: { type: 'array',  items: { type: 'string' } },
+      slide_count: { type: 'number', required: true },
+      slides:      { type: 'array',  required: true, items: { type: 'object' } },
+      partition_compliance: { type: 'string' },
+    },
+  },
+
+  // Premium-LLM structured per-claim KB-only fact check. Loops back to
+  // post-plan with structured corrections on failure (cap=3).
+  'verify-kb': {
+    type: 'object',
+    properties: {
+      passed:             { type: 'boolean', required: true },
+      facts_checked:      { type: 'array',  required: true, items: { type: 'object' } },
+      corrections:        { type: 'array',  items: { type: 'object' } },
+      overall_confidence: { type: 'number' },
+    },
+  },
+
+  // Premium-LLM full per-slide design plan. Each slide picks a template
+  // from the 8-vocabulary, generates Unsplash candidates if real photo
+  // helps, and produces the FULL gpt-image-2 prompt with all the
+  // typography/color/logo specifics. Output feeds Gate B preview AND
+  // the image renderer directly.
+  'design-v2': {
+    type: 'object',
+    properties: {
+      narrative_arc: { type: 'string', required: true, minLength: 20 },
+      slides:        { type: 'array',  required: true, items: { type: 'object' } },
+    },
+  },
 };
 
 // ── Lightweight validator ────────────────────────────────────────────

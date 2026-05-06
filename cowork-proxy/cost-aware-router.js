@@ -37,11 +37,16 @@ const FLOORS = {
   // Quality-critical — never auto-downgrade
   'verify':              'NEVER_AUTO_PICK',
   'verify-translation':  'NEVER_AUTO_PICK',
+  // M119 · IG-v2 KB-only fact check is the single most important gate
+  // before image generation. Always founder-pinned model.
+  'verify-kb':           'NEVER_AUTO_PICK',
 
   // Judgment-heavy — Sonnet 4.6 minimum
   'audit':               'claude-sonnet-4-6',
   'critique':            'claude-sonnet-4-6',
   'design':              'claude-sonnet-4-6',
+  // M119 · IG-v2 design has equal stakes to the legacy 'design' — same floor
+  'design-v2':           'claude-sonnet-4-6',
 
   // Voice-heavy — Sonnet 4.6 floor (founder can pin Opus per agent)
   'draft':               'claude-sonnet-4-6',
@@ -52,6 +57,10 @@ const FLOORS = {
   'adapt':               null,
   'translate':           null,
   'render':              null,   // (renderers are deterministic; no LLM call here)
+  // M119 · IG-v2 cheap stages — synthesis + structuring tasks where the
+  // founder's two approval gates catch any quality drift downstream.
+  'kb-dossier':          null,
+  'post-plan':           null,
 
   // Image generation has its own multi-provider router (compose-image.js)
   'image':               'NEVER_AUTO_PICK',

@@ -1227,6 +1227,228 @@ async function canvaRender({ source, run, recipe, lang }) {
   };
 }
 
+// ════════════════════════════════════════════════════════════════════
+// M119 · IG-v2 image renderer · consumes design-v2 output directly.
+// Afshin's design-v2 has already composed `final_prompt` per slide
+// with full text + font + colors + logo + pattern instructions. This
+// renderer does no LLM work — for each slide it:
+//   1. If image_source = 'unsplash' or 'mixed', fetch the best
+//      Unsplash photo from `unsplash_query` (falling back through
+//      unsplash_candidates if the main query returns nothing).
+//   2. Calls gpt-image-2 with the final_prompt. For mixed/unsplash
+//      slides the photo is prepended to slideReferenceUrls so it
+//      becomes image[1] (brand logo stays image[0] from compose-image.js).
+// Returns { _renderer:'image-design-v2', _carousel:true, slides:[...] }
+// matching the existing carousel preview UI pattern.
+// ════════════════════════════════════════════════════════════════════
+async function imageDesignV2({ source, run, recipe, lang }) {
+  const composeImage = require('./compose-image');
+  const unsplash     = require('./unsplash');
+
+  const designSpec = source && source._design_v2_spec;
+  if (!designSpec || !Array.isArray(designSpec.slides) || !designSpec.slides.length) {
+    return {
+      _renderer: 'image-design-v2',
+      _carousel: false,
+      error: 'no design-v2 spec found upstream',
+      slides: [],
+      cost_usd: 0,
+    };
+  }
+  const slides = designSpec.slides;
+
+  // Pull top-3 brand reference URLs once — same anchor for every slide.
+  let referenceUrls = [];
+  try {
+    const trainingRetrieval = require('./agent-training-retrieval');
+    const topicKw = trainingRetrieval.expandTopicTags(run.topic || '');
+    const packet = await trainingRetrieval.getTrainingPacket({
+      agent: 'afshin', stageName: 'design-v2',
+      platform: recipe && recipe.id, language: lang || run.master_lang,
+      topicTags: [...topicKw, 'visual-reference'],
+    });
+    const designBriefs = (packet.exemplars || []).filter(e => e.kind === 'design_brief').slice(0, 3);
+    for (const d of designBriefs) {
+      const m = String(d.body || '').match(/URL:\s*(\S+)/);
+      if (m) referenceUrls.push(m[1]);
+    }
+  } catch (_) { /* non-fatal */ }
+
+  const renderedSlides = [];
+  let totalCost = 0;
+  let firstError = null;
+
+  for (const slide of slides) {
+    const slideN = slide.n || (renderedSlides.length + 1);
+    const imageSource = slide.image_source || 'generated';
+    let unsplashHeroUrl = null;
+    let unsplashAttribution = null;
+    let unsplashPhotographer = null;
+
+    // Fetch Unsplash hero when needed
+    if ((imageSource === 'mixed' || imageSource === 'unsplash')) {
+      if (!unsplash.hasKey()) {
+        if (imageSource === 'unsplash') {
+          // Pure-photo slide failed because key missing — skip with error
+          if (!firstError) firstError = `slide ${slideN}: UNSPLASH_ACCESS_KEY not set (pure-unsplash slide)`;
+          renderedSlides.push({
+            n: slideN,
+            template: slide.template,
+            error: 'UNSPLASH_ACCESS_KEY not set on server',
+            _hint: 'Set UNSPLASH_ACCESS_KEY (Settings → Health) to enable photo-only slides.',
+            _image_source: 'unsplash',
+          });
+          continue;
+        }
+        // mixed → degrade to generated
+        // (we'll fall through to gpt-image-2 with no Unsplash hero; final_prompt stays the same,
+        // but the visual will lack the photo backbone Afshin assumed)
+      } else {
+        // Try main query, then candidates
+        const queries = [];
+        if (slide.unsplash_query) queries.push(slide.unsplash_query);
+        if (Array.isArray(slide.unsplash_candidates)) {
+          for (const q of slide.unsplash_candidates) {
+            if (q && !queries.includes(q)) queries.push(q);
+          }
+        }
+        if (!queries.length && run.topic) queries.push(run.topic);
+
+        for (const q of queries) {
+          try {
+            const u = await unsplash.quickPick({
+              query: q,
+              orientation: slide.unsplash_orientation || 'squarish',
+              topic: run.topic, language: lang || run.master_lang,
+              topicTags: (run.topic || '').toLowerCase().split(/\s+/).filter(w => w.length >= 4).slice(0, 5),
+            });
+            if (u.ok) {
+              unsplashHeroUrl = u.url;
+              unsplashAttribution = u.attribution_text;
+              unsplashPhotographer = u.photographer;
+              // Pure-unsplash returns the photo as the slide image directly
+              if (imageSource === 'unsplash') {
+                renderedSlides.push({
+                  n: slideN,
+                  template: slide.template,
+                  url: u.url, key: u.r2_key, media_id: u.media_id,
+                  model: 'unsplash-stock', size: null, cost_usd: 0,
+                  prompt: `Unsplash search: "${q}"`,
+                  _image_source: 'unsplash',
+                  _attribution: u.attribution_text,
+                  _photographer: u.photographer,
+                  _unsplash_query: q,
+                  _final_prompt: slide.final_prompt || null,
+                });
+                break;
+              }
+              break;   // mixed: hero secured, fall through to gpt-image-2
+            }
+          } catch (_) { /* try next query */ }
+        }
+        if (!unsplashHeroUrl && imageSource === 'unsplash') {
+          if (!firstError) firstError = `slide ${slideN}: no Unsplash match for any query`;
+          renderedSlides.push({
+            n: slideN, template: slide.template,
+            error: 'no Unsplash match', _image_source: 'unsplash',
+            _unsplash_queries_tried: queries,
+          });
+          continue;
+        }
+      }
+    }
+
+    // For pure-unsplash that succeeded above, we already pushed; skip gpt-image-2.
+    if (imageSource === 'unsplash' && renderedSlides.find(r => r.n === slideN)) continue;
+
+    // Build the gpt-image-2 reference URL list. Brand logo is attached as
+    // image[0] inside compose-image.js (M97). Unsplash hero (if any) goes
+    // image[1]. Brand exemplars fill image[2..N].
+    const slideReferenceUrls = unsplashHeroUrl
+      ? [unsplashHeroUrl, ...referenceUrls]
+      : referenceUrls;
+
+    // Compose the final prompt — Afshin already wrote the comprehensive
+    // version in design-v2. We trust it as-is and append a brand-discipline
+    // safety footer that reminds the model about logo + pattern handling.
+    const finalPrompt = slide.final_prompt || '';
+    if (!finalPrompt) {
+      renderedSlides.push({
+        n: slideN, template: slide.template,
+        error: 'design-v2 produced no final_prompt for this slide',
+        _image_source: imageSource,
+      });
+      continue;
+    }
+
+    try {
+      const r = await composeImage.generateCover({
+        prompt: finalPrompt,
+        runId: run.id,
+        lang: lang || run.master_lang,
+        recipeId: recipe && recipe.id,
+        topic: `${run.topic} · slide ${slideN}`,
+        runOption: (run.options && run.options.image_model) || null,
+        designSuggestion: null,
+        recipeDefault: (recipe && recipe.default_image_model) || null,
+        referenceUrls: slideReferenceUrls,
+      });
+      if (!r.ok) {
+        if (!firstError) firstError = `slide ${slideN}: ${r.error}`;
+        renderedSlides.push({
+          n: slideN, template: slide.template,
+          error: r.error || 'generation failed',
+          _image_source: imageSource,
+          _final_prompt: finalPrompt,
+        });
+        continue;
+      }
+      totalCost += Number(r.cost_usd) || 0;
+      renderedSlides.push({
+        n: slideN,
+        template: slide.template,
+        url: r.url, key: r.key, media_id: r.mediaId,
+        model: r.model, size: r.size, cost_usd: r.cost_usd,
+        model_label: r.model_label || null,
+        prompt: finalPrompt,
+        _image_source: unsplashHeroUrl ? 'mixed' : 'generated',
+        _final_prompt: finalPrompt,
+        _ties_to_next: slide.ties_to_next,
+        _typography: slide.typography,
+        _palette: slide.palette,
+        _logo_placement: slide.logo_placement,
+        _pattern_usage: slide.pattern_usage,
+        ...(unsplashHeroUrl ? {
+          _attribution: unsplashAttribution,
+          _photographer: unsplashPhotographer,
+          _unsplash_hero_url: unsplashHeroUrl,
+          _unsplash_query: slide.unsplash_query,
+        } : {}),
+      });
+    } catch (e) {
+      if (!firstError) firstError = `slide ${slideN}: ${e.message}`;
+      renderedSlides.push({
+        n: slideN, template: slide.template,
+        error: e.message, _image_source: imageSource,
+        _final_prompt: finalPrompt,
+      });
+    }
+  }
+
+  const successes = renderedSlides.filter(s => s.url).length;
+  return {
+    _renderer: 'image-design-v2',
+    _carousel: true,
+    template: 'design-v2',
+    narrative_arc: designSpec.narrative_arc || null,
+    slides: renderedSlides,
+    cost_usd: totalCost,
+    slide_count: slides.length,
+    slides_rendered: successes,
+    partial_failure: firstError,
+  };
+}
+
 module.exports = {
   _default,
   // M26
@@ -1242,4 +1464,6 @@ module.exports = {
   'image-cover': imageCover,
   // M103 · Canva-native carousel renderer (compose Mode B)
   'canva':       canvaRender,
+  // M119 · IG-v2 image renderer (consumes design-v2 directly)
+  'image-design-v2': imageDesignV2,
 };

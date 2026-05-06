@@ -7953,11 +7953,52 @@ function coRenderForm() {
     <div class="flex items-center gap-2 mt-4 pt-3" style="border-top:1px solid var(--border, #e2e8f0);">
       <button class="btn btn-primary" onclick="coStart()">▶ Compose</button>
       <button class="btn btn-ghost btn-xs" onclick="coCancelForm()">Cancel</button>
+      <span id="co-cost-estimate" class="text-xs ml-auto" style="color:#64748b;"></span>
     </div>
   `;
   coRebuildLangChecks();
   coWireImageModelPicker();
   coWireDynamicOptions(r.id);
+  // M119 · Cost estimate display + auto-recompute on slide count / image toggle.
+  coUpdateCostEstimate();
+  ['co-opt-with_image','co-opt-as_carousel','co-opt-carousel_slides'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', coUpdateCostEstimate);
+    if (el) el.addEventListener('input', coUpdateCostEstimate);
+  });
+}
+
+// M119 · Estimate the per-run cost for the selected recipe + options.
+// Numbers are rough but useful as an upfront expectation.
+//   Rough cheap LLM call (haiku) ≈ $0.005
+//   Rough sonnet-tier call         ≈ $0.05
+//   Rough opus-tier call (verify)  ≈ $0.10
+//   gpt-image-2 per slide          ≈ $0.19
+function coUpdateCostEstimate() {
+  const el = document.getElementById('co-cost-estimate');
+  if (!el) return;
+  const r = _coState.selected;
+  if (!r) { el.textContent = ''; return; }
+  const slides = parseInt(($('co-opt-carousel_slides') || {}).value, 10) || 1;
+  const withImage = (() => {
+    const wi = $('co-opt-with_image');
+    return wi ? !!wi.checked : true;
+  })();
+
+  let estimate = 0;
+  // Rough recipe-aware estimates
+  if (r.id === 'ig') {
+    // M119 IG-v2: kb-dossier (cheap) + post-plan (cheap) + verify-kb (premium) + design-v2 (premium) + N images
+    estimate = 0.005 + 0.005 + 0.10 + (withImage ? (0.05 + slides * 0.19) : 0);
+  } else if (r.id === 'ig-canva') {
+    // Mode B: same upstream + canva render (much cheaper than gpt-image-2)
+    estimate = 0.005 + 0.005 + 0.10 + 0.05 + slides * 0.005;
+  } else {
+    // Generic estimate for telegram / facebook / x-thread / email / seo-article
+    const stages = (r.stages || []).length;
+    estimate = stages * 0.03 + (withImage ? 0.19 : 0);
+  }
+  el.innerHTML = `≈ <strong style="color:#0f172a;">$${estimate.toFixed(2)}</strong> per run${withImage && (r.id === 'ig' || r.id === 'ig-canva') ? ` <span style="color:#94a3b8;">(${slides} slide${slides === 1 ? '' : 's'})</span>` : ''}`;
 }
 
 // M103 · Resolve every option marked type='dynamic' by fetching from
@@ -8780,7 +8821,9 @@ function coRenderRun(run) {
           <div class="co-stage-meta">${escapeHtml(agent)}${s.model && s.agent && s.model !== s.agent ? ` · ${escapeHtml(s.model)}` : ''}</div>
           ${s.status === 'failed' && s.error ? `<div class="text-xs mt-1" style="color:var(--err);">${escapeHtml(s.error.slice(0, 300))}</div>` : ''}
           ${showOutput && s.output ? `<div class="co-stage-detail">${coRenderStageOutput(s, isGated)}</div>` : ''}
-          ${isGated ? `
+          ${isGated && s.stage_name === 'verify-kb' ? coRenderGateA(s, run) :
+            isGated && s.stage_name === 'design-v2' ? coRenderGateB(s, run) :
+            isGated ? `
             <div class="mt-3 flex items-center gap-2">
               <button class="btn btn-primary btn-xs" onclick="coApprove('${run.id}')">✓ Approve & continue</button>
               <button class="btn btn-ghost btn-xs" onclick="coCancel('${run.id}')">Cancel run</button>
@@ -9532,6 +9575,206 @@ async function coApprove(runId) {
     authFetch(`${PROXY}/compose/runs/${runId}/run`, { method: 'POST' }).catch(() => {});
     coStartPoll(runId);
   } catch (e) { alert('Error: ' + e.message); }
+}
+
+// M119 · Reject-with-notes — used by Gate A (verify-kb) + Gate B (design-v2).
+// Notes feed into REFINE NOTES on the next attempt of the upstream stage.
+async function coReject(runId, stageName) {
+  const notes = prompt(
+    `Why are you rejecting this ${stageName === 'verify-kb' ? 'post plan' : 'design plan'}?\n\n` +
+    'Be specific — your notes will be injected verbatim into the next attempt as a fix instruction.\n' +
+    '(e.g. "make the CTA softer", "use a flag-overlay template for slide 1, not type-led", "the ORE fee should be £1066 not £1000")'
+  );
+  if (!notes || !notes.trim()) return;
+  try {
+    const r = await authFetch(`${PROXY}/compose/runs/${runId}/reject`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stage_name: stageName, notes: notes.trim() }),
+    });
+    if (r.status === 401) return alert('Sign in required.');
+    const j = await r.json();
+    if (!j.ok) return alert('Reject failed: ' + (j.error || '?'));
+    authFetch(`${PROXY}/compose/runs/${runId}/run`, { method: 'POST' }).catch(() => {});
+    coStartPoll(runId);
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+// M119 · Gate A — verify-kb passed. Founder reviews post-plan content
+// (caption + emojis + hashtags + slides) along with the verify-kb verdict,
+// then approves or rejects with notes.
+function coRenderGateA(verifyStage, run) {
+  // Find the post-plan stage that this verify-kb verified
+  const postPlanStage = (run.stages || []).find(s => s.stage_name === 'post-plan' && s.lang == null && s.status === 'done');
+  const post = (postPlanStage && postPlanStage.output) || {};
+  const verify = verifyStage.output || {};
+
+  const slides = Array.isArray(post.slides) ? post.slides : [];
+  const slidesHtml = slides.map((sl, i) => `
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;padding:10px;border-radius:6px;">
+      <div class="flex items-center gap-2 flex-wrap mb-2">
+        <strong style="font-size:13px;color:#0c4a6e;">Slide ${sl.n || i + 1}</strong>
+        ${sl.role ? `<span class="pill" style="font-size:10px;background:#dbeafe;color:#1e40af;">${escapeHtml(sl.role)}</span>` : ''}
+        ${sl.country_pill ? `<span class="pill" style="font-size:10px;background:#dcfce7;color:#166534;">${escapeHtml(sl.country_pill)}</span>` : ''}
+      </div>
+      ${sl.headline ? `<div style="font-weight:600;font-size:14px;line-height:1.4;">${escapeHtml(sl.headline)}</div>` : ''}
+      ${sl.subheading ? `<div style="font-size:13px;color:#475569;margin-top:4px;">${escapeHtml(sl.subheading)}</div>` : ''}
+      ${Array.isArray(sl.bullets) && sl.bullets.length ? `
+        <ul class="text-xs mt-2" style="color:#1e293b;list-style-type:disc;padding-left:16px;">${sl.bullets.map(b => `<li>${escapeHtml(b)}</li>`).join('')}</ul>` : ''}
+      ${sl.key_number ? `<div style="margin-top:6px;"><span class="mono" style="background:#0c4a6e;color:#f8fafc;padding:2px 8px;border-radius:4px;font-weight:600;">${escapeHtml(sl.key_number)}</span></div>` : ''}
+      ${sl.narrative_purpose ? `<div class="text-xs mt-2" style="color:#64748b;font-style:italic;">${escapeHtml(sl.narrative_purpose)}</div>` : ''}
+    </div>
+  `).join('');
+
+  // Daneshyar's verify-kb structured findings
+  const factsChecked = Array.isArray(verify.facts_checked) ? verify.facts_checked : [];
+  const supported = factsChecked.filter(f => f.verdict === 'supported').length;
+  const unsupported = factsChecked.filter(f => f.verdict === 'unsupported').length;
+  const contradicted = factsChecked.filter(f => f.verdict === 'contradicted').length;
+
+  return `
+    <div class="mt-3" style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:14px;">
+      <div class="flex items-center gap-2 mb-3 flex-wrap">
+        <strong style="font-size:14px;color:#166534;">🚦 GATE A · Founder approval</strong>
+        <span class="pill ok" style="font-size:10px;">✓ Daneshyar verified</span>
+        <span class="text-xs" style="color:#15803d;">${supported} supported · ${unsupported} unsupported · ${contradicted} contradicted</span>
+        ${typeof verify.overall_confidence === 'number' ? `<span class="text-xs" style="color:#15803d;">confidence ${(verify.overall_confidence*100).toFixed(0)}%</span>` : ''}
+      </div>
+      <div class="text-xs mb-3" style="color:#166534;">
+        Daneshyar checked every claim against the KB and approved. Review the caption + slides below; if good, approve. If something needs to change, reject with specific notes — Sepehr will re-plan and Daneshyar will re-verify.
+      </div>
+
+      ${post.caption ? `
+      <div style="background:#fff;border:1px solid #d1fae5;padding:12px;border-radius:6px;margin-bottom:10px;" data-auto-rtl>
+        <div class="text-xs uppercase tracking-wider mb-1" style="color:#166534;font-weight:600;">📝 Caption (${(post.caption.split(/\\s+/).filter(Boolean).length)} words)</div>
+        <div style="font-size:14px;line-height:1.6;white-space:pre-wrap;">${escapeHtml(post.caption)}</div>
+        ${Array.isArray(post.emojis_used) && post.emojis_used.length ? `<div class="text-xs mt-2" style="color:#64748b;">Emojis used: ${post.emojis_used.map(e => `<span style="font-size:16px;">${escapeHtml(e)}</span>`).join(' ')}</div>` : ''}
+      </div>` : ''}
+
+      ${Array.isArray(post.hashtags) && post.hashtags.length ? `
+      <div style="background:#fff;border:1px solid #d1fae5;padding:10px;border-radius:6px;margin-bottom:10px;">
+        <div class="text-xs uppercase tracking-wider mb-2" style="color:#166534;font-weight:600;"># Hashtags (${post.hashtags.length})</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;">
+          ${post.hashtags.map(h => `<span class="pill" style="font-size:11px;background:#0c4a6e;color:#fff;">${escapeHtml(h)}</span>`).join('')}
+        </div>
+      </div>` : ''}
+
+      ${slides.length ? `
+      <div class="text-xs uppercase tracking-wider mb-2" style="color:#166534;font-weight:600;">🎬 ${slides.length} slides</div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3" data-auto-rtl>${slidesHtml}</div>
+      ` : ''}
+
+      ${post.partition_compliance ? `<div class="text-xs mb-3" style="color:#64748b;font-style:italic;">📐 ${escapeHtml(post.partition_compliance)}</div>` : ''}
+
+      ${factsChecked.length ? `
+      <details class="mb-3">
+        <summary class="text-xs cursor-pointer" style="color:#15803d;">📋 Daneshyar fact-check details (${factsChecked.length} claims)</summary>
+        <div class="mt-2" style="max-height:240px;overflow-y:auto;background:#fff;border:1px solid #d1fae5;padding:8px;border-radius:6px;">
+          ${factsChecked.slice(0, 30).map(f => `
+            <div class="text-xs mb-2" style="border-bottom:1px dashed #d1fae5;padding-bottom:4px;">
+              <span class="pill" style="font-size:9px;background:${f.verdict === 'supported' ? '#dcfce7' : f.verdict === 'contradicted' ? '#fee2e2' : '#fef3c7'};color:${f.verdict === 'supported' ? '#166534' : f.verdict === 'contradicted' ? '#991b1b' : '#854d0e'};">${escapeHtml(f.verdict || '?')}</span>
+              <strong style="margin-left:4px;">${escapeHtml(f.location || '?')}</strong>
+              <div style="margin-top:2px;color:#475569;">"${escapeHtml((f.claim || '').slice(0, 200))}"</div>
+              ${f.evidence ? `<div style="color:#64748b;margin-top:2px;">↳ ${escapeHtml(f.evidence.slice(0, 200))}</div>` : ''}
+            </div>
+          `).join('')}
+        </div>
+      </details>` : ''}
+
+      <div class="flex items-center gap-2 flex-wrap mt-3 pt-3" style="border-top:1px solid #d1fae5;">
+        <button class="btn btn-primary btn-xs" onclick="coApprove('${run.id}')">✓ Approve · continue to design</button>
+        <button class="btn btn-ghost btn-xs" onclick="coReject('${run.id}', 'verify-kb')" style="color:#dc2626;border-color:#fecaca;">↶ Reject with notes</button>
+        <button class="btn btn-ghost btn-xs" onclick="coCancel('${run.id}')">Cancel run</button>
+      </div>
+    </div>`;
+}
+
+// M119 · Gate B — design-v2 produced. Founder reviews per-slide design plan
+// (template + colors + fonts + Unsplash thumb if mixed/unsplash + narrative arc),
+// then approves or rejects with notes.
+function coRenderGateB(designStage, run) {
+  const design = designStage.output || {};
+  const slides = Array.isArray(design.slides) ? design.slides : [];
+
+  const swatches = (palette) => {
+    if (!palette || typeof palette !== 'object') return '';
+    return Object.entries(palette).map(([k, hex]) =>
+      `<span title="${escapeHtml(k)}: ${escapeHtml(hex)}" style="display:inline-block;width:18px;height:18px;border-radius:3px;background:${escapeHtml(hex)};border:1px solid rgba(0,0,0,0.1);vertical-align:middle;"></span>`
+    ).join(' ');
+  };
+
+  const slidesHtml = slides.map((sl, i) => {
+    const tColor = ({
+      'type-led':'#0c4a6e','data-card':'#00a69c','photo-hero':'#7c2d12',
+      'quote-card':'#854d0e','split-frame':'#7c3aed','document-mock':'#475569',
+      'flag-overlay':'#dc2626','cta-card':'#15803d',
+    })[sl.template] || '#64748b';
+    return `
+    <div style="background:#fff;border:1px solid #e2e8f0;padding:12px;border-radius:8px;">
+      <div class="flex items-center gap-2 flex-wrap mb-2">
+        <strong style="font-size:13px;">Slide ${sl.n || i + 1}</strong>
+        <span class="pill" style="font-size:10px;background:${tColor};color:#fff;">${escapeHtml(sl.template || '?')}</span>
+        <span class="pill" style="font-size:10px;background:${sl.image_source === 'unsplash' ? '#dbeafe' : sl.image_source === 'mixed' ? '#fef3c7' : '#ede9fe'};color:${sl.image_source === 'unsplash' ? '#1e40af' : sl.image_source === 'mixed' ? '#854d0e' : '#5b21b6'};">${escapeHtml(sl.image_source || 'generated')}</span>
+      </div>
+      ${sl.typography ? `
+      <div class="text-xs mb-2" style="color:#475569;">
+        <strong>Typography:</strong> ${escapeHtml(sl.typography.heading_font || '?')} ${escapeHtml(sl.typography.heading_size || '')} / ${escapeHtml(sl.typography.body_font || '?')} ${escapeHtml(sl.typography.body_size || '')}
+      </div>` : ''}
+      ${sl.palette ? `
+      <div class="text-xs mb-2" style="color:#475569;">
+        <strong>Palette:</strong> ${swatches(sl.palette)}
+        <span class="mono" style="font-size:10px;color:#64748b;margin-left:6px;">${Object.values(sl.palette).join(' · ')}</span>
+      </div>` : ''}
+      <div class="text-xs mb-2" style="color:#475569;">
+        <strong>Logo:</strong> ${escapeHtml(sl.logo_placement || 'absent')} · <strong>Pattern:</strong> ${escapeHtml(sl.pattern_usage || 'none')}
+      </div>
+      ${sl.unsplash_query ? `
+      <div class="text-xs mb-2" style="color:#1e40af;">
+        <strong>📷 Unsplash query:</strong> <em>${escapeHtml(sl.unsplash_query)}</em>
+        ${Array.isArray(sl.unsplash_candidates) && sl.unsplash_candidates.length > 1 ? `
+          <details style="display:inline-block;margin-left:6px;">
+            <summary class="text-xs cursor-pointer" style="color:#64748b;">+${sl.unsplash_candidates.length - 1} alternatives</summary>
+            <div class="text-xs mt-1" style="color:#64748b;">${sl.unsplash_candidates.filter(c => c !== sl.unsplash_query).map(c => `<em>${escapeHtml(c)}</em>`).join(' · ')}</div>
+          </details>` : ''}
+      </div>` : ''}
+      ${sl.design_directive ? `
+      <div class="text-xs mt-2" style="background:#fffbeb;color:#451a03;padding:6px;border-radius:4px;line-height:1.55;" data-auto-rtl>
+        <strong>Design directive:</strong> ${escapeHtml(sl.design_directive)}
+      </div>` : ''}
+      ${sl.ties_to_next ? `
+      <div class="text-xs mt-2" style="color:#64748b;font-style:italic;">↪ ${escapeHtml(sl.ties_to_next)}</div>` : ''}
+      ${sl.final_prompt ? `
+      <details class="mt-2">
+        <summary class="text-xs cursor-pointer" style="color:#7c3aed;">⚙ See full gpt-image-2 prompt (${sl.final_prompt.split(/\\s+/).filter(Boolean).length} words)</summary>
+        <pre style="font-size:10px;background:#f8fafc;padding:6px;border-radius:4px;margin-top:4px;white-space:pre-wrap;color:#0f172a;line-height:1.5;">${escapeHtml(sl.final_prompt)}</pre>
+      </details>` : ''}
+    </div>`;
+  }).join('');
+
+  return `
+    <div class="mt-3" style="background:#fef3c7;border:1px solid #fde68a;border-radius:8px;padding:14px;">
+      <div class="flex items-center gap-2 mb-3 flex-wrap">
+        <strong style="font-size:14px;color:#854d0e;">🚦 GATE B · Founder approval</strong>
+        <span class="pill" style="font-size:10px;background:#fef3c7;color:#854d0e;">design plan ready</span>
+        <span class="text-xs" style="color:#92400e;">${slides.length} slides · ${slides.filter(s => s.image_source === 'mixed' || s.image_source === 'unsplash').length} need Unsplash · ~$${(0.19 * slides.filter(s => s.image_source !== 'unsplash').length).toFixed(2)} image-gen cost ahead</span>
+      </div>
+      <div class="text-xs mb-3" style="color:#854d0e;">
+        Afshin's per-slide design plan. Each slide picks a template, colors, fonts, and (for photo slides) an Unsplash query. Review the plan; if good, approve and the image generator runs. If something needs to change, reject with specific notes — Afshin will redesign with your feedback.
+      </div>
+
+      ${design.narrative_arc ? `
+      <div style="background:#fff;border:1px solid #fde68a;padding:10px;border-radius:6px;margin-bottom:10px;" data-auto-rtl>
+        <div class="text-xs uppercase tracking-wider mb-1" style="color:#854d0e;font-weight:600;">📚 Narrative arc</div>
+        <div style="font-size:13px;line-height:1.55;color:#451a03;">${escapeHtml(design.narrative_arc)}</div>
+      </div>` : ''}
+
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-2 mb-3">${slidesHtml}</div>
+
+      <div class="flex items-center gap-2 flex-wrap mt-3 pt-3" style="border-top:1px solid #fde68a;">
+        <button class="btn btn-primary btn-xs" onclick="coApprove('${run.id}')">✓ Approve · generate images</button>
+        <button class="btn btn-ghost btn-xs" onclick="coReject('${run.id}', 'design-v2')" style="color:#dc2626;border-color:#fecaca;">↶ Reject with notes</button>
+        <button class="btn btn-ghost btn-xs" onclick="coCancel('${run.id}')">Cancel run</button>
+      </div>
+    </div>`;
 }
 
 async function coCancel(runId) {
@@ -15070,6 +15313,35 @@ function _bpRender() {
                  p.example_captions, 'paste captions you have written that nail the voice — separate examples with a blank line · highest leverage for matching tone',
                  8)}
     </div>
+
+    <!-- M119 · IG-v2 brand controls -->
+    <div class="mt-6 pt-4" style="border-top:1px solid #e2e8f0;">
+      <h4 class="font-semibold text-sm mb-3" style="color:#0c4a6e;">🎨 IG-v2 controls</h4>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="text-xs uppercase tracking-wider text-slate-500 font-semibold">Emoji palette</label>
+          <div class="text-xs text-slate-400 mt-1">Sepehr's post-planner picks 2–4 emojis from THIS set per caption. Drop emojis here separated by spaces. Keep small + on-brand.</div>
+          <input id="bp-emoji_palette" type="text" value="${escapeHtml((p.emoji_palette || []).join(' '))}"
+                 class="w-full border border-slate-200 rounded px-2 py-2 text-base mt-1" style="font-size:18px;letter-spacing:4px;">
+          <div class="text-xs text-slate-400 mt-1">Defaults: 🦷 🌍 ✈️ 📋 ✓ 🏥 ⚕️ 📍 📌 💼</div>
+        </div>
+        <div>
+          <label class="text-xs uppercase tracking-wider text-slate-500 font-semibold">Design templates enabled</label>
+          <div class="text-xs text-slate-400 mt-1">Afshin picks one template per slide from this set. Untick a template to disable it across all IG-v2 runs.</div>
+          <div class="grid grid-cols-2 gap-1 mt-2" id="bp-templates-grid">
+            ${['type-led','data-card','photo-hero','quote-card','split-frame','document-mock','flag-overlay','cta-card'].map(t => {
+              const enabled = !p.design_templates_enabled || p.design_templates_enabled.includes(t);
+              return `
+                <label class="flex items-center gap-2 text-xs" style="cursor:pointer;padding:4px 8px;background:#f8fafc;border-radius:4px;border:1px solid #e2e8f0;">
+                  <input type="checkbox" data-bp-template="${t}" ${enabled ? 'checked' : ''}>
+                  <span class="mono">${escapeHtml(t)}</span>
+                </label>`;
+            }).join('')}
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="mt-4">
       <details>
         <summary class="text-xs text-slate-500 cursor-pointer">Preview the prompt block agents will see</summary>
@@ -15084,6 +15356,12 @@ function _bpReadValuesFromForm() {
   // Example captions are separated by BLANK LINES so users can paste multi-line posts.
   const splitByBlank = (s) => String(s || '').split(/\n\s*\n/).map(x => x.trim()).filter(Boolean);
   const splitLines   = (s) => String(s || '').split(/\n/).map(x => x.trim()).filter(Boolean);
+  // M119 · Emoji palette comes from a single space/whitespace-separated input.
+  // Each emoji can be 1+ Unicode codepoints (skin-tone modifiers, ZWJ, etc.).
+  const splitWS      = (s) => String(s || '').split(/\s+/).map(x => x.trim()).filter(Boolean);
+  // M119 · Read which design templates are enabled (checkboxes).
+  const enabledTemplates = Array.from(document.querySelectorAll('[data-bp-template]'))
+    .filter(el => el.checked).map(el => el.getAttribute('data-bp-template'));
   return {
     name: get('bp-name').trim(),
     founder_name: get('bp-founder_name').trim(),
@@ -15097,6 +15375,9 @@ function _bpReadValuesFromForm() {
     always_include: splitLines(get('bp-always_include')),
     never_include: splitLines(get('bp-never_include')),
     example_captions: splitByBlank(get('bp-example_captions')),
+    // M119
+    emoji_palette: splitWS(get('bp-emoji_palette')),
+    design_templates_enabled: enabledTemplates,
   };
 }
 
