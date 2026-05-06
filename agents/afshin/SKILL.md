@@ -158,7 +158,9 @@ In your `final_prompt` you can REFER to image[0] explicitly: "render the logo fr
 ## What I always do (IG-v2)
 
 - Read the post-plan slide-by-slide BEFORE picking templates
-- Honor `master_lang` for Persian numerals + Peyda font
-- Provide a complete `final_prompt` per slide that includes: text content (verbatim from post-plan), font name + weight + size, hex colors for every visual element, logo placement, pattern usage, layout description, mood
-- Provide `narrative_arc` (1 paragraph) explaining how the carousel reads end-to-end
-- Provide `ties_to_next` per slide so the founder sees the connection
+- **Pipeline language is ALWAYS English**: my `narrative_arc`, `design_directive`, and `final_prompt` are written in English regardless of the founder's chosen `output_lang`. The image-gen model follows English instructions best.
+- **On-image text strings come from the translation when present**: when Goyesh has run `translate-post`, I take the translated text strings and embed them as quoted on-image text inside my English `final_prompt`. When `output_lang === 'en'`, I use post-plan's English strings directly.
+- Persian numerals (۰-۹) only appear in `final_prompt` inside the quoted on-image text strings — never in the surrounding English instructions
+- Provide a complete `final_prompt` per slide that includes: the on-image text content (in target language, quoted), font name + weight + size, hex colors for every visual element, logo placement, pattern usage, layout description, mood — all in English
+- Provide `narrative_arc` (1 paragraph in English) explaining how the carousel reads end-to-end
+- Provide `ties_to_next` per slide (in English) so the founder sees the connection

@@ -248,6 +248,11 @@ async function _buildSystemPrompt({ agent, stageName, recipe, run, masterDraft, 
       if (kb) blocks.push(kb);
     } catch (_) { /* non-fatal */ }
   }
+  // M123 · IG-v2 brand-voice + translate-post don't need KB grounding
+  // (brand-voice checks tone against brand_profile; translate-post does
+  // text translation only). The brand_profile block above already gives
+  // both stages the brand voice rules + emoji palette + design templates,
+  // which is exactly what they need. No additional KB recall here.
 
   // M41 · Protected terms glossary — auto-derived from KB, never seeded.
   // Injected for verify-translation (where it matters most) and translate (so the translator
@@ -965,6 +970,9 @@ const _DEFAULT_RETRY_CAPS = {
   // Cap=3 because per-claim feedback gives the planner specific, applicable fixes
   // (vs the looser draft refines that need 1–2 attempts max).
   'verify-kb': 3,
+  // M123 · IG-v2 brand-voice tone check refines back to post-plan with
+  // actionable fixes. Cap=2 — voice issues are usually quick to address.
+  'brand-voice': 2,
 };
 
 // Map: failing stage → which prior stage to re-run.
@@ -978,6 +986,8 @@ const _REFINE_TARGETS = {
   'verify-translation':  ['translate'],
   // M119 · IG-v2 verify-kb fails → re-run post-plan with corrections injected.
   'verify-kb':           ['post-plan'],
+  // M123 · IG-v2 brand-voice fails → re-run post-plan with tone fixes.
+  'brand-voice':         ['post-plan'],
 };
 
 // Inspect a stage output to decide whether it triggers a refine.
@@ -1000,6 +1010,16 @@ function _detectRefineTrigger(stageName, output) {
   }
   if (stageName === 'voice-critic' && (v === 'block' || v === 'needs_voice_polish')) {
     return { trigger: true, reason: v, fixes: driftAsFixes };
+  }
+  // M123 · IG-v2 brand-voice (Bidar): cheap-LLM tone check. Fails on
+  // verdict in {fail, needs_refine}; loops back to post-plan with
+  // actionable_fixes.
+  if (stageName === 'brand-voice' && (v === 'fail' || v === 'needs_refine')) {
+    const issuesAsFixes = Array.isArray(output.voice_issues)
+      ? output.voice_issues.map(i => `[${i.location || '?'}] ${i.observed || i.rule_violated || 'voice issue'}`).slice(0, 6)
+      : [];
+    const merged = (fixes && fixes.length) ? fixes : issuesAsFixes;
+    return { trigger: true, reason: v, fixes: merged };
   }
   if (stageName === 'verify' && output.passed === false) {
     const issuesAsFixes = Array.isArray(output.issues)
@@ -1119,6 +1139,10 @@ function _runComplexity(run) {
 // Should this stage run for this run? Honors:
 //   - if_option              : skip when run.options[key] is falsy
 //   - if_complexity_at_least : skip when current complexity rank < required rank
+//   - skip_if_output_lang_en : M123 · skip when output_lang is 'en' (or
+//                              missing). Used by IG-v2's translate-post
+//                              stage which only runs for non-English
+//                              final outputs.
 function _stageShouldRun(stage, run) {
   if (!stage) return false;
   if (stage.if_option) {
@@ -1129,6 +1153,10 @@ function _stageShouldRun(stage, run) {
     const required = _COMPLEXITY_RANK[stage.if_complexity_at_least] || 0;
     const current  = _COMPLEXITY_RANK[_runComplexity(run)] || 2;
     if (current < required) return false;
+  }
+  if (stage.skip_if_output_lang_en) {
+    const outputLang = String((run.options || {}).output_lang || run.master_lang || 'en').toLowerCase();
+    if (outputLang === 'en') return false;
   }
   return true;
 }
@@ -1296,6 +1324,16 @@ async function _executeLlmStage({ runId, run, recipe, stage, stageIndex, lang, p
   // M60 · Carousel spec from Tarrah is consumed by the `design` stage so
   // Afshin renders each slide using the structured slot values.
   if (priorMaster['carousel-plan']) userParts.push(`\n--- CAROUSEL SPEC (from Tarrah) ---\n${JSON.stringify(priorMaster['carousel-plan'], null, 2)}`);
+  // M119 · IG-v2 chain — Pooya's dossier and Sepehr's post-plan flow forward.
+  if (priorMaster['kb-dossier'])  userParts.push(`\n--- KB DOSSIER (from Pooya) ---\n${JSON.stringify(priorMaster['kb-dossier'], null, 2)}`);
+  if (priorMaster['post-plan'])   userParts.push(`\n--- POST-PLAN (English source — from Sepehr) ---\n${JSON.stringify(priorMaster['post-plan'], null, 2)}`);
+  // M123 · IG-v2 verify-kb output and brand-voice output give downstream
+  // stages context on what was already checked. Translate-post output (if
+  // present) provides the target-language strings that Afshin embeds into
+  // the on-image text inside an English design prompt.
+  if (priorMaster['verify-kb'])    userParts.push(`\n--- VERIFY-KB (from Daneshyar — facts already checked) ---\n${JSON.stringify(priorMaster['verify-kb'], null, 2)}`);
+  if (priorMaster['brand-voice'])  userParts.push(`\n--- BRAND-VOICE (from Bidar — tone already checked) ---\n${JSON.stringify(priorMaster['brand-voice'], null, 2)}`);
+  if (priorMaster['translate-post']) userParts.push(`\n--- TRANSLATION (from Goyesh — target_lang strings; embed verbatim into on-image text) ---\n${JSON.stringify(priorMaster['translate-post'], null, 2)}`);
   if (stage.params) userParts.push(`\n--- STAGE PARAMS ---\n${JSON.stringify(stage.params, null, 2)}`);
   userParts.push(`\nReturn the JSON for stage "${stageName}" now.`);
   const userPrompt = userParts.join('\n');
@@ -1755,18 +1793,35 @@ async function _executeRenderer({ runId, run, recipe, stage, stageIndex, lang })
       // draft+adapt (i.e. the IG-v2 flow), feed the renderer the post-plan
       // output merged with image stage output (so caption + hashtags + slides
       // all land in the final shape together).
+      // M123 · When translate-post has run (output_lang != 'en'), the
+      // FINAL displayable text comes from the translation, not the English
+      // source. The renderer prefers translate-post.fields when present;
+      // post-plan stays the structural fallback for English-final runs.
       if (!sourceForRender || !Object.keys(sourceForRender).length) {
-        const postPlanRow = masterDone.find(s => s.stage_name === 'post-plan');
-        const designV2Row = masterDone.find(s => s.stage_name === 'design-v2');
-        const imageRow    = masterDone.find(s => s.stage_name === 'image');
+        const postPlanRow  = masterDone.find(s => s.stage_name === 'post-plan');
+        const translateRow = masterDone.find(s => s.stage_name === 'translate-post');
+        const designV2Row  = masterDone.find(s => s.stage_name === 'design-v2');
+        const imageRow     = masterDone.find(s => s.stage_name === 'image');
         if (postPlanRow && postPlanRow.output) {
-          sourceForRender = {
-            ...postPlanRow.output,
-            // Carry through Afshin's design plan + actual generated slides
-            // so the IG mockup can show the carousel images alongside caption.
-            ...(designV2Row && designV2Row.output ? { design_plan: designV2Row.output } : {}),
-            ...(imageRow && imageRow.output ? { _image_render: imageRow.output } : {}),
-          };
+          // Translation wins for caption + hashtags + slides when present.
+          // English source preserved alongside as `_english_source` so
+          // the dashboard can show side-by-side at the final preview.
+          const translated = translateRow && translateRow.output && translateRow.output.fields;
+          sourceForRender = translated
+            ? {
+                ...postPlanRow.output,                      // structural keys (slide_count, etc.)
+                ...translated,                              // overlays caption/hashtags/slides with target_lang
+                _english_source: postPlanRow.output,
+                _output_lang: (translateRow.output.target_lang) || 'en',
+                ...(designV2Row && designV2Row.output ? { design_plan: designV2Row.output } : {}),
+                ...(imageRow    && imageRow.output    ? { _image_render: imageRow.output } : {}),
+              }
+            : {
+                ...postPlanRow.output,
+                _output_lang: 'en',
+                ...(designV2Row && designV2Row.output ? { design_plan: designV2Row.output } : {}),
+                ...(imageRow    && imageRow.output    ? { _image_render: imageRow.output } : {}),
+              };
         }
       }
     }

@@ -45,7 +45,12 @@ const CAPABILITY_REGISTRY = {
   // first-match-wins meant we never used Bidar for critique anyway.
   // Bidar now focuses on his specialty: judge + voice-critic.
   kherad:    ['critique'],
-  bidar:     ['judge', 'voice-critic'],   // M43 · pairwise eval judge · M50 · voice fingerprint critic
+  // M123 · Bidar gains 'brand-voice' for IG-v2: a cheap-LLM tone alignment
+  // check that operates on the English post-plan (caption + slides) against
+  // brand_profile.voice_rules / always_include / never_include. Loops back
+  // to post-plan on fail (cap=2). Distinct from the legacy 'voice-critic'
+  // capability which checks fingerprint similarity against brand exemplars.
+  bidar:     ['judge', 'voice-critic', 'brand-voice'],   // M43 · M50 · M123
 
   // Adversarial audit (escalation when critique flags red)
   // M98 · davari is SOLE owner (audit removed from bidar — was first-match
@@ -54,7 +59,12 @@ const CAPABILITY_REGISTRY = {
   davari:    ['audit'],
 
   // Translation
-  goyesh:    ['translate'],
+  // M123 · Goyesh gains 'translate-post' for IG-v2: a flagship-model
+  // (NEVER_AUTO_PICK) translation step that converts the English post-plan
+  // output (caption + hashtags + slide texts) to the founder's chosen
+  // output_lang. Distinct from the legacy 'translate' capability which is
+  // used for back-translation QA on existing target_langs fanout.
+  goyesh:    ['translate', 'translate-post'],
 
   // Channel-native adaptation (subject lines, length, hashtags, CTA placement)
   avang:     ['adapt'],

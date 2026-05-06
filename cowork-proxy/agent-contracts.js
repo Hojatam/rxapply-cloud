@@ -236,6 +236,35 @@ const SCHEMAS = {
       slides:        { type: 'array',  required: true, items: { type: 'object' } },
     },
   },
+
+  // M123 · IG-v2 brand-voice tone check. Cheap-LLM, English-only. Reads
+  // post-plan output (caption + slides) and brand_profile.voice_rules /
+  // always_include / never_include. On fail, refines back to post-plan
+  // with structured fix instructions (cap=2).
+  'brand-voice': {
+    type: 'object',
+    properties: {
+      passed:           { type: 'boolean', required: true },
+      voice_issues:     { type: 'array',  items: { type: 'object' } },
+      actionable_fixes: { type: 'array',  items: { type: 'string' } },
+      summary:          { type: 'string' },
+      verdict:          { type: 'string', enum: ['pass', 'needs_refine', 'fail'] },
+    },
+  },
+
+  // M123 · IG-v2 flagship translation. Reads post-plan output (English)
+  // and produces the same structure with translated text strings. The
+  // English source is preserved alongside the translation so design-v2
+  // and Gate A can show both side-by-side.
+  'translate-post': {
+    type: 'object',
+    properties: {
+      target_lang: { type: 'string', required: true, minLength: 2 },
+      fields:      { type: 'object', required: true },
+      passed:      { type: 'boolean' },
+      notes:       { type: 'string' },
+    },
+  },
 };
 
 // ── Lightweight validator ────────────────────────────────────────────

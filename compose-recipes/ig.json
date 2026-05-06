@@ -2,32 +2,40 @@
   "id": "ig",
   "label": "Instagram",
   "icon": "instagram",
-  "description": "Instagram carousel post (M119 · IG-v2 lean pipeline). KB.recall(20) → Pooya dossier (cheap) → Sepehr post-plan (cheap, caption + hashtags + emojis + slides) → Daneshyar verify-kb (premium, KB-only fact check, loops to post-plan cap=3) → 🚦 Gate A (founder approves caption + slides) → Afshin design-v2 (premium, picks 1 of 8 templates per slide, generates Unsplash queries, composes full per-slide gpt-image-2 prompt with text/font/colors/logo/pattern) → 🚦 Gate B (founder approves design plan) → image generation. Two human-in-the-loop gates before any image is created.",
-  "version": "101",
+  "description": "Instagram carousel post (M123 · IG-v2 lean pipeline). All upstream agents work in English; Goyesh translates only the on-image text strings at the end (flagship-quality). Flow: KB.recall(20) → Pooya kb-dossier → Sepehr post-plan (English caption + hashtags + emojis + slides) → Daneshyar verify-kb (KB-only fact check, loops to post-plan cap=3) → Bidar brand-voice (tone check, loops to post-plan cap=2) → Goyesh translate-post (FLAGSHIP, only when output_lang != en) → 🚦 Gate A → Afshin design-v2 (English design directive; translated text strings on-image) → 🚦 Gate B → image generation → render. Two human-in-the-loop gates before any image is created.",
+  "version": "102",
   "length_target_words": "38–75 (mean 60, p95 119 — never exceed 119)",
 
   "stages": [
-    { "name": "kb-dossier",   "capability": "kb-dossier" },
-    { "name": "post-plan",    "capability": "post-plan",
+    { "name": "kb-dossier",     "capability": "kb-dossier" },
+    { "name": "post-plan",      "capability": "post-plan",
       "params": { "length_words": [38, 75], "hard_max_words": 119 } },
-    { "name": "verify-kb",    "capability": "verify-kb" },
-    { "name": "design-v2",    "capability": "design-v2", "if_option": "with_image" },
-    { "name": "image",        "renderer": "image-design-v2", "if_option": "with_image" },
-    { "name": "render",       "renderer": "ig" }
+    { "name": "verify-kb",      "capability": "verify-kb" },
+    { "name": "brand-voice",    "capability": "brand-voice" },
+    { "name": "translate-post", "capability": "translate-post", "skip_if_output_lang_en": true },
+    { "name": "design-v2",      "capability": "design-v2", "if_option": "with_image" },
+    { "name": "image",          "renderer": "image-design-v2", "if_option": "with_image" },
+    { "name": "render",         "renderer": "ig" }
   ],
 
   "gateable_stages": ["verify-kb", "design-v2"],
-
-  "translate": {
-    "capability": "translate",
-    "stages_to_retranslate": ["caption", "hashtags"]
-  },
 
   "options_schema": [
     { "key": "primary_cta",     "label": "CTA URL (link in bio)", "type": "text", "placeholder": "https://rxapply.com" },
     { "key": "max_hashtags",    "label": "Max hashtags",          "type": "number", "default": 8, "min": 3, "max": 30 },
     { "key": "with_image",      "label": "Generate carousel slide images (~$0.19 per slide)", "type": "checkbox", "default": true },
     { "key": "carousel_slides", "label": "Slide count",           "type": "number", "default": 4, "min": 1, "max": 12 },
+    { "key": "output_lang",     "label": "Output language (text on slides + caption)", "type": "select",
+      "default": "en",
+      "options": [
+        { "value": "en", "label": "English (no translation)" },
+        { "value": "fa", "label": "Persian / فارسی (flagship translation by Goyesh)" },
+        { "value": "ar", "label": "Arabic / العربية (flagship translation by Goyesh)" },
+        { "value": "de", "label": "German / Deutsch (flagship translation by Goyesh)" },
+        { "value": "es", "label": "Spanish / Español (flagship translation by Goyesh)" },
+        { "value": "fr", "label": "French / Français (flagship translation by Goyesh)" }
+      ]
+    },
     { "key": "force_image_source", "label": "Force every slide's image source (override Afshin)", "type": "select",
       "default": "",
       "options": [

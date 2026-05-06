@@ -61,6 +61,12 @@ const FLOORS = {
   // founder's two approval gates catch any quality drift downstream.
   'kb-dossier':          null,
   'post-plan':           null,
+  // M123 · IG-v2 brand-voice tone check on English content; cheap-LLM is fine.
+  'brand-voice':         null,
+  // M123 · IG-v2 flagship translation. Native-quality translation across
+  // languages (Persian / Arabic / German / etc) is too important to auto-
+  // downgrade. Founder-pinned model only — we expect claude-opus-4-7 here.
+  'translate-post':      'NEVER_AUTO_PICK',
 
   // Image generation has its own multi-provider router (compose-image.js)
   'image':               'NEVER_AUTO_PICK',
