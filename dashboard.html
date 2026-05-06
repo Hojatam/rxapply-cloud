@@ -10899,7 +10899,7 @@ async function coSubmitDrive(runId, stageIndex, lang) {
       result.innerHTML = `<div style="background:var(--cx-brand-teal-50);border:1px solid var(--cx-brand-teal);color:var(--cx-brand-teal-700);padding:12px;border-radius:8px;font-size:12.5px;line-height:1.55;">
         <div style="font-weight:600;margin-bottom:4px;">✓ Uploaded to Drive</div>
         <div class="mono" style="font-size:11px;color:var(--cx-text-muted);word-break:break-all;">${escapeHtml(fileName)}</div>
-        ${fileUrl ? `<a href="${escapeHtml(fileUrl)}" target="_blank" rel="noopener" style="display:inline-block;margin-top:8px;color:var(--cx-brand-teal);text-decoration:underline;font-weight:500;">→ Open in Drive</a>` : '<div style="margin-top:6px;color:var(--cx-text-faint);font-size:11px;font-style:italic;">(Webhook didn\\'t return a file URL — check your script returns {file_url: ...})</div>'}
+        ${fileUrl ? `<a href="${escapeHtml(fileUrl)}" target="_blank" rel="noopener" style="display:inline-block;margin-top:8px;color:var(--cx-brand-teal);text-decoration:underline;font-weight:500;">→ Open in Drive</a>` : '<div style="margin-top:6px;color:var(--cx-text-faint);font-size:11px;font-style:italic;">(Webhook returned no file URL — check your script returns {file_url: ...})</div>'}
       </div>`;
     }
     if (status) { status.style.color = 'var(--cx-ok)'; status.textContent = '✓ Done'; }
