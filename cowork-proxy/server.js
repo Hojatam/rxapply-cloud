@@ -2889,6 +2889,41 @@ app.get('/pipelines', async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// M120 · Source-of-truth diagnostic — for each recipe id, report
+// {file_version, db_version, source: 'file'|'db'|'in-sync'} so the
+// Pipeline tab can show "code-deployed v7" vs "founder-edited v9" at
+// a glance and you can never accidentally have parallel state again.
+app.get('/pipelines/sync-status', async (_req, res) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const { queryValue } = require('./db');
+    const recipesDir = path.resolve(__dirname, '..', 'compose-recipes');
+    const out = [];
+    if (fs.existsSync(recipesDir)) {
+      for (const f of fs.readdirSync(recipesDir).sort()) {
+        if (!f.endsWith('.json')) continue;
+        try {
+          const def = JSON.parse(fs.readFileSync(path.join(recipesDir, f), 'utf8'));
+          if (!def || !def.id) continue;
+          const fileV = parseInt(def.version, 10);
+          const dbVRaw = await queryValue(`SELECT version FROM pipelines WHERE id = '${String(def.id).replace(/'/g, "''")}';`);
+          const dbV = dbVRaw == null ? null : parseInt(dbVRaw, 10);
+          let source;
+          if (dbV == null)        source = 'file';        // never seeded
+          else if (fileV > dbV)   source = 'file-newer';  // file would win on next boot
+          else if (fileV === dbV) source = 'in-sync';     // matches
+          else                    source = 'db';          // founder edits past file version
+          out.push({ id: def.id, label: def.label, filename: f, file_version: fileV, db_version: dbV, source });
+        } catch (e) {
+          out.push({ filename: f, error: e.message });
+        }
+      }
+    }
+    res.json({ ok: true, recipes: out });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 app.get('/pipelines/:id', async (req, res) => {
   try {
     if (!PIPELINE_ID_RE.test(req.params.id)) return res.status(400).json({ ok: false, error: 'invalid pipeline id' });

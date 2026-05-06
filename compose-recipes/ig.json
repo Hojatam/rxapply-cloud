@@ -3,7 +3,7 @@
   "label": "Instagram",
   "icon": "instagram",
   "description": "Instagram carousel post (M119 · IG-v2 lean pipeline). KB.recall(20) → Pooya dossier (cheap) → Sepehr post-plan (cheap, caption + hashtags + emojis + slides) → Daneshyar verify-kb (premium, KB-only fact check, loops to post-plan cap=3) → 🚦 Gate A (founder approves caption + slides) → Afshin design-v2 (premium, picks 1 of 8 templates per slide, generates Unsplash queries, composes full per-slide gpt-image-2 prompt with text/font/colors/logo/pattern) → 🚦 Gate B (founder approves design plan) → image generation. Two human-in-the-loop gates before any image is created.",
-  "version": "7",
+  "version": "100",
   "length_target_words": "38–75 (mean 60, p95 119 — never exceed 119)",
 
   "stages": [

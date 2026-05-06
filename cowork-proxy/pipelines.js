@@ -90,7 +90,7 @@ async function getVersion(id, version) {
 
 // ── Writes ────────────────────────────────────────────────────────────
 
-async function save(id, definition, { changedBy = 'founder', changeNote = null, label = null, description = null, category = null } = {}) {
+async function save(id, definition, { changedBy = 'founder', changeNote = null, label = null, description = null, category = null, explicitVersion = null } = {}) {
   if (!id || !definition) throw new Error('id + definition required');
   if (typeof definition !== 'object') throw new Error('definition must be an object');
   if (definition.id && definition.id !== id) throw new Error('definition.id must match pipeline id');
@@ -101,7 +101,15 @@ async function save(id, definition, { changedBy = 'founder', changeNote = null, 
 
   // Upsert pipeline row + bump version atomically
   const existing = await queryValue(`SELECT version FROM pipelines WHERE id = ${q(id)};`);
-  const nextV = existing ? (parseInt(existing, 10) + 1) : 1;
+  // M120 · `explicitVersion` (set by seedFromFiles when the file's version
+  // is the bump signal) overrides the auto-increment. Founder edits via
+  // the Pipeline tab still auto-increment from whatever the current version
+  // is — so a file deploy at version 9 bumps the DB to 9, then a UI edit
+  // bumps it to 10, and the next file deploy at version 9 won't override
+  // because file_version <= DB_version.
+  const nextV = explicitVersion != null
+    ? parseInt(explicitVersion, 10)
+    : (existing ? (parseInt(existing, 10) + 1) : 1);
 
   await query(`
     INSERT INTO pipelines (id, label, description, category, definition, version, enabled, updated_at)
@@ -158,33 +166,73 @@ async function del(id, { hard = false } = {}) {
 
 // ── Boot-time seed from compose-recipes/*.json ───────────────────────
 
+// M120 · Version-gated boot sync. Single source-of-truth model:
+//   · compose-recipes/*.json files = "what code shipped" (deploy baseline)
+//   · pipelines table              = "current production" (founder edits land here)
+//   · `version` field on each      = the merge arbiter
+// Per recipe id, on each boot:
+//   · DB has no row              → seed from file (version = file.version)
+//   · file_version >  db_version → file wins; OVERWRITE the DB row at the
+//                                   file's explicit version. Founder edits
+//                                   below this version are superseded.
+//   · file_version <= db_version → DB wins; founder edits preserved.
+// Founder UI edits auto-increment past file_version, so the next time the
+// file ships at the same version, DB wins. The founder bumps the file
+// version manually (in code) to force-deploy a change downward.
 async function seedFromFiles({ recipesDir = path.resolve(__dirname, '..', 'compose-recipes') } = {}) {
-  if (!fs.existsSync(recipesDir)) return { ok: true, seeded: 0, reason: 'no recipes dir' };
-
-  // Only seed if the table is empty — otherwise the founder's edits would
-  // be overwritten on every redeploy.
-  const count = parseInt(await queryValue(`SELECT COUNT(*) FROM pipelines;`), 10) || 0;
-  if (count > 0) return { ok: true, seeded: 0, reason: `pipelines table already has ${count} rows` };
+  if (!fs.existsSync(recipesDir)) return { ok: true, seeded: 0, updated: 0, reason: 'no recipes dir' };
 
   let seeded = 0;
+  let updated = 0;
+  let preserved = 0;
+  const decisions = [];
+
   for (const f of fs.readdirSync(recipesDir).sort()) {
     if (!f.endsWith('.json')) continue;
     try {
       const def = JSON.parse(fs.readFileSync(path.join(recipesDir, f), 'utf8'));
       if (!def || !def.id) continue;
-      await save(def.id, def, {
-        changedBy: 'system:bootstrap',
-        changeNote: `seeded from compose-recipes/${f}`,
-        label: def.label,
-        description: def.description,
-        category: 'compose',
-      });
-      seeded++;
+      const fileV = parseInt(def.version, 10);
+      if (!Number.isFinite(fileV)) {
+        console.warn(`[pipelines.seedFromFiles] ${f}: missing/invalid "version" field; skipped`);
+        continue;
+      }
+      const dbVRaw = await queryValue(`SELECT version FROM pipelines WHERE id = ${q(def.id)};`);
+      const dbV = dbVRaw == null ? null : parseInt(dbVRaw, 10);
+
+      if (dbV == null) {
+        // No DB row → seed at the file's version
+        await save(def.id, def, {
+          changedBy: 'system:bootstrap',
+          changeNote: `seeded from compose-recipes/${f}`,
+          label: def.label, description: def.description, category: 'compose',
+          explicitVersion: fileV,
+        });
+        seeded++;
+        decisions.push(`  · ${def.id} v${fileV} · SEEDED (was empty)`);
+      } else if (fileV > dbV) {
+        // File version is newer → overwrite DB at the file's version
+        await save(def.id, def, {
+          changedBy: 'system:deploy',
+          changeNote: `code deploy bumped version: file=${fileV} > db=${dbV}`,
+          label: def.label, description: def.description, category: 'compose',
+          explicitVersion: fileV,
+        });
+        updated++;
+        decisions.push(`  · ${def.id} v${dbV}→v${fileV} · OVERWRITTEN by file (founder edits below v${fileV} superseded)`);
+      } else {
+        preserved++;
+        decisions.push(`  · ${def.id} v${dbV} · PRESERVED (file v${fileV} <= db v${dbV}; founder edits kept)`);
+      }
     } catch (e) {
       console.error(`[pipelines.seedFromFiles] ${f}: ${e.message}`);
     }
   }
-  return { ok: true, seeded };
+  if (seeded || updated || preserved) {
+    console.log(`[pipelines] sync · seeded=${seeded} updated=${updated} preserved=${preserved}`);
+    decisions.forEach(d => console.log(d));
+  }
+  return { ok: true, seeded, updated, preserved, decisions };
 }
 
 // ── Cache for hot-path sync access ───────────────────────────────────
