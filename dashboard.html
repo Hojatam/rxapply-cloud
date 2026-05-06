@@ -3120,6 +3120,39 @@
   .cx-root .cx-prow.gate .cx-prow-name { color: var(--cx-warn); font-weight: 600; }
   .cx-root .cx-prow.focused { background: var(--cx-brand-teal-50); border-radius: 6px; padding: 6px 8px; margin: 0 -8px; }
 
+  /* M124 stage 7 · Reject-with-notes modal */
+  .cx-modal-overlay {
+    position: fixed; inset: 0; z-index: 9999;
+    background: rgba(8, 48, 69, 0.55);
+    backdrop-filter: blur(4px);
+    display: grid; place-items: center;
+    animation: cxModalFade .15s ease;
+    padding: 20px;
+  }
+  @keyframes cxModalFade { from { opacity: 0; } to { opacity: 1; } }
+  .cx-modal {
+    width: 100%; max-width: 560px;
+    background: var(--cx-surface);
+    border: 1px solid var(--cx-border);
+    border-radius: 14px;
+    box-shadow: 0 30px 80px rgba(8, 48, 69, 0.35);
+    overflow: hidden;
+    display: flex; flex-direction: column;
+    max-height: calc(100vh - 40px);
+  }
+  .cx-modal-head {
+    background: linear-gradient(135deg, #7c1d2c 0%, #4a1019 100%);
+    color: #fff; padding: 18px 22px;
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 14px;
+  }
+  .cx-modal-body { padding: 20px 22px; overflow-y: auto; }
+  .cx-modal-foot {
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 22px; border-top: 1px solid var(--cx-border);
+    background: var(--cx-surface-2);
+  }
+  .cx-modal-foot > span:first-child { flex: 1; }
+
   /* Pending downstream list — shown under an active gate panel */
   .cx-root .cx-pending-list { background: var(--cx-surface-2); border: 1px solid var(--cx-border); border-radius: 10px; padding: 10px 14px; margin-top: 12px; }
   .cx-root .cx-pending-row { display: flex; align-items: center; gap: 10px; padding: 4px 0; font-size: 12.5px; }
@@ -10684,24 +10717,113 @@ async function coApprove(runId) {
 
 // M119 · Reject-with-notes — used by Gate A (verify-kb) + Gate B (design-v2).
 // Notes feed into REFINE NOTES on the next attempt of the upstream stage.
-async function coReject(runId, stageName) {
-  const notes = prompt(
-    `Why are you rejecting this ${stageName === 'verify-kb' ? 'post plan' : 'design plan'}?\n\n` +
-    'Be specific — your notes will be injected verbatim into the next attempt as a fix instruction.\n' +
-    '(e.g. "make the CTA softer", "use a flag-overlay template for slide 1, not type-led", "the ORE fee should be £1066 not £1000")'
-  );
-  if (!notes || !notes.trim()) return;
+// M124 stage 7 · Reject-with-notes flow. The founder needs a real
+// textarea (window.prompt is single-line, no markdown, often suppressed
+// by the browser, and gives no signal which agent will receive the
+// feedback). This builds an inline cx-modal that:
+//   1. Names the upstream agent who will re-run with the notes
+//      (verify-kb / brand-voice → Sepehr re-plans the post;
+//       design-v2 → Afshin re-designs).
+//   2. Shows a multi-line textarea with placeholder examples.
+//   3. Validates non-empty before sending.
+//   4. POSTs notes verbatim to /compose/runs/:id/reject — backend
+//      writes them as actionable_fixes on the upstream stage and
+//      re-enqueues that stage so the assigned agent sees a "REFINE
+//      NOTES" block in its system prompt on the next attempt.
+//   5. Closes the modal and resumes polling.
+const _REJECT_TARGET_AGENTS = {
+  'verify-kb':   { agent: 'sepehr', upstream: 'post-plan',  what: 'post plan (caption + slides)' },
+  'brand-voice': { agent: 'sepehr', upstream: 'post-plan',  what: 'post plan (caption + slides)' },
+  'design-v2':   { agent: 'afshin', upstream: 'design-v2',  what: 'design plan' },
+  'critique':    { agent: 'mostatab', upstream: 'draft',    what: 'draft' },
+  'audit':       { agent: 'mostatab', upstream: 'draft',    what: 'draft' },
+  'verify':      { agent: 'mostatab', upstream: 'draft',    what: 'draft' },
+};
+function coReject(runId, stageName) {
+  const meta = _REJECT_TARGET_AGENTS[stageName] || { agent: '—', upstream: stageName, what: 'this stage' };
+  // Strip any prior modal so multiple clicks can't pile up.
+  const prior = document.getElementById('co-reject-modal'); if (prior) prior.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'co-reject-modal';
+  overlay.className = 'cx-modal-overlay';
+  overlay.innerHTML = `
+    <div class="cx-modal cx-root">
+      <div class="cx-modal-head">
+        <div>
+          <div class="cx-subhead" style="margin:0 0 4px;color:#fbb;">↶ Reject with notes</div>
+          <h3 style="margin:0;color:#fff;font-size:18px;">Send back to <span style="color:#86efac;">${escapeHtml(meta.agent)}</span></h3>
+          <div style="font-size:12.5px;color:rgba(255,255,255,0.72);margin-top:4px;">
+            ${escapeHtml(meta.agent)} will re-run <span class="mono" style="background:rgba(255,255,255,0.12);padding:1px 6px;border-radius:4px;">${escapeHtml(meta.upstream)}</span> with your notes injected verbatim as REFINE NOTES.
+          </div>
+        </div>
+        <button class="cx-btn xs ghost" onclick="coCloseRejectModal()" style="color:#fff;border-color:rgba(255,255,255,0.2);">✕</button>
+      </div>
+      <div class="cx-modal-body">
+        <div class="cx-field">
+          <label>What needs to change in the ${escapeHtml(meta.what)}?</label>
+          <textarea id="co-reject-notes" class="cx-textarea" rows="6"
+            placeholder="Be specific — these notes go straight to ${escapeHtml(meta.agent)} as a fix instruction.&#10;&#10;Examples:&#10;• Make the CTA softer — don't say 'guaranteed', use 'we can guide you'&#10;• Slide 1: use flag-overlay template, not type-led&#10;• The ORE fee is £1,066 not £1,000 — fix the data slide&#10;• Caption is 6 words too long — trim 'most-asked-about' and 'honest'"></textarea>
+          <div class="cx-help" style="margin-top:6px;">Multi-line is fine. Markdown bullets/dashes work. Avoid vague feedback like "make it better" — the agent loops back into its system prompt with these notes verbatim.</div>
+        </div>
+      </div>
+      <div class="cx-modal-foot">
+        <span id="co-reject-status" style="font-size:12px;color:var(--cx-text-faint);"></span>
+        <button class="cx-btn ghost" onclick="coCloseRejectModal()">Cancel</button>
+        <button class="cx-btn danger" id="co-reject-submit" onclick="coSubmitReject('${runId}', '${stageName}')">↶ Send to ${escapeHtml(meta.agent)}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  // Auto-focus the textarea so the founder can start typing immediately.
+  setTimeout(() => { const ta = document.getElementById('co-reject-notes'); if (ta) ta.focus(); }, 30);
+  // Esc to cancel.
+  overlay.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') coCloseRejectModal();
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) coSubmitReject(runId, stageName);
+  });
+}
+
+function coCloseRejectModal() {
+  const m = document.getElementById('co-reject-modal');
+  if (m) m.remove();
+}
+
+async function coSubmitReject(runId, stageName) {
+  const ta = document.getElementById('co-reject-notes');
+  const notes = (ta && ta.value || '').trim();
+  if (!notes) {
+    if (ta) { ta.focus(); ta.style.borderColor = 'var(--cx-err)'; }
+    const status = document.getElementById('co-reject-status');
+    if (status) { status.style.color = 'var(--cx-err)'; status.textContent = 'Notes are required — be specific so the agent knows what to fix.'; }
+    return;
+  }
+  const submit = document.getElementById('co-reject-submit');
+  const status = document.getElementById('co-reject-status');
+  if (submit) { submit.disabled = true; submit.textContent = 'Sending…'; }
+  if (status) { status.style.color = 'var(--cx-text-faint)'; status.textContent = 'Routing to agent…'; }
   try {
     const r = await authFetch(`${PROXY}/compose/runs/${runId}/reject`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stage_name: stageName, notes: notes.trim() }),
+      body: JSON.stringify({ stage_name: stageName, notes }),
     });
-    if (r.status === 401) return alert('Sign in required.');
+    if (r.status === 401) {
+      if (status) { status.style.color = 'var(--cx-err)'; status.textContent = 'Sign in required.'; }
+      if (submit) { submit.disabled = false; submit.textContent = '↶ Resend'; }
+      return;
+    }
     const j = await r.json();
-    if (!j.ok) return alert('Reject failed: ' + (j.error || '?'));
+    if (!j.ok) {
+      if (status) { status.style.color = 'var(--cx-err)'; status.textContent = 'Reject failed: ' + (j.error || '?'); }
+      if (submit) { submit.disabled = false; submit.textContent = '↶ Try again'; }
+      return;
+    }
+    // Re-enqueue the upstream stage and restart polling.
     authFetch(`${PROXY}/compose/runs/${runId}/run`, { method: 'POST' }).catch(() => {});
+    coCloseRejectModal();
     coStartPoll(runId);
-  } catch (e) { alert('Error: ' + e.message); }
+  } catch (e) {
+    if (status) { status.style.color = 'var(--cx-err)'; status.textContent = 'Error: ' + e.message; }
+    if (submit) { submit.disabled = false; submit.textContent = '↶ Try again'; }
+  }
 }
 
 // M119 · Gate A — verify-kb passed. Founder reviews post-plan content
