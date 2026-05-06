@@ -2871,14 +2871,16 @@
     background: var(--cx-surface); border: 1px solid var(--cx-border);
     border-radius: var(--cx-r-md); padding: 12px 14px;
     transition: opacity .15s ease;
-    min-width: 0; word-break: normal; overflow-wrap: anywhere;
+    word-break: normal; overflow-wrap: break-word;
   }
   .cx-root .cx-stage-card + .cx-stage-card { margin-top: 10px; }
   .cx-root .cx-stage-card + .cx-gate { margin-top: 14px; }
-  .cx-root .cx-run-focus, .cx-root .cx-run-focus * { min-width: 0; }
+  .cx-root .cx-run-focus { min-width: 0; }
   .cx-root .cx-stage-card.dim { opacity: 0.55; }
   .cx-root .cx-stage-card.dim:hover { opacity: 0.85; }
-  .cx-root .cx-stage-row { display: flex; align-items: center; gap: 12px; }
+  .cx-root .cx-stage-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .cx-root .cx-stage-row > div:nth-child(2) { flex: 1 1 200px; min-width: 0; }
+  .cx-root .cx-stage-row > div:nth-child(3) { flex: 0 0 auto; }
   .cx-root .cx-stage-avatar {
     width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
     background: var(--cx-surface-sunken); border: 2px solid var(--cx-surface);
@@ -2904,12 +2906,11 @@
     background: linear-gradient(135deg, var(--cx-brand-navy) 0%, var(--cx-brand-navy-700) 100%);
     color: #fff; padding: 18px 24px;
     display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
-    min-width: 0;
   }
-  .cx-root .cx-gate-head > div { min-width: 0; }
+  .cx-root .cx-gate-head > div { min-width: 200px; flex: 1; }
   .cx-root .cx-gate-head .cx-gate-title,
   .cx-root .cx-gate-head .cx-gate-subtitle,
-  .cx-root .cx-gate-head .cx-gate-eyebrow { word-break: normal; overflow-wrap: anywhere; }
+  .cx-root .cx-gate-head .cx-gate-eyebrow { word-break: normal; overflow-wrap: break-word; }
   .cx-root .cx-gate-letter {
     width: 44px; height: 44px; border-radius: 12px;
     background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.25);
@@ -2929,8 +2930,7 @@
     background: #ffd47a;
     animation: cxPulseStripe 2.4s ease-in-out infinite;
   }
-  .cx-root .cx-gate-body { padding: 24px; background: var(--cx-surface-2); min-width: 0; word-break: normal; overflow-wrap: anywhere; }
-  .cx-root .cx-gate-body * { min-width: 0; }
+  .cx-root .cx-gate-body { padding: 24px; background: var(--cx-surface-2); word-break: normal; overflow-wrap: break-word; }
   .cx-root .cx-gate { min-width: 0; }
   .cx-root .cx-gate-actionbar {
     position: sticky; bottom: 0; z-index: 5;
