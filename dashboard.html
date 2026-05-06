@@ -2960,7 +2960,7 @@
     background: conic-gradient(from 0deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888, #f09433);
     padding: 2px;
   }
-  .cx-root .cx-ig-avatar-inner { width: 100%; height: 100%; border-radius: 50%; background: #fff; display: grid; place-items: center; }
+  .cx-root .cx-ig-avatar-inner { width: 100%; height: 100%; border-radius: 50%; background: #fff; display: grid; place-items: center; color: var(--cx-brand-teal); font-weight: 800; font-size: 14px; font-family: var(--cx-font-en); letter-spacing: -0.02em; }
   .cx-root .cx-ig-handle { font-size: 13px; font-weight: 600; color: #262626; }
   .cx-root .cx-ig-sub { font-size: 11px; color: #8e8e8e; }
   .cx-root .cx-ig-photo { position: relative; aspect-ratio: 1/1; background: #000; overflow: hidden; }
@@ -9924,46 +9924,60 @@ function _mockupInstagram(out, coverUrl, run, carouselSlides) {
   let photoBlock;
   if (isCarousel) {
     photoBlock = `
-      <div class="co-mock-ig-carousel" id="${id}-track" style="position:relative;width:100%;aspect-ratio:1/1;background:#000;overflow:hidden;">
+      <div class="cx-ig-photo co-mock-ig-carousel" id="${id}-track">
         ${slides.map((sl, i) => `
           <img src="${escapeHtml(sl.url)}" alt="slide ${i+1}"
                data-idx="${i}"
+               class="cx-ig-slide${i === 0 ? ' active' : ''}"
                style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
-                      opacity:${i === 0 ? '1' : '0'};transition:opacity 200ms ease;
+                      opacity:${i === 0 ? '1' : '0'};transition:opacity 220ms ease;
                       ${i === 0 ? '' : 'pointer-events:none;'}" />
         `).join('')}
         <!-- Slide counter top-right (real IG convention) -->
-        <div id="${id}-count" style="position:absolute;top:10px;right:10px;background:rgba(0,0,0,0.55);color:#fff;font-size:12px;font-weight:600;padding:4px 10px;border-radius:14px;backdrop-filter:blur(4px);">1/${slides.length}</div>
+        <div id="${id}-count" class="cx-ig-counter">1/${slides.length}</div>
         <!-- Prev / next arrow buttons -->
-        <button onclick="igCarouselNav('${id}', -1)" style="position:absolute;left:6px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.85);border:none;width:28px;height:28px;border-radius:50%;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#0f172a;">‹</button>
-        <button onclick="igCarouselNav('${id}',  1)" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.85);border:none;width:28px;height:28px;border-radius:50%;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#0f172a;">›</button>
+        <button onclick="igCarouselNav('${id}', -1)" class="cx-ig-nav prev" aria-label="Previous slide">‹</button>
+        <button onclick="igCarouselNav('${id}',  1)" class="cx-ig-nav next" aria-label="Next slide">›</button>
       </div>
       <!-- Dot indicators below photo (also real IG convention) -->
-      <div id="${id}-dots" style="display:flex;justify-content:center;gap:5px;padding:7px 0 3px;">
-        ${slides.map((_, i) => `<span data-dot="${i}" style="width:6px;height:6px;border-radius:50%;background:${i === 0 ? '#0095f6' : '#c7c7c7'};transition:background 150ms ease;"></span>`).join('')}
+      <div id="${id}-dots" class="cx-ig-dots">
+        ${slides.map((_, i) => `<span data-dot="${i}" class="cx-ig-dot${i === 0 ? ' active' : ''}"></span>`).join('')}
       </div>`;
   } else {
     photoBlock = coverUrl
-      ? `<img src="${escapeHtml(coverUrl)}" alt="" class="co-mock-ig-photo" />`
-      : `<div class="co-mock-ig-photo" style="background:#e2e8f0;display:grid;place-items:center;color:#64748b;font-size:11px;">no cover yet</div>`;
+      ? `<div class="cx-ig-photo"><img src="${escapeHtml(coverUrl)}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;" /></div>`
+      : `<div class="cx-ig-photo" style="display:grid;place-items:center;color:var(--cx-text-faint);font-size:12px;background:var(--cx-surface-sunken);">no cover yet</div>`;
   }
 
+  // M124 stage 3 · IG card with conic-gradient avatar ring (authentic IG
+  // story-ring colors: orange → pink → magenta → purple), 380px width
+  // per the Claude Design handoff bundle.
   return `
-    <div class="co-mockup-wrap">
-      <div class="co-mock-phone">
-        <div class="co-mock-ig-header">
-          <div class="co-mock-ig-avatar"></div>
-          <div style="flex:1;font-weight:600;font-size:13px;">${escapeHtml(handle)}</div>
-          <div style="color:#888;font-size:18px;">⋯</div>
+    <div class="co-mockup-wrap" style="display:flex;justify-content:center;">
+      <div class="cx-ig co-mock-phone" data-auto-rtl>
+        <div class="cx-ig-header">
+          <div class="cx-ig-avatar-ring">
+            <div class="cx-ig-avatar-inner">R</div>
+          </div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-weight:600;font-size:13px;color:#262626;line-height:1.2;">${escapeHtml(handle)}</div>
+            <div style="font-size:11px;color:#8e8e8e;">RxApply · Sponsored</div>
+          </div>
+          <div style="color:#262626;font-size:18px;letter-spacing:1px;cursor:pointer;">⋯</div>
         </div>
         ${photoBlock}
-        <div class="co-mock-ig-actions"><span>♡</span><span>💬</span><span>↗</span><span style="margin-left:auto;">🔖</span></div>
-        <div class="co-mock-ig-likes">2,148 likes</div>
-        <div class="co-mock-ig-caption" data-auto-rtl>
+        <div class="cx-ig-actions">
+          <span title="Like">♡</span>
+          <span title="Comment">💬</span>
+          <span title="Share">↗</span>
+          <span style="margin-left:auto;" title="Save">🔖</span>
+        </div>
+        <div class="cx-ig-likes">2,148 likes</div>
+        <div class="cx-ig-cap">
           <span style="font-weight:600;">${escapeHtml(handle)}</span> ${escapeHtml(captionText)}
         </div>
-        <div class="co-mock-ig-hashtags">${(tags || []).map(t => escapeHtml(t)).join(' ')}</div>
-        <div class="co-mock-ig-time">2 minutes ago</div>
+        ${tags && tags.length ? `<div class="cx-ig-tags">${tags.map(t => escapeHtml(t)).join(' ')}</div>` : ''}
+        <div class="cx-ig-time">2 minutes ago</div>
       </div>
     </div>
   `;
@@ -9987,9 +10001,11 @@ function igCarouselNav(id, dir) {
   imgs.forEach((img, i) => {
     img.style.opacity = (i === next) ? '1' : '0';
     img.style.pointerEvents = (i === next) ? 'auto' : 'none';
+    img.classList.toggle('active', i === next);
   });
   dots.forEach((d, i) => {
     d.style.background = (i === next) ? '#0095f6' : '#c7c7c7';
+    d.classList.toggle('active', i === next);
   });
   const counter = document.getElementById(id + '-count');
   if (counter) counter.textContent = `${next + 1}/${imgs.length}`;
