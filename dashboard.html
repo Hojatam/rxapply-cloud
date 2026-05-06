@@ -3037,6 +3037,78 @@
 
   /* Form section helper used by coRenderForm rebuild */
   .cx-root .cx-form-section { padding-top: 4px; }
+
+  /* M124 stage 4 · Form 2-column grid + sticky run-summary rail */
+  .cx-root .cx-form-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; align-items: start; margin-top: 4px; }
+  .cx-root .cx-form-col  { min-width: 0; }
+  @media (max-width: 1024px) {
+    .cx-root .cx-form-grid { grid-template-columns: 1fr; }
+  }
+  .cx-root .cx-summary-rail {
+    position: sticky; top: 12px;
+    background: var(--cx-surface);
+    border: 1px solid var(--cx-border);
+    border-radius: 12px; padding: 16px;
+    box-shadow: 0 1px 2px rgba(13, 36, 51, 0.04);
+  }
+  .cx-root .cx-summary-rail-head { padding-bottom: 12px; border-bottom: 1px solid var(--cx-border); margin-bottom: 12px; }
+  .cx-root .cx-summary-row {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 10px; padding: 6px 0; font-size: 12.5px;
+  }
+  .cx-root .cx-summary-row span { color: var(--cx-text-faint); text-transform: uppercase; letter-spacing: 0.06em; font-size: 10.5px; font-weight: 600; }
+  .cx-root .cx-summary-row strong { color: var(--cx-text); font-weight: 500; text-align: right; max-width: 60%; word-break: break-word; }
+  .cx-root .cx-summary-cost { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--cx-border); }
+  .cx-root .cx-summary-cost-num { font-family: var(--cx-font-mono); font-size: 26px; font-weight: 700; color: var(--cx-brand-teal); letter-spacing: -0.02em; margin-top: 6px; }
+  .cx-root .cx-summary-cost-sub { font-size: 11.5px; color: var(--cx-text-faint); margin-top: 2px; }
+
+  /* Run view 2-col grid · pipeline rail (left) + focus column (right) */
+  .cx-root .cx-run-grid {
+    display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 18px;
+    padding: 18px; align-items: start;
+  }
+  .cx-root .cx-pipeline-col {
+    position: sticky; top: 12px;
+    background: var(--cx-surface-2);
+    border: 1px solid var(--cx-border);
+    border-radius: 10px; padding: 14px 12px;
+    max-height: calc(100vh - 80px); overflow-y: auto;
+  }
+  .cx-root .cx-run-focus { min-width: 0; }
+  @media (max-width: 1024px) {
+    .cx-root .cx-run-grid { grid-template-columns: 1fr; }
+    .cx-root .cx-pipeline-col { position: static; max-height: none; }
+  }
+  /* Pipeline timeline row */
+  .cx-root .cx-prow {
+    display: grid; grid-template-columns: 18px minmax(0, 1fr) auto;
+    gap: 8px; padding: 6px 0; font-size: 12.5px; align-items: center;
+    position: relative;
+  }
+  .cx-root .cx-prow-tcol { display: flex; flex-direction: column; align-items: center; height: 100%; min-height: 28px; }
+  .cx-root .cx-prow-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--cx-border-strong); border: 2px solid var(--cx-surface);
+    box-shadow: 0 0 0 1px var(--cx-border-strong); flex-shrink: 0;
+  }
+  .cx-root .cx-prow.done .cx-prow-dot { background: var(--cx-ok); box-shadow: 0 0 0 1px var(--cx-ok); }
+  .cx-root .cx-prow.running .cx-prow-dot { background: var(--cx-brand-teal); box-shadow: 0 0 0 1px var(--cx-brand-teal); animation: cxPulseStripe 1.4s ease-in-out infinite; }
+  .cx-root .cx-prow.gated .cx-prow-dot { background: var(--cx-warn); box-shadow: 0 0 0 1px var(--cx-warn); transform: rotate(45deg); border-radius: 2px; }
+  .cx-root .cx-prow.failed .cx-prow-dot { background: var(--cx-err); box-shadow: 0 0 0 1px var(--cx-err); }
+  .cx-root .cx-prow-tline { width: 2px; flex: 1; background: var(--cx-border); margin-top: 2px; }
+  .cx-root .cx-prow.done + .cx-prow .cx-prow-tline,
+  .cx-root .cx-prow.done .cx-prow-tline { background: var(--cx-ok); }
+  .cx-root .cx-prow-name { font-weight: 500; color: var(--cx-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cx-root .cx-prow-agent { color: var(--cx-text-faint); font-size: 11px; margin-top: 1px; }
+  .cx-root .cx-prow-cost { font-family: var(--cx-font-mono); font-size: 11px; color: var(--cx-text-faint); }
+  .cx-root .cx-prow.gate .cx-prow-name { color: var(--cx-warn); font-weight: 600; }
+  .cx-root .cx-prow.focused { background: var(--cx-brand-teal-50); border-radius: 6px; padding: 6px 8px; margin: 0 -8px; }
+
+  /* Pending downstream list — shown under an active gate panel */
+  .cx-root .cx-pending-list { background: var(--cx-surface-2); border: 1px solid var(--cx-border); border-radius: 10px; padding: 10px 14px; margin-top: 12px; }
+  .cx-root .cx-pending-row { display: flex; align-items: center; gap: 10px; padding: 4px 0; font-size: 12.5px; }
+  .cx-root .cx-pending-row .cx-pending-name { color: var(--cx-text-muted); }
+  .cx-root .cx-pending-row .cx-pending-agent { color: var(--cx-text-faint); font-size: 11px; }
 </style>
 </head>
 <body>
@@ -8181,10 +8253,15 @@ function renderCompose() {
       <div class="cx-section-head">
         <div>
           <h1>Compose</h1>
-          <div class="cx-sub">Pick a format · agents collaborate to draft, critique, verify against KB, design, render — with two human-in-the-loop gates.</div>
+          <div class="cx-sub">Submit a run · watch progress · approve at gates · ship the post.</div>
         </div>
         <div class="cx-actions">
-          <button class="cx-btn xs ghost" onclick="coLoadRecent()">↻ Refresh</button>
+          <span class="cx-subhead" style="margin:0 8px 0 0;">Preview state</span>
+          <div class="cx-state-tabs" id="co-state-tabs" role="tablist">
+            <button class="cx-state-tab" data-state="initial" onclick="coGotoState('initial')">Initial form</button>
+            <button class="cx-state-tab" data-state="midrun"  onclick="coGotoState('midrun')">Mid-run · Gate A</button>
+            <button class="cx-state-tab" data-state="final"   onclick="coGotoState('final')">Final · carousel</button>
+          </div>
         </div>
       </div>
 
@@ -8324,6 +8401,10 @@ function coRenderForm() {
       <button class="cx-btn xs ghost" onclick="coCancelForm()">Cancel</button>
     </div>
 
+    <!-- M124 stage 4 · 2-col layout: form on the left, sticky run-summary rail on the right -->
+    <div class="cx-form-grid">
+    <div class="cx-form-col">
+
     <div class="cx-form-section" style="margin-top:8px;">
       <div class="cx-subhead">What's this about?</div>
       <div style="display:grid;grid-template-columns:3fr 2fr;gap:14px;">
@@ -8401,22 +8482,124 @@ function coRenderForm() {
       </div>
     ` : ''}
 
-    <div style="display:flex;align-items:center;gap:10px;margin-top:22px;padding-top:16px;border-top:1px solid var(--cx-border);">
-      <button class="cx-btn primary lg" onclick="coStart()">▶ Submit run</button>
-      <button class="cx-btn ghost" onclick="coCancelForm()">Cancel</button>
-      <span id="co-cost-estimate" style="margin-left:auto;font-size:12.5px;color:var(--cx-text-muted);"></span>
-    </div>
+    </div><!-- /cx-form-col -->
+
+    <!-- Sticky right rail · live RUN SUMMARY card (mirrors the design's right column) -->
+    <aside class="cx-summary-rail">
+      <div class="cx-summary-rail-head">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div class="cx-glyph" style="width:30px;height:30px;font-size:13px;border-radius:7px;">${meta.icon}</div>
+          <div style="font-weight:600;font-size:14px;color:var(--cx-text);">${escapeHtml(meta.label)}</div>
+        </div>
+        <div class="cx-subhead" style="margin-top:10px;">Run summary</div>
+      </div>
+      <div class="cx-summary-row"><span>Topic</span><strong id="co-sum-topic">—</strong></div>
+      <div class="cx-summary-row"><span>Audience</span><strong id="co-sum-aud">—</strong></div>
+      <div class="cx-summary-row"><span>Languages</span><strong id="co-sum-lang">${escapeHtml(masterLang)}</strong></div>
+      <div class="cx-summary-row"><span>Slides</span><strong id="co-sum-slides">—</strong></div>
+      <div class="cx-summary-row"><span>Hashtags</span><strong id="co-sum-tags">—</strong></div>
+      <div class="cx-summary-row"><span>Images</span><strong id="co-sum-imgs">—</strong></div>
+      <div class="cx-summary-row"><span>Gates</span><strong id="co-sum-gates">A+B</strong></div>
+      <div class="cx-summary-cost">
+        <div class="cx-subhead">Live cost estimate</div>
+        <div class="cx-summary-cost-num" id="co-cost-estimate">$0.00</div>
+        <div class="cx-summary-cost-sub" id="co-cost-estimate-sub">per run</div>
+      </div>
+      <button class="cx-btn primary lg" onclick="coStart()" style="width:100%;margin-top:14px;">▶ Submit run</button>
+      <button class="cx-btn ghost" onclick="coCancelForm()" style="width:100%;margin-top:6px;">Cancel · clear form</button>
+    </aside>
+
+    </div><!-- /cx-form-grid -->
   `;
   coRebuildLangChecks();
   coWireImageModelPicker();
   coWireDynamicOptions(r.id);
   // M119 · Cost estimate display + auto-recompute on slide count / image toggle.
   coUpdateCostEstimate();
-  ['co-opt-with_image','co-opt-as_carousel','co-opt-carousel_slides'].forEach(id => {
+  // M124 stage 4 · live-update the right-rail summary card from every form field
+  coUpdateSummaryRail();
+  ['co-opt-with_image','co-opt-as_carousel','co-opt-carousel_slides','co-opt-max_hashtags',
+   'co-topic','co-audience','co-master'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.addEventListener('change', coUpdateCostEstimate);
-    if (el) el.addEventListener('input', coUpdateCostEstimate);
+    if (el) {
+      el.addEventListener('change', () => { coUpdateCostEstimate(); coUpdateSummaryRail(); });
+      el.addEventListener('input',  () => { coUpdateCostEstimate(); coUpdateSummaryRail(); });
+    }
   });
+  // Target-language checkboxes are rebuilt by coRebuildLangChecks; delegate.
+  document.querySelectorAll('#co-target-langs input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', coUpdateSummaryRail);
+  });
+}
+
+// M124 stage 4 · "Preview state" tab bar in the section header. The
+// tabs jump between Initial form / Mid-run · Gate A / Final · carousel —
+// they're a navigation affordance, not editable state. Active tab is
+// driven by what's currently visible on the page.
+function coGotoState(state) {
+  if (state === 'initial') {
+    coCloseRun();
+    const card = $('co-form-card');
+    if (card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } else if (state === 'midrun' || state === 'final') {
+    if (!_coState.currentRun) {
+      const recent = $('co-recent');
+      if (recent) recent.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    const run = $('co-run');
+    if (run) run.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  coUpdateStateTabs();
+}
+
+function coUpdateStateTabs() {
+  const tabs = document.querySelectorAll('#co-state-tabs .cx-state-tab');
+  if (!tabs.length) return;
+  let active = 'initial';
+  if (_coState.currentRun) {
+    const status = _coState.currentRun.status;
+    if (status === 'done') active = 'final';
+    else active = 'midrun';
+  } else if (_coState.selected) {
+    active = 'initial';
+  }
+  tabs.forEach(t => t.classList.toggle('active', t.getAttribute('data-state') === active));
+}
+
+// M124 stage 4 · Refresh the sticky run-summary rail whenever the form
+// fields change. Keeps the right-column preview in sync with what the
+// founder is filling in.
+function coUpdateSummaryRail() {
+  const r = _coState.selected; if (!r) return;
+  const get = (id) => (document.getElementById(id) || {}).value || '';
+  const topic = get('co-topic').trim();
+  const aud = get('co-audience').trim();
+  const master = get('co-master') || 'en';
+  const targets = Array.from(document.querySelectorAll('#co-target-langs input[type=checkbox]:checked'))
+    .map(cb => cb.value).filter(v => v && v !== master);
+  const langStr = [master, ...targets].join('  ');
+  const slides = parseInt(get('co-opt-carousel_slides'), 10) || (r.id === 'ig' ? 4 : 1);
+  const maxTags = parseInt(get('co-opt-max_hashtags'), 10) || 8;
+  const imgsEl = document.getElementById('co-opt-with_image');
+  const withImage = imgsEl ? !!imgsEl.checked : true;
+  const imgSrc = get('co-opt-force_image_source') || 'mixed';
+  const setText = (id, t) => { const e = document.getElementById(id); if (e) e.textContent = t; };
+  setText('co-sum-topic', topic ? (topic.length > 42 ? topic.slice(0, 42) + '…' : topic) : '—');
+  setText('co-sum-aud',   aud   ? (aud.length > 42   ? aud.slice(0, 42)   + '…' : aud)   : '—');
+  setText('co-sum-lang',  langStr);
+  if (r.id === 'ig' || r.id === 'ig-canva') {
+    setText('co-sum-slides', String(slides));
+    setText('co-sum-tags',   `up to ${maxTags}`);
+    setText('co-sum-imgs',   withImage ? imgSrc : 'text-only');
+    setText('co-sum-gates',  'A+B');
+  } else {
+    setText('co-sum-slides', '—');
+    setText('co-sum-tags',   '—');
+    setText('co-sum-imgs',   withImage ? 'cover' : 'text-only');
+    const gate = (document.querySelector('input[name=co-gate]:checked') || {}).value || 'critique';
+    setText('co-sum-gates', gate);
+  }
 }
 
 // M119 · Estimate the per-run cost for the selected recipe + options.
@@ -8449,7 +8632,15 @@ function coUpdateCostEstimate() {
     const stages = (r.stages || []).length;
     estimate = stages * 0.03 + (withImage ? 0.19 : 0);
   }
-  el.innerHTML = `≈ <strong style="color:var(--cx-text, #0d2433);">$${estimate.toFixed(2)}</strong> per run${withImage && (r.id === 'ig' || r.id === 'ig-canva') ? ` <span style="color:var(--cx-text-faint, #7d8c97);">(${slides} slide${slides === 1 ? '' : 's'})</span>` : ''}`;
+  el.textContent = `$${estimate.toFixed(2)}`;
+  const sub = document.getElementById('co-cost-estimate-sub');
+  if (sub) {
+    const targets = Array.from(document.querySelectorAll('#co-target-langs input[type=checkbox]:checked'))
+      .map(cb => cb.value).filter(Boolean);
+    const langCount = Math.max(1, targets.length || 1);
+    const slideStr = (r.id === 'ig' || r.id === 'ig-canva') ? ` · ${slides} slide${slides === 1 ? '' : 's'}` : '';
+    sub.textContent = `per run${slideStr} · ${langCount} language${langCount === 1 ? '' : 's'}`;
+  }
 }
 
 // M103 · Resolve every option marked type='dynamic' by fetching from
@@ -8639,14 +8830,15 @@ async function coOpenRun(runId) {
           <button class="cx-btn xs ghost" onclick="coCloseRun()">Close</button>
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:18px;">
-        <div id="co-pipeline"><div style="color:var(--cx-text-faint);font-size:13px;">Starting…</div></div>
-        <div id="co-preview"><div style="color:var(--cx-text-faint);font-size:13px;">Preview will appear when render completes.</div></div>
+      <div class="cx-run-grid">
+        <aside id="co-pipeline" class="cx-pipeline-col"><div style="color:var(--cx-text-faint);font-size:13px;">Starting…</div></aside>
+        <div id="co-preview" class="cx-run-focus"><div style="color:var(--cx-text-faint);font-size:13px;">Preview will appear when render completes.</div></div>
       </div>
     </div>
   `;
   _coState.currentRun = { id: runId, _openedAt: Date.now() };
   coStartPoll(runId);
+  coUpdateStateTabs();
 }
 
 function coCloseRun() {
@@ -8655,6 +8847,7 @@ function coCloseRun() {
   $('co-run').style.display = 'none';
   $('co-run').innerHTML = '';
   coLoadRecent();
+  coUpdateStateTabs();
 }
 
 function coStartPoll(runId) {
@@ -9637,37 +9830,104 @@ function coRenderRun(run) {
     return html;
   };
 
+  // M124 stage 4 · Compact rail rows for the LEFT pipeline column. One
+  // small row per stage with a status dot + name + agent + cost, mirroring
+  // the design's left-rail timeline.
+  const railRow = (s, lastIdx) => {
+    const cost = (typeof s.cost_usd === 'number' && s.cost_usd > 0) ? `$${s.cost_usd.toFixed(4)}` : '';
+    const isGate = s.stage_name === 'verify-kb' || s.stage_name === 'design-v2';
+    const cls = ['cx-prow', s.status, isGate ? 'gate' : ''].filter(Boolean).join(' ');
+    const isFocused = (s.status === 'gated' || s.status === 'running');
+    return `
+      <div class="${cls}${isFocused ? ' focused' : ''}">
+        <div class="cx-prow-tcol">
+          <div class="cx-prow-dot"></div>
+          ${s.stage_index < lastIdx ? '<div class="cx-prow-tline"></div>' : ''}
+        </div>
+        <div style="min-width:0;">
+          <div class="cx-prow-name">${escapeHtml(s.stage_name)}${s.lang ? ` · ${escapeHtml(s.lang)}` : ''}</div>
+          <div class="cx-prow-agent">${escapeHtml(s.agent || s.model || 'renderer')}</div>
+        </div>
+        <div class="cx-prow-cost">${cost}</div>
+      </div>`;
+  };
+  const lastIdx = Math.max(...((run.stages || []).map(s => s.stage_index || 0)), 0);
   $('co-pipeline').innerHTML = `
-    ${refineBanner}
-    <div class="co-form-section-title" style="margin-bottom:10px;">Master · ${escapeHtml(run.master_lang)}</div>
-    ${masterRows.map(s => decorate(s, renderRow(s))).join('') || '<div class="text-xs text-slate-400 italic">no stages yet</div>'}
+    <div class="cx-subhead" style="margin-bottom:8px;">Pipeline · ${(run.stages || []).filter(s => s.status === 'done').length}/${(run.stages || []).length} stages</div>
+    ${masterRows.map(s => railRow(s, lastIdx)).join('') || '<div style="color:var(--cx-text-faint);font-size:12px;font-style:italic;">no stages yet</div>'}
     ${targetRows.length ? `
-      <div class="co-form-section-title" style="margin-top:18px;margin-bottom:10px;">Translations</div>
-      ${targetRows.map(s => decorate(s, renderRow(s))).join('')}
+      <div class="cx-subhead" style="margin-top:14px;margin-bottom:8px;">Translations</div>
+      ${targetRows.map(s => railRow(s, lastIdx)).join('')}
     ` : ''}
   `;
 
+  // M124 stage 4 · Right column focuses on what needs attention RIGHT
+  // NOW: refine banner + the active/gated stage's full card (with the
+  // gate panel rendered inline) + a "PENDING DOWNSTREAM" list of what
+  // comes next. Done stages collapse to the rail; failed stages still
+  // surface their card so the founder sees the error.
+  const activeStage = stages.find(s => s.status === 'gated')
+                   || stages.find(s => s.status === 'running')
+                   || stages.find(s => s.status === 'failed')
+                   || (stages.filter(s => s.status === 'done').slice(-1)[0]);
+  const pendingStages = stages.filter(s => s.status === 'pending');
+  const pendingList = pendingStages.length ? `
+    <div class="cx-pending-list">
+      <div class="cx-subhead" style="margin-bottom:6px;">Pending downstream · ${pendingStages.length}</div>
+      ${pendingStages.map(s => `
+        <div class="cx-pending-row">
+          <span class="cx-pill" style="font-size:10px;">pending</span>
+          <div style="flex:1;min-width:0;">
+            <div class="cx-pending-name">${escapeHtml(s.stage_name)}${s.lang ? ` · ${escapeHtml(s.lang)}` : ''}</div>
+            <div class="cx-pending-agent">${escapeHtml(s.agent || s.model || 'renderer')}</div>
+          </div>
+        </div>
+      `).join('')}
+    </div>` : '';
+
+  const focusHtml = activeStage
+    ? decorate(activeStage, renderRow(activeStage)) + pendingList
+    : '<div style="color:var(--cx-text-faint);font-size:13px;">No active stage. Pick a recipe and submit a run.</div>';
+
+  $('co-preview').innerHTML = `
+    ${refineBanner}
+    ${focusHtml}
+  `;
+
+  // After the carousel renders, surface the IG mockup below the active focus.
   coRenderPreview(run);
 }
 
 function coRenderPreview(run) {
+  // M124 stage 4 · The preview pane no longer owns the entire right
+  // column — coRenderRun writes the active-focus + pending list there.
+  // We append the IG carousel mockup BELOW the focus only when render
+  // has completed, so the founder sees both the final card AND the
+  // run's last gated/active state on the same page.
   const renderStages = (run.stages || []).filter(s => s.stage_name === 'render' && s.status === 'done');
-  if (renderStages.length === 0) {
-    $('co-preview').innerHTML = `<div class="empty"><div class="empty-text text-xs">Preview will appear when render completes.</div></div>`;
-    return;
-  }
-  // Build tabs per language
+  // Drop any stale carousel block from a prior tick.
+  const stale = document.getElementById('co-preview-mockup');
+  if (stale) stale.remove();
+  if (renderStages.length === 0) return;
   const langs = renderStages.map(s => s.lang || run.master_lang);
-  const tabs = langs.map((lang, i) => `
-    <button class="btn btn-ghost btn-xs ${i === 0 ? 'active' : ''}" onclick="coShowPreviewLang('${escapeHtml(lang)}', this)">${escapeHtml(lang)}</button>
-  `).join('');
-  $('co-preview').innerHTML = `
-    <div class="flex items-center gap-2 mb-3 flex-wrap">
-      ${tabs}
-      <span class="text-xs text-slate-400 ml-auto">recipe: ${escapeHtml(run.recipe_id)}</span>
+  const host = document.createElement('div');
+  host.id = 'co-preview-mockup';
+  host.style.marginTop = '16px';
+  host.innerHTML = `
+    <div class="cx-card-head" style="margin-bottom:10px;">
+      <div>
+        <div class="cx-subhead" style="margin:0;">Final preview</div>
+        <h3 style="margin:2px 0 0;">${escapeHtml(_coFormatMeta(run.recipe_id).label)}</h3>
+      </div>
+      <div style="display:flex;gap:6px;">
+        ${langs.map((lang, i) => `
+          <button class="cx-btn xs ${i === 0 ? 'primary' : 'ghost'}" data-preview-lang="${escapeHtml(lang)}" onclick="coShowPreviewLang('${escapeHtml(lang)}', this)">${escapeHtml(lang)}</button>
+        `).join('')}
+      </div>
     </div>
     <div id="co-preview-body"></div>
   `;
+  $('co-preview').appendChild(host);
   coShowPreviewLang(langs[0]);
 }
 
