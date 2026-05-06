@@ -1563,6 +1563,40 @@ async function _executeLlmStage({ runId, run, recipe, stage, stageIndex, lang, p
   if (stageName === 'voice-critic' && parsed && parsed.verdict === 'block') forceGate = true;
   if (stageName === 'verify-kb'  && parsed && parsed.passed === true) forceGate = true;   // Gate A
   if (stageName === 'design-v2'  && parsed && Array.isArray(parsed.slides)) forceGate = true; // Gate B
+
+  // M126 · Fix 1 · KB-empty hard stop. After kb-dossier produces a dossier
+  // with no KB entries used and no key facts, the cascade downstream is
+  // doomed: Sepehr will write a meta-post about "we can't verify
+  // anything," Daneshyar will mark every claim unsupported, the result
+  // will be brand-safe but content-free. Pause here and let the founder
+  // either (a) cancel + go fill the KB, or (b) override and accept that
+  // the post will be generic. A new field `gate_kind: 'kb_empty'` is
+  // attached to the parsed output so the dashboard can render a tailored
+  // panel — distinct from Gate A (verify-kb) which fires on success.
+  if (stageName === 'kb-dossier' && parsed) {
+    const idsUsed   = Array.isArray(parsed.kb_entry_ids_used) ? parsed.kb_entry_ids_used.length : 0;
+    const keyFacts  = Array.isArray(parsed.key_facts) ? parsed.key_facts.length : 0;
+    const namedSrc  = Array.isArray(parsed.named_sources_used) ? parsed.named_sources_used.length : 0;
+    // "Empty" = no KB entries cited AND fewer than 3 key facts AND no
+    // named sources. All three conditions guard against false positives
+    // when Pooya synthesized a usable dossier from a few rich entries.
+    const kbEmpty = idsUsed === 0 && keyFacts < 3 && namedSrc === 0;
+    if (kbEmpty) {
+      forceGate = true;
+      parsed = {
+        ...parsed,
+        _gate_kind: 'kb_empty',
+        _kb_empty_signals: {
+          kb_entry_ids_used: idsUsed,
+          key_facts_count: keyFacts,
+          named_sources_count: namedSrc,
+          regulatory_context: parsed.regulatory_context || null,
+          must_avoid: Array.isArray(parsed.must_avoid) ? parsed.must_avoid.slice(0, 8) : [],
+          topic: run.topic || null,
+        },
+      };
+    }
+  }
   const gateHere = forceGate || _shouldGate(stageName, recipe, run.gate_strategy);
   const finalStatus = gateHere ? 'gated' : 'done';
 

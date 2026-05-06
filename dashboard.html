@@ -9814,6 +9814,7 @@ function coRenderRun(run) {
             : `<div class="cx-stage-detail">${coRenderStageOutput(s, isGated)}</div>`
         ) : ''}
         ${(isGated && skipGate) ? '' :
+          isGated && s.stage_name === 'kb-dossier' && s.output && s.output._gate_kind === 'kb_empty' ? coRenderGateKbEmpty(s, run) :
           isGated && s.stage_name === 'verify-kb' ? coRenderGateA(s, run) :
           isGated && s.stage_name === 'design-v2' ? coRenderGateB(s, run) :
           isGated ? `
@@ -9980,7 +9981,9 @@ function coRenderRun(run) {
   } else {
     // 1) Currently-active stage (gated / running / failed / most-recent-done)
     if (activeStage && activeStage.status === 'gated') {
-      const gateHtml = activeStage.stage_name === 'verify-kb' ? coRenderGateA(activeStage, run)
+      const gateHtml = (activeStage.stage_name === 'kb-dossier' && activeStage.output && activeStage.output._gate_kind === 'kb_empty')
+                          ? coRenderGateKbEmpty(activeStage, run)
+                     : activeStage.stage_name === 'verify-kb' ? coRenderGateA(activeStage, run)
                      : activeStage.stage_name === 'design-v2' ? coRenderGateB(activeStage, run)
                      : `<div class="cx-card" style="margin-top:12px;">
                           <div class="cx-card-head">
@@ -11025,6 +11028,72 @@ async function coSubmitReject(runId, stageName) {
 // when translate-post has run (English source on the left, translated
 // version on the right) so the founder approves the FINAL displayable
 // language with full visibility into the source.
+// M126 · Fix 1 · Gate-0 panel · fires when kb-dossier finds the KB has
+// no entries on the founder's topic. Backend (compose-orchestrator) sets
+// _gate_kind: 'kb_empty' on the dossier output and forces the stage to
+// gate; this panel surfaces the warning and lets the founder either
+// cancel and go fill the KB, or override and ship a generic post.
+function coRenderGateKbEmpty(stage, run) {
+  const out = (stage && stage.output) || {};
+  const sig = out._kb_empty_signals || {};
+  const topic = sig.topic || run.topic || 'this topic';
+  const mustAvoid = Array.isArray(sig.must_avoid) ? sig.must_avoid : [];
+  const ctxText = sig.regulatory_context || '';
+  return `
+    <div class="cx-gate" style="margin-top:12px;">
+      <div class="cx-gate-head" style="background:linear-gradient(135deg, #92400e 0%, #78350f 100%);">
+        <div class="cx-gate-letter" style="background:rgba(255,255,255,0.18);border-color:rgba(255,255,255,0.3);">⚠</div>
+        <div style="flex:1;min-width:0;">
+          <div class="cx-gate-eyebrow">Gate 0 · Knowledge base empty</div>
+          <div class="cx-gate-title">No KB entries found for "${escapeHtml(topic)}"</div>
+          <div class="cx-gate-subtitle">Pooya scanned the Knowledge Base and found <strong>0</strong> supporting entries, <strong>${sig.key_facts_count || 0}</strong> key facts, <strong>${sig.named_sources_count || 0}</strong> named sources. If you proceed, the agents will produce a brand-safe but content-free post — Sepehr writes meta-text, Daneshyar marks every claim "unsupported," and the post ships without specific facts.</div>
+        </div>
+        <div class="cx-gate-waitchip">awaiting you</div>
+      </div>
+      <div class="cx-gate-body">
+        <div class="cx-card" style="margin-top:0;padding:14px;background:#fffbeb;border-color:#fcd34d;">
+          <div class="cx-subhead" style="margin-bottom:8px;color:#92400e;">📋 What's missing</div>
+          <ul style="margin:0;padding-left:20px;font-size:13px;line-height:1.7;color:#78350f;">
+            <li>No entries cite a regulator (e.g. ADC for Australia, GDC for UK, NDEB for Canada).</li>
+            <li>No exam structure, fee, pass-mark, or timeline data on file.</li>
+            <li>No named source documents the agents can quote.</li>
+          </ul>
+          ${ctxText ? `<div style="margin-top:10px;padding:8px 10px;background:#fff;border:1px dashed #d97706;border-radius:6px;font-size:12px;color:#78350f;font-style:italic;">${escapeHtml(ctxText)}</div>` : ''}
+        </div>
+
+        <div class="cx-card" style="padding:14px;background:var(--cx-surface);">
+          <div class="cx-subhead" style="margin-bottom:8px;">✅ Recommended path · fill the KB first</div>
+          <ol style="margin:0;padding-left:20px;font-size:13px;line-height:1.7;color:var(--cx-text);">
+            <li>Click <strong>Cancel run</strong> below.</li>
+            <li>Open the <a href="#" onclick="navigate('knowledge');return false;" style="color:var(--cx-brand-teal);text-decoration:underline;">Knowledge Base</a> tab and search for <span class="mono" style="background:var(--cx-surface-sunken);padding:1px 6px;border-radius:3px;">${escapeHtml(topic)}</span>.</li>
+            <li>Add 5–10 entries: regulator name, exam structure, current fee, pass mark, timeline, application docs. Paste from the official source — Daneshyar normalises automatically.</li>
+            <li>Re-submit the same Compose run. Pooya will pick up the new entries and Sepehr will write specific, teaching content instead of meta-text.</li>
+          </ol>
+        </div>
+
+        ${mustAvoid.length ? `
+        <details>
+          <summary class="cx-stage-detail-summary">⚙ See what Pooya told downstream agents to avoid (${mustAvoid.length})</summary>
+          <ul style="margin-top:10px;padding-left:20px;font-size:12.5px;line-height:1.65;color:var(--cx-text-muted);">
+            ${mustAvoid.map(m => `<li>${escapeHtml(m)}</li>`).join('')}
+          </ul>
+        </details>` : ''}
+      </div>
+      <div class="cx-gate-actionbar">
+        <button class="cx-btn primary" onclick="coCancel('${run.id}')" title="Recommended · cancel this run, go fill the KB, then re-submit">↳ Cancel · open Knowledge Base</button>
+        <button class="cx-btn danger" onclick="coApproveKbEmpty('${run.id}')" title="Override · ship a generic, content-free post (the agents will be hand-tied by must_avoid rules)">⚠ Proceed anyway</button>
+        <span style="margin-left:auto;font-size:11.5px;color:var(--cx-text-faint);">Cost so far: $${Number(run.total_cost_usd || 0).toFixed(4)}</span>
+      </div>
+    </div>`;
+}
+
+// Confirm-on-override so a single click can't accidentally ship a
+// content-free post.
+async function coApproveKbEmpty(runId) {
+  if (!confirm('Are you sure?\n\nThe Knowledge Base has no entries on this topic. The post will be brand-safe but content-free — agents will produce meta-text about why they can\'t cite specifics.\n\nIt is much better to cancel and add 5–10 KB entries first. Continue anyway?')) return;
+  return coApprove(runId);
+}
+
 function coRenderGateA(verifyStage, run) {
   // Find the post-plan stage that this verify-kb verified
   const postPlanStage = (run.stages || []).find(s => s.stage_name === 'post-plan' && s.lang == null && s.status === 'done');
