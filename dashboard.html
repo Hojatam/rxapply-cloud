@@ -2871,7 +2871,11 @@
     background: var(--cx-surface); border: 1px solid var(--cx-border);
     border-radius: var(--cx-r-md); padding: 12px 14px;
     transition: opacity .15s ease;
+    min-width: 0; word-break: normal; overflow-wrap: anywhere;
   }
+  .cx-root .cx-stage-card + .cx-stage-card { margin-top: 10px; }
+  .cx-root .cx-stage-card + .cx-gate { margin-top: 14px; }
+  .cx-root .cx-run-focus, .cx-root .cx-run-focus * { min-width: 0; }
   .cx-root .cx-stage-card.dim { opacity: 0.55; }
   .cx-root .cx-stage-card.dim:hover { opacity: 0.85; }
   .cx-root .cx-stage-row { display: flex; align-items: center; gap: 12px; }
@@ -2899,8 +2903,13 @@
   .cx-root .cx-gate-head {
     background: linear-gradient(135deg, var(--cx-brand-navy) 0%, var(--cx-brand-navy-700) 100%);
     color: #fff; padding: 18px 24px;
-    display: flex; align-items: center; gap: 18px;
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+    min-width: 0;
   }
+  .cx-root .cx-gate-head > div { min-width: 0; }
+  .cx-root .cx-gate-head .cx-gate-title,
+  .cx-root .cx-gate-head .cx-gate-subtitle,
+  .cx-root .cx-gate-head .cx-gate-eyebrow { word-break: normal; overflow-wrap: anywhere; }
   .cx-root .cx-gate-letter {
     width: 44px; height: 44px; border-radius: 12px;
     background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.25);
@@ -2920,7 +2929,9 @@
     background: #ffd47a;
     animation: cxPulseStripe 2.4s ease-in-out infinite;
   }
-  .cx-root .cx-gate-body { padding: 24px; background: var(--cx-surface-2); }
+  .cx-root .cx-gate-body { padding: 24px; background: var(--cx-surface-2); min-width: 0; word-break: normal; overflow-wrap: anywhere; }
+  .cx-root .cx-gate-body * { min-width: 0; }
+  .cx-root .cx-gate { min-width: 0; }
   .cx-root .cx-gate-actionbar {
     position: sticky; bottom: 0; z-index: 5;
     background: var(--cx-surface); border-top: 1px solid var(--cx-border);
@@ -2929,7 +2940,11 @@
   }
 
   /* Side-by-side translation review */
-  .cx-root .cx-translate-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; background: var(--cx-surface); border: 1px solid var(--cx-border); border-radius: var(--cx-r-md); overflow: hidden; }
+  .cx-root .cx-translate-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0; background: var(--cx-surface); border: 1px solid var(--cx-border); border-radius: var(--cx-r-md); overflow: hidden; }
+  @media (max-width: 760px) {
+    .cx-root .cx-translate-grid { grid-template-columns: 1fr; }
+    .cx-root .cx-translate-pane.en { border-right: 0; border-bottom: 1px solid var(--cx-border); }
+  }
   .cx-root .cx-translate-pane { padding: 16px; }
   .cx-root .cx-translate-pane.en { border-right: 1px solid var(--cx-border); }
   .cx-root .cx-translate-pane.target { background: var(--cx-surface-2); }
@@ -3081,10 +3096,11 @@
   }
   /* Pipeline timeline row */
   .cx-root .cx-prow {
-    display: grid; grid-template-columns: 18px minmax(0, 1fr) auto;
+    display: grid; grid-template-columns: 18px minmax(0, 1fr) max-content;
     gap: 8px; padding: 6px 0; font-size: 12.5px; align-items: center;
-    position: relative;
+    position: relative; min-width: 0;
   }
+  .cx-root .cx-prow > div { min-width: 0; }
   .cx-root .cx-prow-tcol { display: flex; flex-direction: column; align-items: center; height: 100%; min-height: 28px; }
   .cx-root .cx-prow-dot {
     width: 10px; height: 10px; border-radius: 50%;
@@ -9699,7 +9715,12 @@ function coRenderRun(run) {
   const masterRows = stages.filter(s => s.lang == null);
   const targetRows = stages.filter(s => s.lang != null);
 
-  const renderRow = (s) => {
+  // M124 stage 5 · skipGate=true is used by the focus column so the gate
+  // panel is rendered as a sibling at the focus-column root rather than
+  // nested inside the stage card (where its flex layout collapsed at
+  // narrow widths and wrapped each character onto its own line).
+  const renderRow = (s, opts = {}) => {
+    const skipGate = !!opts.skipGate;
     const cost = (typeof s.cost_usd === 'number' && s.cost_usd > 0) ? `$${s.cost_usd.toFixed(4)}` : '';
     const agent = s.agent || (s.model ? s.model : 'renderer');
     const isGated = s.status === 'gated';
@@ -9738,7 +9759,8 @@ function coRenderRun(run) {
         </div>
         ${s.status === 'failed' && s.error ? `<div style="font-size:12px;margin-top:8px;color:var(--cx-err);">${escapeHtml(s.error.slice(0, 300))}</div>` : ''}
         ${showOutput && s.output ? `<div class="cx-stage-detail">${coRenderStageOutput(s, isGated)}</div>` : ''}
-        ${isGated && s.stage_name === 'verify-kb' ? coRenderGateA(s, run) :
+        ${(isGated && skipGate) ? '' :
+          isGated && s.stage_name === 'verify-kb' ? coRenderGateA(s, run) :
           isGated && s.stage_name === 'design-v2' ? coRenderGateB(s, run) :
           isGated ? `
           <div style="display:flex;align-items:center;gap:8px;margin-top:12px;">
@@ -9885,9 +9907,29 @@ function coRenderRun(run) {
       `).join('')}
     </div>` : '';
 
-  const focusHtml = activeStage
-    ? decorate(activeStage, renderRow(activeStage)) + pendingList
-    : '<div style="color:var(--cx-text-faint);font-size:13px;">No active stage. Pick a recipe and submit a run.</div>';
+  // M124 stage 5 · When the active stage is gated, render the stage card
+  // (compact summary) THEN the full-width gate panel as a sibling. This
+  // gives the gate the full focus-column width instead of squeezing it
+  // inside the card's padding.
+  let focusHtml;
+  if (!activeStage) {
+    focusHtml = '<div style="color:var(--cx-text-faint);font-size:13px;">No active stage. Pick a recipe and submit a run.</div>';
+  } else if (activeStage.status === 'gated') {
+    const gateHtml = activeStage.stage_name === 'verify-kb' ? coRenderGateA(activeStage, run)
+                   : activeStage.stage_name === 'design-v2' ? coRenderGateB(activeStage, run)
+                   : `<div class="cx-card" style="margin-top:12px;">
+                        <div class="cx-card-head">
+                          <div><h3>Awaiting approval</h3><div class="cx-meta">${escapeHtml(activeStage.stage_name)}</div></div>
+                        </div>
+                        <div style="display:flex;gap:8px;">
+                          <button class="cx-btn primary" onclick="coApprove('${run.id}')">✓ Approve & continue</button>
+                          <button class="cx-btn ghost" onclick="coCancel('${run.id}')">Cancel run</button>
+                        </div>
+                      </div>`;
+    focusHtml = decorate(activeStage, renderRow(activeStage, { skipGate: true })) + gateHtml + pendingList;
+  } else {
+    focusHtml = decorate(activeStage, renderRow(activeStage)) + pendingList;
+  }
 
   $('co-preview').innerHTML = `
     ${refineBanner}
