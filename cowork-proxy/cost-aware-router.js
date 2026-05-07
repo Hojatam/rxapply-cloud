@@ -68,6 +68,12 @@ const FLOORS = {
   // downgrade. Founder-pinned model only — we expect claude-opus-4-7 here.
   'translate-post':      'NEVER_AUTO_PICK',
 
+  // M128 · Hojat single-shot composer. Does the work of post-plan +
+  // verify-kb + brand-voice + translate-post + design-v2 in ONE call,
+  // so it inherits the strictest floor of those (translate-post +
+  // verify-kb are both NEVER_AUTO_PICK premium). Pinned to flagship.
+  'full-post':           'NEVER_AUTO_PICK',
+
   // Image generation has its own multi-provider router (compose-image.js)
   'image':               'NEVER_AUTO_PICK',
 };

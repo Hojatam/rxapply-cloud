@@ -1,0 +1,43 @@
+{
+  "id": "ig-hojat",
+  "label": "Instagram (Hojat · single-shot)",
+  "icon": "instagram",
+  "description": "Single-agent Instagram pipeline. Hojat reads the KB, drafts caption + slides + hashtags, picks per-slide design templates, generates Unsplash queries, composes the gpt-image-2 prompts, AND writes natively in the target output language — all in one LLM call. Trade-off vs. the multi-agent `ig` recipe: ~$0.30–0.60 per run (vs ~$1.40), 30–90s (vs 5–8min), one calm voice end-to-end (vs handoff drift), single founder gate (vs Gate A + Gate B). Use Hojat for fast, coherent, brand-consistent posts; use `ig` for high-stakes regulatory posts that need every claim signed off by Daneshyar.",
+  "version": "1",
+  "length_target_words": "38–75 (mean 60, p95 119 — never exceed 119)",
+
+  "stages": [
+    { "name": "full-post", "capability": "full-post" },
+    { "name": "image",     "renderer": "image-design-v2", "if_option": "with_image" },
+    { "name": "render",    "renderer": "ig" }
+  ],
+
+  "gateable_stages": ["full-post"],
+
+  "options_schema": [
+    { "key": "primary_cta",     "label": "CTA URL (link in bio)", "type": "text", "placeholder": "https://rxapply.com" },
+    { "key": "max_hashtags",    "label": "Max hashtags",          "type": "number", "default": 8, "min": 3, "max": 30 },
+    { "key": "with_image",      "label": "Generate carousel slide images (~$0.19 per slide)", "type": "checkbox", "default": true },
+    { "key": "carousel_slides", "label": "Slide count",           "type": "number", "default": 4, "min": 1, "max": 12 },
+    { "key": "output_lang",     "label": "Output language (text on slides + caption)", "type": "select",
+      "default": "en",
+      "options": [
+        { "value": "en", "label": "English (no translation)" },
+        { "value": "fa", "label": "Persian / فارسی (native composition by Hojat)" },
+        { "value": "ar", "label": "Arabic / العربية (native composition by Hojat)" },
+        { "value": "de", "label": "German / Deutsch (native composition by Hojat)" },
+        { "value": "es", "label": "Spanish / Español (native composition by Hojat)" },
+        { "value": "fr", "label": "French / Français (native composition by Hojat)" }
+      ]
+    },
+    { "key": "force_image_source", "label": "Force every slide's image source (override Hojat's per-slide judgment)", "type": "select",
+      "default": "",
+      "options": [
+        { "value": "",          "label": "— Trust Hojat (per-slide) —" },
+        { "value": "mixed",     "label": "All slides: mixed (Unsplash hero + AI overlay)" },
+        { "value": "unsplash",  "label": "All slides: pure Unsplash photo (no AI)" },
+        { "value": "generated", "label": "All slides: pure gpt-image-2 (no Unsplash)" }
+      ]
+    }
+  ]
+}

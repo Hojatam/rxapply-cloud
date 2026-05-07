@@ -237,6 +237,25 @@ const SCHEMAS = {
     },
   },
 
+  // M128 · Hojat single-shot composer. The output object overlaps with
+  // post-plan (caption / hashtags / slides) AND design-v2 (slides[]
+  // .template / .image_source / .final_prompt) AND translate-post
+  // (output_lang already set, text strings already in target language)
+  // — so existing renderers consume it without changes. Validate the
+  // top-level keys; per-slide shape is checked at render time.
+  'full-post': {
+    type: 'object',
+    properties: {
+      output_lang:   { type: 'string', required: true },
+      caption:       { type: 'string', required: true, minLength: 20 },
+      hashtags:      { type: 'array',  required: true, items: { type: 'string' } },
+      slides:        { type: 'array',  required: true, items: { type: 'object' } },
+      slide_count:   { type: 'number' },
+      narrative_arc: { type: 'string', minLength: 20 },
+      self_check:    { type: 'object' },
+    },
+  },
+
   // M123 · IG-v2 brand-voice tone check. Cheap-LLM, English-only. Reads
   // post-plan output (caption + slides) and brand_profile.voice_rules /
   // always_include / never_include. On fail, refines back to post-plan

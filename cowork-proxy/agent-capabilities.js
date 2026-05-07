@@ -104,6 +104,18 @@ const CAPABILITY_REGISTRY = {
   // return editable design URLs. Owned by Payvand because it's still
   // a render-stage in spirit (no new LLM call beyond Tarrah's plan).
   payvand:   ['render', 'canva-render'],
+
+  // M128 · Hojat — single-shot IG composer. ONE agent does the entire
+  // chain that the multi-agent IG-v2 recipe splits across six agents:
+  // KB synthesis, post-planning, fact self-grounding, brand-voice
+  // self-check, native-language composition (no separate translate),
+  // per-slide design plan with Unsplash queries + final gpt-image-2
+  // prompts. The 'full-post' capability outputs a JSON object whose
+  // keys overlap with both post-plan (caption, hashtags, slides) AND
+  // design-v2 (slides[].template, .image_source, .unsplash_query,
+  // .final_prompt) so existing renderers (image-design-v2, ig) can
+  // consume it without code paths of their own.
+  hojat:     ['full-post'],
 };
 
 // Inverse index: capability → ordered agent list.

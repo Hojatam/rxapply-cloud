@@ -8324,6 +8324,12 @@ const _CO_FORMAT_META = {
                   icon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 3h3l-7.5 8.5L22 21h-6l-5-6.5L5 21H2l8-9-8-9h6l4.5 6z"/></svg>' },
   ig:           { cls: 'co-fc-ig',       label: 'Instagram',      desc: 'Feed post · caption + hashtags + cover',
                   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor"/></svg>' },
+  // M128 · Hojat single-shot composer. Same IG icon (it's still an IG
+  // post) but a distinct label so the founder picks the fast lane
+  // intentionally — different cost / latency / audit-trail trade-off
+  // from the multi-agent `ig` recipe.
+  'ig-hojat':   { cls: 'co-fc-ig',       label: 'IG · Hojat (1-shot)', desc: 'Single-agent IG · Hojat does KB + draft + design + Unsplash + translate in one call · ~$0.30 · 30–90s',
+                  icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="5"/><path d="M9 9 L15 15 M15 9 L9 15" stroke-width="2"/></svg>' },
 };
 
 function _coFormatMeta(id) { return _CO_FORMAT_META[id] || _CO_FORMAT_META.email; }
@@ -8651,7 +8657,7 @@ async function coRefreshUnsplashWarning() {
   const forced = (document.getElementById('co-opt-force_image_source') || {}).value || '';
   const withImage = (() => { const wi = document.getElementById('co-opt-with_image'); return wi ? !!wi.checked : true; })();
   const wantsUnsplash = withImage && (forced === 'mixed' || forced === 'unsplash');
-  const isIgRecipe = (r.id === 'ig' || r.id === 'ig-canva');
+  const isIgRecipe = (r.id === 'ig' || r.id === 'ig-canva' || r.id === 'ig-hojat');
   // For IG recipes without an explicit force value, Afshin MAY still
   // pick mixed/unsplash per slide — surface the warning there too as a
   // softer "for awareness" line.
@@ -8733,7 +8739,7 @@ function coUpdateSummaryRail() {
   setText('co-sum-topic', topic ? (topic.length > 42 ? topic.slice(0, 42) + '…' : topic) : '—');
   setText('co-sum-aud',   aud   ? (aud.length > 42   ? aud.slice(0, 42)   + '…' : aud)   : '—');
   setText('co-sum-lang',  langStr);
-  if (r.id === 'ig' || r.id === 'ig-canva') {
+  if (r.id === 'ig' || r.id === 'ig-canva' || r.id === 'ig-hojat') {
     setText('co-sum-slides', String(slides));
     setText('co-sum-tags',   `up to ${maxTags}`);
     setText('co-sum-imgs',   withImage ? imgSrc : 'text-only');
@@ -8769,6 +8775,12 @@ function coUpdateCostEstimate() {
   if (r.id === 'ig') {
     // M119 IG-v2: kb-dossier (cheap) + post-plan (cheap) + verify-kb (premium) + design-v2 (premium) + N images
     estimate = 0.005 + 0.005 + 0.10 + (withImage ? (0.05 + slides * 0.19) : 0);
+  } else if (r.id === 'ig-hojat') {
+    // M128 · Hojat single-shot: ONE premium call doing the work of
+    // kb-dossier + post-plan + verify-kb + brand-voice + translate-post
+    // + design-v2. Roughly 2x cost of one design-v2 call (~$0.18) since
+    // the prompt is large and the output is dense, plus N image gens.
+    estimate = 0.18 + (withImage ? slides * 0.19 : 0);
   } else if (r.id === 'ig-canva') {
     // Mode B: same upstream + canva render (much cheaper than gpt-image-2)
     estimate = 0.005 + 0.005 + 0.10 + 0.05 + slides * 0.005;
@@ -8783,7 +8795,7 @@ function coUpdateCostEstimate() {
     const targets = Array.from(document.querySelectorAll('#co-target-langs input[type=checkbox]:checked'))
       .map(cb => cb.value).filter(Boolean);
     const langCount = Math.max(1, targets.length || 1);
-    const slideStr = (r.id === 'ig' || r.id === 'ig-canva') ? ` · ${slides} slide${slides === 1 ? '' : 's'}` : '';
+    const slideStr = (r.id === 'ig' || r.id === 'ig-canva' || r.id === 'ig-hojat') ? ` · ${slides} slide${slides === 1 ? '' : 's'}` : '';
     sub.textContent = `per run${slideStr} · ${langCount} language${langCount === 1 ? '' : 's'}`;
   }
 }

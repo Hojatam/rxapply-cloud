@@ -234,7 +234,10 @@ async function _buildSystemPrompt({ agent, stageName, recipe, run, masterDraft, 
   // M119 · IG-v2 KB grounding — kb-dossier needs WIDE recall (k=20) so it
   // can synthesize a representative topic pack. verify-kb / post-plan /
   // design-v2 also benefit from KB context but at the standard limit.
-  if (['kb-dossier'].includes(stageName)) {
+  if (['kb-dossier', 'full-post'].includes(stageName)) {
+    // M128 · 'full-post' (Hojat single-shot) gets the same wide KB recall
+    // as kb-dossier — it's doing the synthesis work that pooya+sepehr+
+    // daneshyar split, so it needs the full top-20 entries.
     try {
       const country = KB.detectCountry(run.topic);
       const kb = await KB.renderAsBlock({ country, query: run.topic, limit: 20 });
@@ -1813,9 +1816,14 @@ async function _executeRenderer({ runId, run, recipe, stage, stageIndex, lang })
     } else if (rendererName === 'image-design-v2') {
       // M119 · IG-v2 image renderer reads the design-v2 stage output
       // directly. Each slide already has final_prompt + Unsplash queries.
-      const designV2Row = masterDone.find(s => s.stage_name === 'design-v2');
-      if (designV2Row && designV2Row.output) {
-        sourceForRender = { _design_v2_spec: designV2Row.output };
+      // M128 · IG-Hojat single-shot recipe has no design-v2 stage —
+      // Hojat's `full-post` stage produces the same shape (slides[]
+      // with template, image_source, unsplash_query, final_prompt) so
+      // we fall back to it.
+      const designSourceRow = masterDone.find(s => s.stage_name === 'design-v2')
+                           || masterDone.find(s => s.stage_name === 'full-post');
+      if (designSourceRow && designSourceRow.output) {
+        sourceForRender = { _design_v2_spec: designSourceRow.output };
       }
     } else {
       // Non-image renderers (telegram/email/etc) use adapt > draft.
@@ -1832,9 +1840,16 @@ async function _executeRenderer({ runId, run, recipe, stage, stageIndex, lang })
       // source. The renderer prefers translate-post.fields when present;
       // post-plan stays the structural fallback for English-final runs.
       if (!sourceForRender || !Object.keys(sourceForRender).length) {
-        const postPlanRow  = masterDone.find(s => s.stage_name === 'post-plan');
+        // M128 · IG-Hojat single-shot recipe has only `full-post`. It
+        // produces caption + hashtags + slides (post-plan shape) AND
+        // slides[].template/.image_source/.final_prompt (design-v2
+        // shape) AND already-translated text strings (translate-post
+        // shape). Treat full-post as all three sources so the IG
+        // renderer needs zero changes.
+        const fullPostRow  = masterDone.find(s => s.stage_name === 'full-post');
+        const postPlanRow  = masterDone.find(s => s.stage_name === 'post-plan')  || fullPostRow;
         const translateRow = masterDone.find(s => s.stage_name === 'translate-post');
-        const designV2Row  = masterDone.find(s => s.stage_name === 'design-v2');
+        const designV2Row  = masterDone.find(s => s.stage_name === 'design-v2')  || fullPostRow;
         const imageRow     = masterDone.find(s => s.stage_name === 'image');
         if (postPlanRow && postPlanRow.output) {
           // Translation wins for caption + hashtags + slides when present.
@@ -1852,7 +1867,12 @@ async function _executeRenderer({ runId, run, recipe, stage, stageIndex, lang })
               }
             : {
                 ...postPlanRow.output,
-                _output_lang: 'en',
+                // M128 · Hojat composed natively in target language; its
+                // output already has output_lang at top level. For the
+                // multi-agent flow without a translate-post stage, the
+                // output is English. Honor the post-plan's own field
+                // when present, fall back to 'en'.
+                _output_lang: (postPlanRow.output && postPlanRow.output.output_lang) || 'en',
                 ...(designV2Row && designV2Row.output ? { design_plan: designV2Row.output } : {}),
                 ...(imageRow    && imageRow.output    ? { _image_render: imageRow.output } : {}),
               };
