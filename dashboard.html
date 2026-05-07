@@ -8391,6 +8391,13 @@ function renderCompose() {
 
 async function coLoadRecipes() {
   try {
+    // M128 · Hot-reload recipes from disk before listing them. seedFromFiles
+    // is idempotent: existing recipes are preserved unless file_version >
+    // db_version (M120 version-gated sync). Lets newly-deployed recipe
+    // files (e.g. ig-hojat.json) show up without bouncing the proxy.
+    // Best-effort — failure (e.g. unauthenticated) is fine, the cached
+    // list still serves.
+    try { await fetch(`${PROXY}/pipelines/reseed-from-files`, { method: 'POST' }); } catch (_) { /* non-fatal */ }
     const j = await fetch(`${PROXY}/compose/recipes`).then(r => r.json());
     if (!j.ok) throw new Error(j.error || 'failed');
     _coState.recipes = j.recipes || [];

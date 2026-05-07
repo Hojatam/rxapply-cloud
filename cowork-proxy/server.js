@@ -2860,6 +2860,26 @@ app.get('/compose/recipes', (_req, res) => {
   catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// M128 · Hot-reload recipes from disk without restarting the proxy.
+// `seedFromFiles` is the same function the bootstrap code calls — it
+// reads compose-recipes/*.json, inserts new recipes (where DB has no
+// row), and overwrites existing rows whose file_version > db_version
+// (M120 version-gated sync). Existing founder-edited recipes whose DB
+// version is already >= the file version are preserved (no overwrite).
+//
+// Use case: after deploying a new recipe file (e.g. ig-hojat.json), hit
+// this endpoint and the recipe shows up in the picker without bouncing
+// the server. The dashboard's renderCompose() calls this on page load
+// so the founder doesn't have to remember.
+app.post('/pipelines/reseed-from-files', async (_req, res) => {
+  try {
+    const pipelines = require('./pipelines');
+    const r = await pipelines.seedFromFiles({});
+    await pipelines.refreshCache();
+    res.json({ ok: true, ...r });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ── M72A · Pipeline management API ──────────────────────────────────
 // Founder-facing CRUD for pipelines. The Pipeline tab v2 (M72B) reads
 // and writes through these endpoints. Compose runs use the orchestrator's
