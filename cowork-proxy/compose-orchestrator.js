@@ -226,7 +226,7 @@ async function _buildSystemPrompt({ agent, stageName, recipe, run, masterDraft, 
   if (['research', 'verify', 'verify-translation', 'draft', 'critique', 'audit'].includes(stageName)) {
     try {
       const country = KB.detectCountry(run.topic);
-      const kb = KB.renderAsBlock({ country, query: run.topic, limit: 6 });
+      const kb = await KB.renderAsBlock({ country, query: run.topic, limit: 6 });
       if (kb) blocks.push(kb);
     } catch (_) { /* non-fatal */ }
   }
@@ -237,14 +237,14 @@ async function _buildSystemPrompt({ agent, stageName, recipe, run, masterDraft, 
   if (['kb-dossier'].includes(stageName)) {
     try {
       const country = KB.detectCountry(run.topic);
-      const kb = KB.renderAsBlock({ country, query: run.topic, limit: 20 });
+      const kb = await KB.renderAsBlock({ country, query: run.topic, limit: 20 });
       if (kb) blocks.push(kb);
     } catch (_) { /* non-fatal */ }
   }
   if (['verify-kb', 'post-plan', 'design-v2'].includes(stageName)) {
     try {
       const country = KB.detectCountry(run.topic);
-      const kb = KB.renderAsBlock({ country, query: run.topic, limit: 8 });
+      const kb = await KB.renderAsBlock({ country, query: run.topic, limit: 8 });
       if (kb) blocks.push(kb);
     } catch (_) { /* non-fatal */ }
   }
