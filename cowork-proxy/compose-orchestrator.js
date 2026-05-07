@@ -107,11 +107,21 @@ function getRecipe(id) {
   throw new Error(`Unknown recipe: ${id}`);
 }
 function listRecipes() {
-  // Prefer DB list when ready; otherwise file list. Both produce the same shape.
+  // M128 · UNION DB + file recipes so newly-deployed recipe files
+  // (e.g. ig-hojat.json) appear immediately even if seedFromFiles
+  // hasn't run yet. Old behavior was either-or: once _dbReady was
+  // true, file-only recipes were hidden until the next seed cycle,
+  // which only ran at proxy boot. That left the founder unable to
+  // see new recipes after a deploy without bouncing the proxy.
+  // Now: take everything from DB, then add any file recipes whose
+  // ID isn't already in the DB list. The DB version always wins
+  // when both exist (preserves founder edits via M120 versioning).
   const fromDb = _dbReady ? pipelines.listCachedSync() : [];
-  const list = fromDb.length
-    ? fromDb.map(p => p.definition || {})
-    : Object.values(_loadRecipesFromFiles());
+  const dbDefs = fromDb.map(p => p.definition || {});
+  const dbIds  = new Set(dbDefs.map(r => r.id).filter(Boolean));
+  const fromFiles = Object.values(_loadRecipesFromFiles());
+  const fileOnly = fromFiles.filter(r => r && r.id && !dbIds.has(r.id));
+  const list = [...dbDefs, ...fileOnly];
   return list.map(r => ({
     id: r.id, label: r.label, icon: r.icon || null,
     description: r.description || '',
